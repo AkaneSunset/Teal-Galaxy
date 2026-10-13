@@ -1,0 +1,15 @@
+{
+  "name": "teal-galaxy-server",
+  "version": "1.0.0",
+  "description": "Galaxy server for the Teal Galaxy prototype",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "private": true
+}
