@@ -13,6 +13,7 @@ const SkyView := preload("res://sky.gd")
 const NavMap := preload("res://nav_map.gd")
 const SettingsMenu := preload("res://settings_menu.gd")
 const ChatBox := preload("res://chat_box.gd")
+const Models := preload("res://models.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
@@ -134,6 +135,11 @@ func _build_local_space() -> void:
 		spoke.mesh.size = Vector3(460, 14, 14)
 		spoke.rotation.y = i * PI / 4.0
 		ring.add_child(spoke)
+	for side in [-1, 1]:
+		var beacon := Models.nav_beacon()
+		beacon.scale = Vector3.ONE * 2.0
+		beacon.position = Vector3(45 * side, 122, 45)
+		_port.add_child(beacon)
 	var pad := _mesh(BoxMesh.new(), Color(0.95, 0.6, 0.2), true)
 	pad.mesh.size = Vector3(70, 4, 70)
 	pad.position = Vector3(0, 122, 0)
@@ -155,17 +161,15 @@ func _build_local_space() -> void:
 	rng.seed = 7 # same field for every player
 	for i in 40:
 		var radius := rng.randf_range(15.0, 90.0)
-		var rock_mesh := SphereMesh.new()
-		rock_mesh.radius = radius
-		rock_mesh.height = radius * 2.0
-		rock_mesh.radial_segments = 9
-		rock_mesh.rings = 6
-		var rock := _mesh(rock_mesh, Color(0.75, 0.85, 0.95))
+		var rock := Models.ice_asteroid(radius, i + 1)
 		rock.position = Vector3(rng.randf_range(-1500, 1500), rng.randf_range(-400, 400), rng.randf_range(-1500, 1500))
 		rock.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, 0)
-		rock.scale = Vector3(rng.randf_range(0.8, 1.25), rng.randf_range(0.7, 1.0), rng.randf_range(0.8, 1.25))
 		_field.add_child(rock)
 		_rocks.append({"node": rock, "radius": radius})
+	var field_beacon := Models.nav_beacon()
+	field_beacon.scale = Vector3.ONE * 4.0
+	field_beacon.position = Vector3(0, -30, 0)
+	_field.add_child(field_beacon)
 	add_child(_field)
 
 	# Dust drifting past the canopy, so speed can be felt with nothing else nearby.
@@ -821,10 +825,7 @@ func _on_ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3) -> 
 	var world: Array = Net.last_ship_pos if Net.last_ship_pos.size() == 3 else [pos.x, pos.y, pos.z]
 	if not _others.has(id):
 		var node := Node3D.new()
-		var body := _mesh(PrismMesh.new(), Color(0.95, 0.4, 0.6))
-		body.mesh.size = Vector3(9, 15, 3)
-		body.rotation_degrees.x = -90 # tip points forward (-Z)
-		node.add_child(body)
+		node.add_child(Models.starter_ship())
 		var tag := Label3D.new()
 		tag.text = pilot_name
 		tag.position = Vector3(0, 10, 0)
