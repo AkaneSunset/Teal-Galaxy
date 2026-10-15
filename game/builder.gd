@@ -7,6 +7,7 @@ const BUILDING_INFO := {
 	"spaceport": {"name": "Spaceport", "cost": "30 metal"},
 	"hydroponics": {"name": "Hydroponics", "cost": "20 metal, 10 ice"},
 }
+const ICONS := "res://ui/icons/"
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 
 var _header: Label
@@ -42,18 +43,19 @@ func _ready() -> void:
 	col.add_child(_slots)
 
 	_post_job = Button.new()
+	_icon_button(_post_job, "send")
 	_post_job.text = "Post job: deliver %d %s for %d credits" % [JOB.amount, JOB.resource, JOB.reward]
 	_post_job.pressed.connect(func(): Net.send({"type": "post_job", "resource": JOB.resource, "amount": JOB.amount, "reward": JOB.reward}))
 	col.add_child(_post_job)
 
-	_label(col, 16).text = "Jobs"
+	_heading(col, "Jobs", "mission_complete")
 	_jobs = _label(col, 14)
-	_label(col, 16).text = "Activity"
+	_heading(col, "Activity", "notifications")
 	_feed = _label(col, 13)
 	_feed.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 	# Chat with pilots in flight.
-	_label(col, 16).text = "Chat"
+	_heading(col, "Chat", "chat")
 	_chat_log = _label(col, 13)
 	var chat_row := HBoxContainer.new()
 	col.add_child(chat_row)
@@ -64,6 +66,7 @@ func _ready() -> void:
 	chat_row.add_child(chat_edit)
 	var send := Button.new()
 	send.text = "Send"
+	_icon_button(send, "send")
 	chat_row.add_child(send)
 	var send_chat := func(_text = ""):
 		if chat_edit.text.strip_edges() != "":
@@ -81,6 +84,27 @@ func _ready() -> void:
 	Net.server_error.connect(func(reason): _status.text = "Server: " + reason)
 	Net.connection_changed.connect(func(online): _status.text = "Connected" if online else "Connecting to server...")
 	_header.text = "Connecting..."
+
+
+## A section title with an icon in front of it.
+func _heading(parent: Node, text: String, icon: String) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	parent.add_child(row)
+	var pic := TextureRect.new()
+	pic.texture = load(ICONS + icon + ".png")
+	pic.custom_minimum_size = Vector2(28, 28)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(pic)
+	var title := _label(row, 16)
+	title.text = text
+	title.autowrap_mode = TextServer.AUTOWRAP_OFF
+
+
+func _icon_button(button: Button, icon: String) -> void:
+	button.icon = load(ICONS + icon + ".png")
+	button.add_theme_constant_override("icon_max_width", 24)
 
 
 func _label(parent: Node, font_size: int) -> Label:
