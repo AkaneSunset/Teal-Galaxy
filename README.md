@@ -33,6 +33,17 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
    `-- --mode=builder --name=Akane`, `-- --mode=explorer --name=PilotA`, `-- --mode=explorer --name=PilotB`.
 4. Press Play. Without arguments the game shows a start screen where you pick a mode.
 
+## The Builder screen
+
+The Builder is a base-builder view of planet Aster, like Clash of Clans, played with the phone held sideways.
+Drag to pan, pinch (or scroll the mouse wheel) to zoom. Six build pads ring the command centre:
+tap a pad to select it, and its actions appear at the bottom (Info, Post job on the Spaceport,
+Ship cargo, security tier upgrades and the Alarm on facilities). **Build** (bottom right) opens the shop:
+pick a building, then tap a free pad (or select an empty pad first and it builds there).
+Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as short messages.
+During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
+Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
+
 ## The prototype loop
 
 1. **Builder:** build a Spaceport on planet Aster (costs 30 metal), then post the job
@@ -45,7 +56,7 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 
 ## Raids: facilities and the pilots who rob them
 
-Based on the Facility Heist design doc. Builders build **facilities** on Aster (tap an empty slot):
+Based on the Facility Heist design doc. Builders build **facilities** on Aster (from the Build shop, on a free pad):
 
 | Facility | Cost | Fills its vault with |
 | --- | --- | --- |
@@ -53,7 +64,7 @@ Based on the Facility Heist design doc. Builders build **facilities** on Aster (
 | Research Outpost | 30 metal, 10 ice | Design drives and blueprint cases (plans) |
 | Data Spire | 50 metal, 150 credits | Data shards and security dossiers (intel) |
 
-**Builder (phone):** tap a facility to see its vault. *Ship cargo to HQ* brings the goods home
+**Builder (phone):** tap a facility and press Info to see its vault. *Ship cargo to HQ* brings the goods home
 (materials and plans go to stock, intel sells for credits; once a minute). Spend them on
 **security tiers**: more guards, vault turrets, rarer loot and a longer raid clock. When a pilot
 boards, the facility turns red and the Raids list shows the intruder's Heat and time left live.

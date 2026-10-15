@@ -1,106 +1,99 @@
 extends Control
-## Builder mode (phone): build on planet slots, post jobs, watch explorer activity.
+## Builder mode (phone): a base-builder view of the home planet, like Clash of Clans.
+## The base is a 3D scene seen from above at an angle: drag to pan, pinch or scroll to zoom,
+## tap a pad to select it. Buildings sit on fixed pads around the command centre.
+## The HUD sits around the edges: system and resources at the top, Jobs / Raids / Chat drawers
+## bottom left, the Build shop bottom right, and the selected building's actions bottom centre.
 ## Facilities fill vaults with goods to ship home; Explorers can raid them, and the Builder
 ## watches the raid live and can sound the alarm.
 
+const BaseModels := preload("res://base_models.gd")
+const ICONS := "res://ui/icons/"
+
 const BUILDING_INFO := {
-	"mine": {"name": "Mine", "cost": "10 metal"},
-	"habitat": {"name": "Habitat", "cost": "20 metal"},
-	"spaceport": {"name": "Spaceport", "cost": "30 metal"},
-	"hydroponics": {"name": "Hydroponics", "cost": "20 metal, 10 ice"},
-	"refinery": {"name": "Mining Refinery", "cost": "40 metal"},
-	"lab": {"name": "Research Outpost", "cost": "30 metal, 10 ice"},
-	"spire": {"name": "Data Spire", "cost": "50 metal, 150 credits"},
+	"mine": {"name": "Mine", "cost": {"metal": 10}, "about": "Digs 1 metal every tick."},
+	"habitat": {"name": "Habitat", "cost": {"metal": 20}, "about": "Houses 50 people."},
+	"spaceport": {"name": "Spaceport", "cost": {"metal": 30}, "about": "Pilots land here. Post jobs for them to fly."},
+	"hydroponics": {"name": "Hydroponics", "cost": {"metal": 20, "ice": 10}, "about": "Grows food for the colony."},
+	"refinery": {"name": "Mining Refinery", "cost": {"metal": 40}, "about": "Makes alloy, isotopes and exotics. Pilots can raid it."},
+	"lab": {"name": "Research Outpost", "cost": {"metal": 30, "ice": 10}, "about": "Makes plans and drives. Pilots can raid it."},
+	"spire": {"name": "Data Spire", "cost": {"metal": 50, "credits": 150}, "about": "Makes intel. Pilots can raid it."},
 }
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 
-var _header: Label
-var _status: Label
-var _slots: GridContainer
-var _post_job: Button
+const PAD_RING := 34.0 # metres from the command centre to each pad
+const PAD_RADIUS := 9.5
+const YAW := deg_to_rad(45.0)
+const PITCH := deg_to_rad(52.0)
+const ZOOM_MIN := 45.0
+const ZOOM_MAX := 170.0
+const PAN_LIMIT := 60.0
+const TAP_SLOP := 14.0 # pixels a finger can move and still count as a tap
+
+const C_PANEL := Color(0.06, 0.1, 0.2, 0.86)
+const C_TEAL := Color(0.36, 0.78, 0.78)
+const C_AMBER := Color(1.0, 0.62, 0.15)
+const C_RED := Color(0.9, 0.25, 0.22)
+
+# --- 3D base ---
+var _cam: Camera3D
+var _focus := Vector3(0, 0, 4)
+var _zoom := 120.0
+var _pads := [] # per slot: {"root", "pos", "key", "model", "label", "ring", "plus", "light"}
+var _drag_from := Vector2.ZERO
+var _drag_total := 0.0
+var _dragging := false
+var _touches := {} # finger index -> position, for pinch
+var _pinch_dist := 0.0
+var _clock := 0.0
+
+# --- HUD ---
+var _title: Label
+var _subtitle: Label
+var _stock := {} # resource -> Label
+var _goods: Label
+var _banner: Button
+var _toasts: VBoxContainer
+var _raids_btn: Button
+var _select_box: VBoxContainer
+var _select_name: Label
+var _actions: HBoxContainer
+var _action_ids := []
+var _place_bar: PanelContainer
+var _place_label: Label
+var _drawer: PanelContainer
+var _drawer_title: Label
+var _pages := {} # page name -> Control
+var _page := ""
 var _jobs: Label
-var _feed: Label
+var _post_job: Button
+var _raids: Label
+var _info: Label
 var _chat_log: Label
 var _chat_lines := []
-var _menu: PopupMenu
-var _menu_slot := -1
-var _fac_box: VBoxContainer
-var _fac_slot := -1 # the facility shown in the panel, or -1
-var _raids: Label
+var _shop: PanelContainer
+var _shop_hint: Label
+var _shop_cards: HBoxContainer
+
+# --- What the player is doing ---
+var _selected := -1 # pad index, or -1
+var _placing := "" # building type picked in the shop, waiting for a pad
+var _last_feed_at := -1.0
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var scroll := ScrollContainer.new()
-	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(scroll)
-	var margin := MarginContainer.new()
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 16)
-	scroll.add_child(margin)
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	margin.add_child(col)
-
-	_header = _label(col, 22)
-	_status = _label(col, 14)
-	_label(col, 16).text = "Planet Aster"
-	_slots = GridContainer.new()
-	_slots.columns = 2
-	_slots.add_theme_constant_override("h_separation", 8)
-	_slots.add_theme_constant_override("v_separation", 8)
-	col.add_child(_slots)
-
-	# The facility tapped in the grid above: its vault, security and any raid in progress.
-	_fac_box = VBoxContainer.new()
-	_fac_box.add_theme_constant_override("separation", 6)
-	_fac_box.visible = false
-	col.add_child(_fac_box)
-
-	_post_job = Button.new()
-	_post_job.text = "Post job: deliver %d %s for %d credits" % [JOB.amount, JOB.resource, JOB.reward]
-	_post_job.pressed.connect(func(): Net.send({"type": "post_job", "resource": JOB.resource, "amount": JOB.amount, "reward": JOB.reward}))
-	col.add_child(_post_job)
-
-	_label(col, 16).text = "Jobs"
-	_jobs = _label(col, 14)
-	_label(col, 16).text = "Raids"
-	_raids = _label(col, 14)
-	_label(col, 16).text = "Activity"
-	_feed = _label(col, 13)
-	_feed.size_flags_vertical = Control.SIZE_EXPAND_FILL
-
-	# Chat with pilots in flight.
-	_label(col, 16).text = "Chat"
-	_chat_log = _label(col, 13)
-	var chat_row := HBoxContainer.new()
-	col.add_child(chat_row)
-	var chat_edit := LineEdit.new()
-	chat_edit.placeholder_text = "Message pilots"
-	chat_edit.max_length = 200
-	chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	chat_row.add_child(chat_edit)
-	var send := Button.new()
-	send.text = "Send"
-	chat_row.add_child(send)
-	var send_chat := func(_text = ""):
-		if chat_edit.text.strip_edges() != "":
-			Net.send({"type": "chat", "text": chat_edit.text})
-		chat_edit.text = ""
-	send.pressed.connect(send_chat)
-	chat_edit.text_submitted.connect(send_chat)
-	Net.chat_received.connect(_on_chat)
-
-	_menu = PopupMenu.new()
-	_menu.id_pressed.connect(_on_build_chosen)
-	add_child(_menu)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scale_for_screen()
+	theme = _make_theme()
+	_build_world()
+	_build_hud()
 
 	Net.state_changed.connect(_refresh)
-	Net.server_error.connect(func(reason): _status.text = "Server: " + reason)
-	Net.connection_changed.connect(func(online): _status.text = "Connected" if online else "Connecting to server...")
-	_header.text = "Connecting..."
+	Net.chat_received.connect(_on_chat)
+	Net.server_error.connect(func(reason): toast("Server: " + reason, C_RED))
+	Net.connection_changed.connect(func(online): toast("Connected" if online else "Connection lost, retrying...", C_TEAL if online else C_RED))
+	_title.text = "Connecting..."
 
 	# Count down cooldowns and raid clocks between server updates.
 	var timer := Timer.new()
@@ -110,165 +103,1014 @@ func _ready() -> void:
 	add_child(timer)
 
 
+## Phones have small, dense screens: scale the HUD so buttons stay finger-sized.
+func _scale_for_screen() -> void:
+	var win := get_window()
+	var short_side := float(mini(win.size.x, win.size.y))
+	win.content_scale_factor = clampf(short_side / 540.0, 1.0, 3.0)
+
+
+# --- The 3D base ------------------------------------------------------------------------
+
+func _build_world() -> void:
+	var world := Node3D.new()
+	world.name = "Base"
+	add_child(world)
+
+	var env := Environment.new()
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.02, 0.03, 0.09)
+	sky_mat.sky_horizon_color = Color(0.12, 0.32, 0.38)
+	sky_mat.ground_horizon_color = Color(0.12, 0.32, 0.38)
+	sky_mat.ground_bottom_color = Color(0.05, 0.06, 0.1)
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.55, 0.65, 0.85)
+	env.ambient_light_energy = 0.4
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	var we := WorldEnvironment.new()
+	we.environment = env
+	world.add_child(we)
+
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-55, -30, 0)
+	sun.light_energy = 1.1
+	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 300.0
+	world.add_child(sun)
+
+	_cam = Camera3D.new()
+	_cam.fov = 38.0
+	_cam.far = 2000.0
+	world.add_child(_cam)
+	_cam.current = true
+	_place_camera()
+
+	# Ground: dusty regolith, with the base plate and paths on top.
+	var ground := MeshInstance3D.new()
+	var disc := CylinderMesh.new()
+	disc.top_radius = 700.0
+	disc.bottom_radius = 700.0
+	disc.height = 1.0
+	disc.radial_segments = 48
+	ground.mesh = disc
+	ground.position.y = -0.5
+	ground.material_override = _flat(Color(0.25, 0.23, 0.32))
+	world.add_child(ground)
+	var plate := MeshInstance3D.new()
+	var plate_mesh := CylinderMesh.new()
+	plate_mesh.top_radius = PAD_RING + 16.0
+	plate_mesh.bottom_radius = PAD_RING + 17.5
+	plate_mesh.height = 0.4
+	plate_mesh.radial_segments = 6
+	plate.mesh = plate_mesh
+	plate.position.y = 0.2
+	plate.rotation_degrees.y = 30
+	plate.material_override = _flat(Color(0.2, 0.25, 0.35))
+	world.add_child(plate)
+
+	var hq := BaseModels.command_center()
+	hq.rotation_degrees.y = 45
+	world.add_child(hq)
+
+	var slots := 6
+	for i in slots:
+		var ang := deg_to_rad(-90.0 + 360.0 * i / slots)
+		var pos := Vector3(cos(ang), 0, sin(ang)) * PAD_RING
+		var path := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(3.0, 0.2, PAD_RING - 16.0)
+		path.mesh = box
+		path.material_override = _flat(Color(0.15, 0.19, 0.28))
+		world.add_child(path)
+		path.position = pos * 0.5 + Vector3(0, 0.45, 0)
+		path.look_at(Vector3(0, 0.45, 0), Vector3.UP)
+		_pads.append(_make_pad(world, pos))
+
+	# Scenery past the plate: boulders, ice crystals and beacons.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in 26:
+		var ang := rng.randf() * TAU
+		var dist := rng.randf_range(PAD_RING + 22.0, PAD_RING + 90.0)
+		var p := Vector3(cos(ang), 0, sin(ang)) * dist
+		var prop: Node3D
+		if i % 4 == 0:
+			prop = BaseModels.Models.ice_asteroid(rng.randf_range(2.0, 3.5), i)
+			prop.position = p + Vector3(0, 0.5, 0)
+		else:
+			prop = BaseModels.boulder(rng.randf_range(2.0, 6.0), i)
+			prop.position = p
+		prop.rotation.y = rng.randf() * TAU
+		world.add_child(prop)
+	for a in 4:
+		var beacon := BaseModels.Models.nav_beacon()
+		var ang := deg_to_rad(a * 90.0)
+		beacon.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RING + 18.0)
+		beacon.scale = Vector3.ONE * 0.7
+		world.add_child(beacon)
+
+
+func _make_pad(world: Node3D, pos: Vector3) -> Dictionary:
+	var root := Node3D.new()
+	root.position = pos
+	world.add_child(root)
+	root.add_child(BaseModels.pad())
+
+	# Selection / placement ring, shown when needed.
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = PAD_RADIUS + 0.2
+	torus.outer_radius = PAD_RADIUS + 1.2
+	torus.rings = 32
+	ring.mesh = torus
+	ring.position.y = 1.0
+	ring.material_override = _glow(C_AMBER)
+	ring.visible = false
+	root.add_child(ring)
+
+	var plus := Label3D.new()
+	plus.text = "+"
+	plus.font_size = 96
+	plus.pixel_size = 0.06
+	plus.outline_size = 12
+	plus.modulate = Color(0.6, 1.0, 1.0, 0.75)
+	plus.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	plus.position.y = 4.0
+	root.add_child(plus)
+
+	var label := Label3D.new()
+	label.font_size = 40
+	label.pixel_size = 0.07
+	label.outline_size = 10
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.position.y = 16.0
+	label.visible = false
+	root.add_child(label)
+
+	var light := OmniLight3D.new()
+	light.light_color = C_RED
+	light.omni_range = 18.0
+	light.position.y = 10.0
+	light.visible = false
+	root.add_child(light)
+	return {"root": root, "pos": pos, "key": "", "model": null, "label": label, "ring": ring, "plus": plus, "light": light}
+
+
+func _flat(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.roughness = 0.9
+	return m
+
+
+func _glow(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.emission_enabled = true
+	m.emission = c
+	m.emission_energy_multiplier = 1.2
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return m
+
+
+func _place_camera() -> void:
+	var dir := Vector3(sin(YAW) * cos(PITCH), sin(PITCH), cos(YAW) * cos(PITCH))
+	_cam.position = _focus + dir * _zoom
+	_cam.look_at(_focus, Vector3.UP)
+
+
+## Where a point on the screen lands on the ground, or null when it misses.
+func _ground_at(screen: Vector2) -> Variant:
+	var from := _cam.project_ray_origin(screen)
+	var dir := _cam.project_ray_normal(screen)
+	if absf(dir.y) < 0.0001:
+		return null
+	var t := -from.y / dir.y
+	return from + dir * t if t > 0.0 else null
+
+
+func _pan(from: Vector2, to: Vector2) -> void:
+	var a = _ground_at(from)
+	var b = _ground_at(to)
+	if a == null or b == null:
+		return
+	_focus += a - b
+	var flat := Vector2(_focus.x, _focus.z).limit_length(PAN_LIMIT)
+	_focus = Vector3(flat.x, 0, flat.y)
+	_place_camera()
+
+
+func _zoom_by(factor: float) -> void:
+	_zoom = clampf(_zoom * factor, ZOOM_MIN, ZOOM_MAX)
+	_place_camera()
+
+
+## Moves the camera to look at a pad.
+func focus_pad(i: int) -> void:
+	_focus = _pads[i].pos
+	_place_camera()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Pinch with two fingers. Single-finger drags arrive as mouse events (phones emulate them).
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_touches[event.index] = event.position
+		else:
+			_touches.erase(event.index)
+		_pinch_dist = _touch_spread()
+	elif event is InputEventScreenDrag:
+		_touches[event.index] = event.position
+		if _touches.size() >= 2:
+			var d := _touch_spread()
+			if _pinch_dist > 0.0 and d > 0.0:
+				_zoom_by(_pinch_dist / d)
+			_pinch_dist = d
+			_drag_total = INF # a pinch is never a tap
+	elif event is InputEventMagnifyGesture:
+		_zoom_by(1.0 / event.factor)
+	elif event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if event.pressed:
+					_zoom_by(0.9)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if event.pressed:
+					_zoom_by(1.1)
+			MOUSE_BUTTON_LEFT:
+				if event.pressed:
+					_dragging = true
+					_drag_from = event.position
+					_drag_total = 0.0
+				elif _dragging:
+					_dragging = false
+					if _drag_total < TAP_SLOP:
+						_tap(event.position)
+	elif event is InputEventMouseMotion and _dragging:
+		if _touches.size() < 2:
+			_pan(_drag_from, event.position)
+		_drag_total += event.relative.length()
+		_drag_from = event.position
+
+
+func _touch_spread() -> float:
+	if _touches.size() < 2:
+		return 0.0
+	var pts := _touches.values()
+	return (pts[0] as Vector2).distance_to(pts[1])
+
+
+func _tap(screen: Vector2) -> void:
+	var hit = _ground_at(screen)
+	var pad := -1
+	if hit != null:
+		for i in _pads.size():
+			if Vector2(hit.x - _pads[i].pos.x, hit.z - _pads[i].pos.z).length() < PAD_RADIUS + 3.0:
+				pad = i
+	if _placing != "":
+		if pad >= 0 and _building_at(pad).is_empty():
+			_build(pad, _placing)
+			_set_placing("")
+		return
+	select_pad(pad if pad != _selected else -1)
+
+
+func _process(delta: float) -> void:
+	_clock += delta
+	var pulse := 0.5 + 0.5 * sin(_clock * 6.0)
+	for p in _pads:
+		if p.light.visible:
+			p.light.light_energy = 1.0 + 4.0 * pulse
+		if p.ring.visible:
+			p.ring.scale = Vector3.ONE * (1.0 + 0.03 * pulse)
+		if p.plus.visible:
+			p.plus.position.y = 4.0 + 0.6 * sin(_clock * 2.0 + p.pos.x)
+
+
+# --- HUD layout --------------------------------------------------------------------------
+
+func _make_theme() -> Theme:
+	var t := Theme.new()
+	t.default_font_size = 17
+	var panel := _box(C_PANEL, C_TEAL.darkened(0.3), 14)
+	t.set_stylebox("panel", "PanelContainer", panel)
+	t.set_stylebox("normal", "Button", _box(Color(0.12, 0.2, 0.34, 0.95), C_TEAL.darkened(0.2), 12))
+	t.set_stylebox("hover", "Button", _box(Color(0.16, 0.28, 0.44, 0.95), C_TEAL, 12))
+	t.set_stylebox("pressed", "Button", _box(Color(0.08, 0.14, 0.24, 0.95), C_TEAL, 12))
+	t.set_stylebox("disabled", "Button", _box(Color(0.1, 0.13, 0.2, 0.8), Color(0.3, 0.35, 0.45), 12))
+	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	t.set_color("font_disabled_color", "Button", Color(0.6, 0.65, 0.72))
+	t.set_constant("icon_max_width", "Button", 30)
+	t.set_constant("h_separation", "Button", 8)
+	t.set_stylebox("normal", "LineEdit", _box(Color(0.03, 0.06, 0.12, 0.95), C_TEAL.darkened(0.4), 10))
+	t.set_constant("outline_size", "Label", 0)
+	return t
+
+
+func _box(fill: Color, border: Color, radius: int, pad := 10) -> StyleBoxFlat:
+	var s := StyleBoxFlat.new()
+	s.bg_color = fill
+	s.border_color = border
+	s.set_border_width_all(2)
+	s.set_corner_radius_all(radius)
+	s.content_margin_left = pad + 4
+	s.content_margin_right = pad + 4
+	s.content_margin_top = pad
+	s.content_margin_bottom = pad
+	return s
+
+
+func _build_hud() -> void:
+	var hud := MarginContainer.new()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for side in ["left", "right", "top", "bottom"]:
+		hud.add_theme_constant_override("margin_" + side, 14)
+	add_child(hud)
+	var layer := Control.new()
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(layer)
+
+	# Top left: where you are.
+	var where := PanelContainer.new()
+	where.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(where)
+	var where_col := VBoxContainer.new()
+	where_col.add_theme_constant_override("separation", 0)
+	where.add_child(where_col)
+	_title = _label(where_col, 22)
+	_subtitle = _label(where_col, 14)
+	_subtitle.modulate = Color(0.7, 0.9, 0.95)
+	_subtitle.text = "Planet Aster"
+
+	# Top right: resources.
+	var res_col := VBoxContainer.new()
+	_pin(res_col, Control.PRESET_TOP_RIGHT)
+	res_col.alignment = BoxContainer.ALIGNMENT_END
+	res_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(res_col)
+	var res_row := HBoxContainer.new()
+	res_row.alignment = BoxContainer.ALIGNMENT_END
+	res_row.add_theme_constant_override("separation", 8)
+	res_col.add_child(res_row)
+	for r in [["credits", "credits"], ["metal", "metal"], ["ice", "ice"], ["population", "group"]]:
+		_stock[r[0]] = _pill(res_row, r[1])
+	_goods = _label(res_col, 14)
+	_goods.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_goods.modulate = Color(0.85, 0.95, 1.0)
+
+	# Top centre: raid banner, then toasts.
+	var top_mid := VBoxContainer.new()
+	_pin(top_mid, Control.PRESET_CENTER_TOP)
+	top_mid.offset_top = 64
+	top_mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_mid.add_theme_constant_override("separation", 6)
+	layer.add_child(top_mid)
+	_banner = Button.new()
+	_banner.add_theme_stylebox_override("normal", _box(C_RED.darkened(0.15), Color(1, 0.6, 0.5), 18))
+	_banner.add_theme_stylebox_override("hover", _box(C_RED, Color(1, 0.7, 0.6), 18))
+	_banner.add_theme_stylebox_override("pressed", _box(C_RED.darkened(0.3), Color(1, 0.7, 0.6), 18))
+	_banner.icon = load(ICONS + "alarm.png")
+	_banner.visible = false
+	_banner.pressed.connect(_on_banner)
+	top_mid.add_child(_banner)
+	_toasts = VBoxContainer.new()
+	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toasts.alignment = BoxContainer.ALIGNMENT_BEGIN
+	top_mid.add_child(_toasts)
+
+	# Bottom left: Jobs, Raids, Chat.
+	var left := HBoxContainer.new()
+	_pin(left, Control.PRESET_BOTTOM_LEFT)
+	left.add_theme_constant_override("separation", 8)
+	layer.add_child(left)
+	_round_button(left, "Jobs", "mission_complete", func(): _toggle_page("jobs"))
+	_raids_btn = _round_button(left, "Raids", "alarm", func(): _toggle_page("raids"))
+	_round_button(left, "Chat", "chat", func(): _toggle_page("chat"))
+
+	# Bottom right: the shop.
+	var build := Button.new()
+	build.text = "Build"
+	build.icon = load(ICONS + "launch.png")
+	build.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+	build.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	build.add_theme_constant_override("icon_max_width", 44)
+	build.add_theme_font_size_override("font_size", 20)
+	build.add_theme_color_override("font_color", Color(0.1, 0.08, 0.02))
+	build.add_theme_color_override("font_hover_color", Color(0.1, 0.08, 0.02))
+	build.add_theme_color_override("font_pressed_color", Color(0.1, 0.08, 0.02))
+	build.add_theme_stylebox_override("normal", _box(C_AMBER, Color(1, 0.85, 0.5), 18))
+	build.add_theme_stylebox_override("hover", _box(C_AMBER.lightened(0.15), Color(1, 0.9, 0.6), 18))
+	build.add_theme_stylebox_override("pressed", _box(C_AMBER.darkened(0.2), Color(1, 0.9, 0.6), 18))
+	build.custom_minimum_size = Vector2(96, 92)
+	_pin(build, Control.PRESET_BOTTOM_RIGHT)
+	build.pressed.connect(func(): open_shop())
+	layer.add_child(build)
+
+	# Bottom centre: the selected pad's name and actions.
+	_select_box = VBoxContainer.new()
+	_pin(_select_box, Control.PRESET_CENTER_BOTTOM)
+	_select_box.alignment = BoxContainer.ALIGNMENT_END
+	_select_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_select_box.visible = false
+	layer.add_child(_select_box)
+	_select_name = _label(_select_box, 18)
+	_select_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_select_name.add_theme_constant_override("outline_size", 6)
+	_select_name.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_actions = HBoxContainer.new()
+	_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	_actions.add_theme_constant_override("separation", 8)
+	_select_box.add_child(_actions)
+
+	# Bottom centre while placing: what you're placing, and Cancel.
+	_place_bar = PanelContainer.new()
+	_pin(_place_bar, Control.PRESET_CENTER_BOTTOM)
+	_place_bar.visible = false
+	layer.add_child(_place_bar)
+	var place_row := HBoxContainer.new()
+	place_row.add_theme_constant_override("separation", 12)
+	_place_bar.add_child(place_row)
+	_place_label = _label(place_row, 17)
+	_place_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var cancel := Button.new()
+	cancel.text = "Cancel"
+	cancel.pressed.connect(func(): _set_placing(""))
+	place_row.add_child(cancel)
+
+	_build_drawer(layer)
+	_build_shop(layer)
+
+
+## Left-hand drawer for Jobs, Raids, Chat and building info.
+func _build_drawer(layer: Control) -> void:
+	_drawer = PanelContainer.new()
+	_drawer.anchor_top = 0.0
+	_drawer.anchor_bottom = 1.0
+	_drawer.offset_top = 70
+	_drawer.offset_bottom = -90
+	_drawer.custom_minimum_size = Vector2(340, 0)
+	_drawer.visible = false
+	layer.add_child(_drawer)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 8)
+	_drawer.add_child(col)
+	var head := HBoxContainer.new()
+	col.add_child(head)
+	_drawer_title = _label(head, 20)
+	_drawer_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var close := Button.new()
+	close.text = "X"
+	close.pressed.connect(func(): _show_page(""))
+	head.add_child(close)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(scroll)
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(body)
+
+	var jobs := VBoxContainer.new()
+	jobs.add_theme_constant_override("separation", 10)
+	body.add_child(jobs)
+	_post_job = Button.new()
+	_post_job.icon = load(ICONS + "send.png")
+	_post_job.text = "Post job: deliver %d %s for %d credits" % [JOB.amount, JOB.resource, JOB.reward]
+	_post_job.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_post_job.pressed.connect(_send_job)
+	jobs.add_child(_post_job)
+	_jobs = _label(jobs, 15)
+	_jobs.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pages["jobs"] = jobs
+
+	_raids = _label(body, 15)
+	_raids.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pages["raids"] = _raids
+	_info = _label(body, 15)
+	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pages["info"] = _info
+
+	var chat := VBoxContainer.new()
+	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(chat)
+	_chat_log = _label(chat, 15)
+	_chat_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_chat_log.text = "No messages yet."
+	var chat_row := HBoxContainer.new()
+	chat.add_child(chat_row)
+	var chat_edit := LineEdit.new()
+	chat_edit.placeholder_text = "Message pilots"
+	chat_edit.max_length = 200
+	chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_row.add_child(chat_edit)
+	var send := Button.new()
+	send.icon = load(ICONS + "send.png")
+	chat_row.add_child(send)
+	var send_chat := func(_text = ""):
+		if chat_edit.text.strip_edges() != "":
+			Net.send({"type": "chat", "text": chat_edit.text})
+		chat_edit.text = ""
+	send.pressed.connect(send_chat)
+	chat_edit.text_submitted.connect(send_chat)
+	_pages["chat"] = chat
+
+	for p in _pages.values():
+		p.visible = false
+
+
+## Bottom sheet listing what can be built.
+func _build_shop(layer: Control) -> void:
+	_shop = PanelContainer.new()
+	_pin(_shop, Control.PRESET_BOTTOM_WIDE)
+	_shop.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_shop.visible = false
+	layer.add_child(_shop)
+	var col := VBoxContainer.new()
+	_shop.add_child(col)
+	var head := HBoxContainer.new()
+	col.add_child(head)
+	var title := _label(head, 20)
+	title.text = "Build"
+	_shop_hint = _label(head, 15)
+	_shop_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_shop_hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_shop_hint.modulate = Color(0.75, 0.9, 0.95)
+	var close := Button.new()
+	close.text = "X"
+	close.pressed.connect(func(): _shop.visible = false)
+	head.add_child(close)
+	var scroll := ScrollContainer.new()
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 176)
+	col.add_child(scroll)
+	_shop_cards = HBoxContainer.new()
+	_shop_cards.add_theme_constant_override("separation", 10)
+	scroll.add_child(_shop_cards)
+
+
+## Pins a control to a corner or edge of its parent; it grows away from that edge as it fills.
+func _pin(c: Control, preset: Control.LayoutPreset) -> void:
+	c.set_anchors_preset(preset)
+	c.offset_left = 0
+	c.offset_right = 0
+	c.offset_top = 0
+	c.offset_bottom = 0
+	var right := preset in [PRESET_TOP_RIGHT, PRESET_BOTTOM_RIGHT, PRESET_CENTER_RIGHT]
+	var bottom := preset in [PRESET_BOTTOM_LEFT, PRESET_BOTTOM_RIGHT, PRESET_CENTER_BOTTOM]
+	var centre_h := preset in [PRESET_CENTER_TOP, PRESET_CENTER_BOTTOM]
+	c.grow_horizontal = GROW_DIRECTION_BOTH if centre_h else (GROW_DIRECTION_BEGIN if right else GROW_DIRECTION_END)
+	c.grow_vertical = GROW_DIRECTION_BEGIN if bottom else GROW_DIRECTION_END
+
+
 func _label(parent: Node, font_size: int) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", font_size)
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(l)
 	return l
 
 
+## A resource pill for the top bar: icon and number.
+func _pill(parent: Node, icon: String) -> Label:
+	var pill := PanelContainer.new()
+	pill.add_theme_stylebox_override("panel", _box(C_PANEL, C_TEAL.darkened(0.4), 20, 4))
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(pill)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	pill.add_child(row)
+	var pic := TextureRect.new()
+	pic.texture = load(ICONS + icon + ".png")
+	pic.custom_minimum_size = Vector2(26, 26)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	row.add_child(pic)
+	var l := _label(row, 17)
+	l.custom_minimum_size = Vector2(40, 0)
+	l.text = "0"
+	return l
+
+
+func _round_button(parent: Node, text: String, icon: String, on_press: Callable) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.icon = load(ICONS + icon + ".png")
+	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.add_theme_constant_override("icon_max_width", 34)
+	b.add_theme_font_size_override("font_size", 14)
+	b.custom_minimum_size = Vector2(72, 72)
+	b.pressed.connect(on_press)
+	parent.add_child(b)
+	return b
+
+
+## A short message near the top of the screen that fades away.
+func toast(text: String, color := Color.WHITE) -> void:
+	var pill := PanelContainer.new()
+	pill.add_theme_stylebox_override("panel", _box(C_PANEL, color.darkened(0.2), 16, 5))
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var l := _label(pill, 15)
+	l.text = text
+	_toasts.add_child(pill)
+	var live := _toasts.get_children().filter(func(c): return not c.is_queued_for_deletion())
+	for i in live.size() - 3:
+		live[i].queue_free()
+	var tw := create_tween()
+	tw.tween_interval(3.0)
+	tw.tween_property(pill, "modulate:a", 0.0, 0.6)
+	tw.tween_callback(pill.queue_free)
+
+
+# --- HUD behaviour -----------------------------------------------------------------------
+
+func _toggle_page(page: String) -> void:
+	_show_page("" if _page == page else page)
+
+
+func _show_page(page: String) -> void:
+	_page = page
+	for p in _pages:
+		_pages[p].visible = p == page
+	_drawer.visible = page != ""
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info"}.get(page, "")
+	if page != "":
+		_shop.visible = false
+	if page == "info" and _selected >= 0:
+		_drawer_title.text = _pad_name(_selected)
+	if not Net.state.is_empty():
+		_refresh(Net.state)
+
+
+func select_pad(i: int) -> void:
+	_selected = i
+	if _page == "info" and i < 0:
+		_show_page("")
+	if not Net.state.is_empty():
+		_refresh(Net.state)
+	else:
+		_refresh_selection({})
+
+
+## Opens the shop. With an empty pad selected, a pick builds there; otherwise pick a pad next.
+func open_shop() -> void:
+	_set_placing("")
+	_show_page("")
+	_shop.visible = true
+	if not Net.state.is_empty():
+		_refresh(Net.state)
+
+
+func _set_placing(type: String) -> void:
+	_placing = type
+	_place_bar.visible = type != ""
+	if type != "":
+		_place_label.text = "Tap a free pad to place the %s" % BUILDING_INFO[type].name
+		_selected = -1
+	if not Net.state.is_empty():
+		_refresh(Net.state)
+
+
+func _on_banner() -> void:
+	var raids: Array = Net.state.get("raids", [])
+	if raids.is_empty():
+		return
+	var slot := int(raids[0].slot)
+	focus_pad(slot)
+	select_pad(slot)
+	_show_page("info")
+
+
+func _send_job() -> void:
+	Net.send({"type": "post_job", "resource": JOB.resource, "amount": JOB.amount, "reward": JOB.reward})
+
+
+func _build(slot: int, type: String) -> void:
+	Net.send({"type": "build", "planet": "aster", "slot": slot, "building": type})
+
+
+func _shop_pick(type: String) -> void:
+	_shop.visible = false
+	if _selected >= 0 and _building_at(_selected).is_empty():
+		_build(_selected, type)
+	else:
+		_set_placing(type)
+
+
+# --- State -------------------------------------------------------------------------------
+
+func _planet() -> Dictionary:
+	return Net.state.system.planets[0] if not Net.state.is_empty() else {}
+
+
+func _building_at(slot: int) -> Dictionary:
+	var planet := _planet()
+	if planet.is_empty():
+		return {}
+	for b in planet.buildings:
+		if int(b.slot) == slot:
+			return b
+	return {}
+
+
+func _is_facility(type: String) -> bool:
+	return Net.catalog.get("facilities", {}).has(type)
+
+
+func _pad_name(slot: int) -> String:
+	var b := _building_at(slot)
+	if b.is_empty():
+		return "Empty pad %d" % (slot + 1)
+	var n: String = BUILDING_INFO.get(b.type, {"name": b.type}).name
+	return "%s  (Tier %d)" % [n, int(b.security)] if _is_facility(b.type) else n
+
+
+func _cost_text(cost: Dictionary) -> String:
+	var parts := []
+	for id in cost:
+		parts.append("%d %s" % [cost[id], id if id in ["metal", "ice", "credits"] else Net.item_name(id)])
+	return ", ".join(parts)
+
+
+func _can_afford(cost: Dictionary) -> bool:
+	for id in cost:
+		var have := float(Net.state.credits) if id == "credits" else float(Net.state.stock.get(id, 0))
+		if have < float(cost[id]):
+			return false
+	return true
+
+
 func _refresh(state: Dictionary) -> void:
 	var stock: Dictionary = state.stock
-	_header.text = "%s   |   %d credits" % [state.system.name, state.credits]
+	_title.text = state.system.name
+	_subtitle.text = "Planet %s" % state.system.planets[0].name
+	_stock.credits.text = str(int(state.credits))
+	_stock.metal.text = str(int(stock.metal))
+	_stock.ice.text = str(int(stock.get("ice", 0)))
+	_stock.population.text = str(int(state.population))
 	var goods := []
 	for id in stock:
 		if id not in ["metal", "ice"] and int(stock[id]) > 0:
 			goods.append("%s %d" % [Net.item_name(id), stock[id]])
-	_status.text = "Metal %d   Ice %d   Population %d" % [stock.metal, stock.get("ice", 0), state.population]
-	if goods:
-		_status.text += "\n" + "   ".join(goods)
+	_goods.text = "   ".join(goods)
+	_goods.visible = not goods.is_empty()
 
-	var planet: Dictionary = state.system.planets[0]
-	var by_slot := {}
-	for b in planet.buildings:
-		by_slot[int(b.slot)] = b.type
-	for child in _slots.get_children():
-		child.queue_free()
-	for slot in int(planet.slots):
-		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(0, 64)
-		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		if by_slot.has(slot) and Net.catalog.get("facilities", {}).has(by_slot[slot]):
-			var raid := Net.raid_on("aster", slot)
-			var b: Dictionary = planet.buildings.filter(func(x): return int(x.slot) == slot)[0]
-			btn.text = "%s  T%d\n%s" % [BUILDING_INFO[by_slot[slot]].name, int(b.security), "RAID IN PROGRESS" if not raid.is_empty() else "Vault: %d items" % _vault_count(b)]
-			if not raid.is_empty():
-				btn.modulate = Color(1.0, 0.55, 0.45)
-			btn.pressed.connect(func(): _fac_slot = -1 if _fac_slot == slot else slot; _refresh(Net.state))
-		elif by_slot.has(slot):
-			btn.text = BUILDING_INFO[by_slot[slot]].name
-			btn.disabled = true
-		else:
-			btn.text = "+ Build"
-			btn.pressed.connect(_open_menu.bind(slot, state.unlocked))
-		_slots.add_child(btn)
+	_refresh_pads(state)
+	_refresh_selection(state)
+	_refresh_raids(state)
+	_refresh_jobs(state)
+	if _shop.visible:
+		_refresh_shop(state)
+	if _page == "info":
+		_refresh_info(state)
+	_toast_feed(state)
 
+
+func _refresh_pads(state: Dictionary) -> void:
+	var tiers: Dictionary = Net.catalog.get("security", {})
+	for i in _pads.size():
+		var p: Dictionary = _pads[i]
+		var b := _building_at(i)
+		var raid := Net.raid_on("aster", i) if not b.is_empty() else {}
+		var key := ""
+		if not b.is_empty():
+			key = "%s:%d" % [b.type, int(b.get("security", 0))]
+		if key != p.key:
+			if p.model:
+				p.model.queue_free()
+				p.model = null
+			if not b.is_empty():
+				p.model = Node3D.new()
+				p.model.position.y = 1.0
+				p.model.rotation_degrees.y = 45.0 + 60.0 * i
+				p.root.add_child(p.model)
+				p.model.add_child(BaseModels.building(b.type))
+				# Security turrets around a facility, one per turret its tier adds.
+				var turrets := int(tiers.get(str(int(b.get("security", 0))), {}).get("turrets", 0))
+				for t in turrets:
+					var tur := BaseModels.turret()
+					var ang := TAU * (t + 0.5) / maxf(turrets, 1) + 0.6
+					tur.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RADIUS - 1.2)
+					tur.rotation.y = -ang - PI / 2
+					p.model.add_child(tur)
+			p.key = key
+		p.plus.visible = b.is_empty()
+		p.plus.modulate = Color(0.5, 1.0, 0.6, 0.95) if _placing != "" else Color(0.6, 1.0, 1.0, 0.6)
+		p.label.visible = not b.is_empty()
+		if not b.is_empty():
+			var n: String = BUILDING_INFO.get(b.type, {"name": b.type}).name
+			if _is_facility(b.type):
+				n += "  T%d" % int(b.security)
+			p.label.text = ("RAID!  " + n) if not raid.is_empty() else n
+			p.label.modulate = Color(1, 0.55, 0.45) if not raid.is_empty() else Color(1, 1, 1, 0.9)
+		p.light.visible = not raid.is_empty()
+		var placing_here := _placing != "" and b.is_empty()
+		p.ring.visible = placing_here or _selected == i or not raid.is_empty()
+		var ring_color := C_AMBER
+		if placing_here:
+			ring_color = Color(0.4, 1.0, 0.5)
+		elif not raid.is_empty() and _selected != i:
+			ring_color = C_RED
+		(p.ring.material_override as StandardMaterial3D).albedo_color = ring_color
+		(p.ring.material_override as StandardMaterial3D).emission = ring_color
+
+
+## Name and action buttons for the selected pad.
+func _refresh_selection(state: Dictionary) -> void:
+	_select_box.visible = _selected >= 0 and _placing == "" and not _shop.visible
+	if not _select_box.visible:
+		return
+	_select_name.text = _pad_name(_selected)
+	var b := _building_at(_selected)
+	var acts := []
+	if b.is_empty():
+		acts.append({"id": "build", "text": "Build here", "icon": "launch"})
+	else:
+		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
+		if b.type == "spaceport":
+			acts.append({"id": "job", "text": "Post job", "icon": "send",
+				"disabled": not Net.open_job().is_empty()})
+		if _is_facility(b.type) and not state.is_empty():
+			var now := Net.now_ms()
+			var wait := (float(b.shipReadyAt) - now) / 1000.0
+			var vault_empty := true
+			for id in b.vault:
+				if int(b.vault[id]) > 0:
+					vault_empty = false
+			acts.append({"id": "ship", "icon": "launch", "disabled": wait > 0 or vault_empty,
+				"text": "Ship cargo" if wait <= 0 else "Freighter %ds" % ceili(wait)})
+			var next: Dictionary = Net.catalog.security.get(str(int(b.security) + 1), {})
+			if not next.is_empty():
+				acts.append({"id": "upgrade", "icon": "rank", "text": "Tier %d" % (int(b.security) + 1),
+					"disabled": not Net.raid_on("aster", _selected).is_empty() or not _can_afford(next.cost)})
+			if not Net.raid_on("aster", _selected).is_empty():
+				var alarm_wait := (float(b.alarmReadyAt) - now) / 1000.0
+				acts.append({"id": "alarm", "icon": "alarm", "disabled": alarm_wait > 0, "danger": true,
+					"text": "Alarm (%d cr)" % Net.catalog.alarmCost if alarm_wait <= 0 else "Alarm %ds" % ceili(alarm_wait)})
+	_set_actions(acts)
+
+
+## Updates the action buttons in place, so a button never vanishes under a finger.
+func _set_actions(acts: Array) -> void:
+	var ids := acts.map(func(a): return a.id)
+	if ids != _action_ids:
+		for c in _actions.get_children():
+			c.queue_free()
+		for a in acts:
+			var btn := Button.new()
+			btn.icon = load(ICONS + a.icon + ".png")
+			btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+			btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			btn.add_theme_constant_override("icon_max_width", 32)
+			btn.add_theme_font_size_override("font_size", 14)
+			btn.custom_minimum_size = Vector2(86, 74)
+			if a.get("danger", false):
+				btn.add_theme_stylebox_override("normal", _box(C_RED.darkened(0.3), Color(1, 0.6, 0.5), 12))
+			btn.pressed.connect(_on_action.bind(a.id))
+			_actions.add_child(btn)
+		_action_ids = ids
+	var buttons := _actions.get_children().filter(func(c): return not c.is_queued_for_deletion())
+	for i in acts.size():
+		buttons[i].text = acts[i].text
+		buttons[i].disabled = acts[i].get("disabled", false)
+
+
+func _on_action(id: String) -> void:
+	match id:
+		"build":
+			open_shop()
+		"info":
+			_toggle_page("info")
+		"job":
+			_send_job()
+		"ship":
+			Net.send({"type": "ship_cargo", "planet": "aster", "slot": _selected})
+		"upgrade":
+			Net.send({"type": "upgrade_security", "planet": "aster", "slot": _selected})
+		"alarm":
+			Net.send({"type": "sound_alarm", "planet": "aster", "slot": _selected})
+
+
+func _refresh_shop(state: Dictionary) -> void:
+	var target := _selected >= 0 and _building_at(_selected).is_empty()
+	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad"
+	for c in _shop_cards.get_children():
+		c.queue_free()
+	for type in BUILDING_INFO:
+		var info: Dictionary = BUILDING_INFO[type]
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(150, 166)
+		card.icon = load(ICONS + type + ".png") if ResourceLoader.exists(ICONS + type + ".png") else load(ICONS + "vault.png")
+		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_theme_constant_override("icon_max_width", 72)
+		card.add_theme_font_size_override("font_size", 14)
+		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var locked: bool = type not in state.unlocked
+		var afford := _can_afford(info.cost)
+		card.text = "%s\n%s" % [info.name, "Locked: needs ice in stock" if locked else _cost_text(info.cost)]
+		card.disabled = locked or not afford
+		if not locked and not afford:
+			card.add_theme_color_override("font_disabled_color", Color(1, 0.6, 0.55))
+		card.pressed.connect(_shop_pick.bind(type))
+		_shop_cards.add_child(card)
+
+
+func _refresh_info(state: Dictionary) -> void:
+	if _selected < 0:
+		_info.text = ""
+		return
+	_drawer_title.text = _pad_name(_selected)
+	var b := _building_at(_selected)
+	if b.is_empty():
+		_info.text = "An empty pad. Tap Build to put something here."
+		return
+	var lines: Array = [BUILDING_INFO.get(b.type, {}).get("about", "")]
+	if _is_facility(b.type):
+		var now := Net.now_ms()
+		var vault := []
+		for id in b.vault:
+			if int(b.vault[id]) > 0:
+				vault.append("%d %s" % [b.vault[id], Net.item_name(id)])
+		lines.append("Vault: %s" % (", ".join(vault) if vault else "empty"))
+		var escrow := []
+		for id in b.get("escrow", {}):
+			escrow.append("%d %s" % [b.escrow[id], Net.item_name(id)])
+		if escrow:
+			lines.append("In the raid zone: %s" % ", ".join(escrow))
+		var tier := int(b.security)
+		var s: Dictionary = Net.catalog.security[str(tier)]
+		lines.append("Security tier %d: %d guards, %d turrets, %d-minute raid clock" % [tier, s.guards, s.turrets, s.minutes])
+		var next: Dictionary = Net.catalog.security.get(str(tier + 1), {})
+		if not next.is_empty():
+			lines.append("Tier %d costs %s" % [tier + 1, _cost_text(next.cost)])
+		var raid := Net.raid_on("aster", _selected)
+		if not raid.is_empty():
+			lines.append("INTRUDER: %s is inside. Heat %d." % [raid.pilot, raid.heat])
+		elif float(b.cooldownUntil) > now:
+			lines.append("Guards on alert after a raid: no one can board for %d s" % ceili((float(b.cooldownUntil) - now) / 1000.0))
+	_info.text = "\n\n".join(lines)
+
+
+func _refresh_jobs(state: Dictionary) -> void:
 	_post_job.disabled = not Net.has_building("spaceport") or not Net.open_job().is_empty()
-
 	var lines := []
 	for job in state.jobs:
 		lines.append("#%d  %s %d/%d  (%d cr)  %s" % [job.id, job.resource, job.delivered, job.amount, job.reward, job.status])
 	_jobs.text = "\n".join(lines) if lines else "No jobs yet. Build a Spaceport, then post one."
 
-	_refresh_facility(state)
-	_refresh_raids(state)
-
-	var feed := []
-	for i in range(state.feed.size() - 1, max(-1, state.feed.size() - 9), -1):
-		feed.append(state.feed[i].text)
-	_feed.text = "\n".join(feed)
-
-
-func _vault_count(b: Dictionary) -> int:
-	var n := 0
-	for id in b.vault:
-		n += int(b.vault[id])
-	return n
-
-
-func _refresh_facility(state: Dictionary) -> void:
-	for child in _fac_box.get_children():
-		child.queue_free()
-	var fac := {}
-	for f in Net.facilities():
-		if f.planet == "aster" and f.slot == _fac_slot:
-			fac = f
-	_fac_box.visible = not fac.is_empty()
-	if fac.is_empty():
-		return
-	var b: Dictionary = fac.building
-	var now := Net.now_ms()
-	_label(_fac_box, 18).text = fac.name
-	var vault := []
-	for id in b.vault:
-		if int(b.vault[id]) > 0:
-			vault.append("%d %s" % [b.vault[id], Net.item_name(id)])
-	var escrow := []
-	for id in b.get("escrow", {}):
-		escrow.append("%d %s" % [b.escrow[id], Net.item_name(id)])
-	_label(_fac_box, 14).text = "Vault: %s%s" % [", ".join(vault) if vault else "empty",
-		("\nIn the raid zone: %s" % ", ".join(escrow)) if escrow else ""]
-
-	var ship := Button.new()
-	var wait := (float(b.shipReadyAt) - now) / 1000.0
-	ship.text = "Ship cargo to HQ" if wait <= 0 else "Freighter back in %d s" % ceili(wait)
-	ship.disabled = wait > 0 or vault.is_empty()
-	ship.pressed.connect(func(): Net.send({"type": "ship_cargo", "planet": "aster", "slot": _fac_slot}))
-	_fac_box.add_child(ship)
-
-	var tier := int(b.security)
-	var info: Dictionary = Net.catalog.security[str(tier)]
-	_label(_fac_box, 14).text = "Security tier %d: %d guards, %d turrets, %d-minute raid clock" % [tier, info.guards, info.turrets, info.minutes]
-	var next: Dictionary = Net.catalog.security.get(str(tier + 1), {})
-	if not next.is_empty():
-		var cost := []
-		for id in next.cost:
-			cost.append("%d %s" % [next.cost[id], "credits" if id == "credits" else Net.item_name(id)])
-		var up := Button.new()
-		up.text = "Upgrade to tier %d (%s)" % [tier + 1, ", ".join(cost)]
-		up.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		up.pressed.connect(func(): Net.send({"type": "upgrade_security", "planet": "aster", "slot": _fac_slot}))
-		_fac_box.add_child(up)
-
-	var raid := Net.raid_on("aster", _fac_slot)
-	if not raid.is_empty():
-		var alarm := Button.new()
-		var alarm_wait := (float(b.alarmReadyAt) - now) / 1000.0
-		alarm.text = "Sound the alarm (%d credits)" % Net.catalog.alarmCost if alarm_wait <= 0 else "Alarm ready in %d s" % ceili(alarm_wait)
-		alarm.disabled = alarm_wait > 0
-		alarm.pressed.connect(func(): Net.send({"type": "sound_alarm", "planet": "aster", "slot": _fac_slot}))
-		_fac_box.add_child(alarm)
-	elif float(b.cooldownUntil) > now:
-		_label(_fac_box, 14).text = "Guards on alert after a raid: no one can board for %d s" % ceili((float(b.cooldownUntil) - now) / 1000.0)
-
 
 func _refresh_raids(state: Dictionary) -> void:
 	var lines := []
 	var levels: Array = Net.catalog.get("heatLevels", [])
-	for r in state.get("raids", []):
+	var live: Array = state.get("raids", [])
+	for r in live:
 		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
 		lines.append("INTRUDER: %s inside %s\nHeat %d (%s)%s, %d:%02d left" % [r.pilot, r.facility, r.heat,
 			levels[int(r.level)].name if levels else "", ", vault open" if r.vaultOpen else "", int(left) / 60, int(left) % 60])
 	var history: Array = state.get("raidLog", [])
-	for i in range(history.size() - 1, maxi(-1, history.size() - 4), -1):
+	for i in range(history.size() - 1, maxi(-1, history.size() - 6), -1):
 		var e: Dictionary = history[i]
 		var stolen := []
 		for id in e.stolen:
 			stolen.append("%d %s" % [e.stolen[id], Net.item_name(id)])
 		lines.append("%s at %s: %s%s" % [e.pilot, e.facility, e.outcome, (", took " + ", ".join(stolen)) if stolen else ""])
-	_raids.text = "\n".join(lines) if lines else "No raids yet. Facilities you build can be raided by pilots."
+	_raids.text = "\n\n".join(lines) if lines else "No raids yet. Facilities you build can be raided by pilots."
+
+	_banner.visible = not live.is_empty()
+	_raids_btn.modulate = Color(1, 0.6, 0.55) if not live.is_empty() else Color.WHITE
+	if not live.is_empty():
+		var r: Dictionary = live[0]
+		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
+		_banner.text = "Raid at %s  %d:%02d  Heat %d" % [BUILDING_INFO.get(_building_at(int(r.slot)).get("type", ""), {"name": r.facility}).name,
+			int(left) / 60, int(left) % 60, r.heat]
+
+
+## New activity-feed entries pop up as toasts. The backlog at connect time is skipped.
+func _toast_feed(state: Dictionary) -> void:
+	var feed: Array = state.feed
+	if _last_feed_at < 0.0:
+		_last_feed_at = float(feed[-1].at) if feed else 0.0
+		return
+	for e in feed:
+		if float(e.at) > _last_feed_at:
+			toast(e.text)
+	if feed:
+		_last_feed_at = maxf(_last_feed_at, float(feed[-1].at))
 
 
 func _on_chat(sender: String, _role: String, text: String) -> void:
 	_chat_lines.append("%s: %s" % [sender, text])
-	if _chat_lines.size() > 5:
+	if _chat_lines.size() > 30:
 		_chat_lines.pop_front()
 	_chat_log.text = "\n".join(_chat_lines)
-
-
-func _open_menu(slot: int, unlocked: Array) -> void:
-	_menu_slot = slot
-	_menu.clear()
-	var i := 0
-	for type in BUILDING_INFO:
-		if type in unlocked:
-			_menu.add_item("%s  (%s)" % [BUILDING_INFO[type].name, BUILDING_INFO[type].cost], i)
-			_menu.set_item_metadata(_menu.get_item_index(i), type)
-		i += 1
-	_menu.popup_centered()
-
-
-func _on_build_chosen(id: int) -> void:
-	var type: String = _menu.get_item_metadata(_menu.get_item_index(id))
-	Net.send({"type": "build", "planet": "aster", "slot": _menu_slot, "building": type})
+	if _page != "chat":
+		toast("%s: %s" % [sender, text], C_TEAL)

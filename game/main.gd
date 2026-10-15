@@ -76,8 +76,8 @@ func _start(mode: String, player_name: String, server: String) -> void:
 	for child in get_children():
 		child.queue_free()
 	if mode == "builder" and not OS.has_feature("mobile"):
-		# Phone-shaped window when testing the Builder on a PC.
-		DisplayServer.window_set_size(Vector2i(420, 820))
+		# Phone-shaped window (held sideways) when testing the Builder on a PC.
+		DisplayServer.window_set_size(Vector2i(1040, 480))
 	get_window().title = "Teal Galaxy: %s (%s)" % [mode.capitalize(), player_name]
 	Net.connect_to(server, mode, player_name)
 	add_child(BuilderMode.new() if mode == "builder" else ExplorerMode.new())
