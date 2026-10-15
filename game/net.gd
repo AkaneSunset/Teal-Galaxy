@@ -8,8 +8,12 @@ signal ship_left(id: int)
 signal chat_received(sender: String, role: String, text: String)
 signal server_error(reason: String)
 signal connection_changed(online: bool)
+## Raid events for the raider: begin, container, reveal, inventory, heat, extracting, end, ...
+signal raid_event(msg: Dictionary)
 
 var state: Dictionary = {}
+## Items, facilities and security tiers, from the server.
+var catalog: Dictionary = {}
 var my_id := 0
 var my_name := ""
 ## The last ship position exactly as the server sent it (64-bit numbers, metres from the star).
@@ -74,6 +78,7 @@ func _handle(msg: Dictionary) -> void:
 		"welcome":
 			my_id = int(msg.id)
 			my_name = msg.name
+			catalog = msg.get("catalog", {})
 			state = msg.state
 			state_changed.emit(state)
 		"state":
@@ -88,6 +93,8 @@ func _handle(msg: Dictionary) -> void:
 			chat_received.emit(str(msg.name), str(msg.get("role", "")), str(msg.text))
 		"left":
 			ship_left.emit(int(msg.id))
+		"raid":
+			raid_event.emit(msg)
 		"error":
 			server_error.emit(msg.reason)
 
@@ -111,3 +118,33 @@ func open_job() -> Dictionary:
 		if job.status == "open":
 			return job
 	return {}
+
+
+## Every facility in the system: {"planet", "slot", "type", "name", "building"}.
+func facilities() -> Array:
+	var out := []
+	if state.is_empty() or catalog.is_empty():
+		return out
+	for planet in state.system.planets:
+		for b in planet.buildings:
+			if catalog.facilities.has(b.type):
+				out.append({"planet": planet.id, "slot": int(b.slot), "type": b.type, "building": b,
+					"name": "%s %s %d" % [planet.name, catalog.facilities[b.type].name, int(b.slot) + 1]})
+	return out
+
+
+## The live raid on a facility, or an empty Dictionary.
+func raid_on(planet_id: String, slot: int) -> Dictionary:
+	for r in state.get("raids", []):
+		if r.planet == planet_id and int(r.slot) == slot:
+			return r
+	return {}
+
+
+func item_name(id: String) -> String:
+	return catalog.get("items", {}).get(id, {}).get("name", id)
+
+
+## Server timestamps are milliseconds since 1970.
+func now_ms() -> float:
+	return Time.get_unix_time_from_system() * 1000.0

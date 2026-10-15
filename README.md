@@ -43,6 +43,47 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 3. **Builder:** the job completes, 10 ice lands in stock, and Hydroponics unlocks.
    Pilots are paid by how much each delivered.
 
+## Raids: facilities and the pilots who rob them
+
+Based on the Facility Heist design doc. Builders build **facilities** on Aster (tap an empty slot):
+
+| Facility | Cost | Fills its vault with |
+| --- | --- | --- |
+| Mining Refinery | 40 metal | Alloy plates, isotope cells, rarely exotic matter |
+| Research Outpost | 30 metal, 10 ice | Design drives and blueprint cases (plans) |
+| Data Spire | 50 metal, 150 credits | Data shards and security dossiers (intel) |
+
+**Builder (phone):** tap a facility to see its vault. *Ship cargo to HQ* brings the goods home
+(materials and plans go to stock, intel sells for credits; once a minute). Spend them on
+**security tiers**: more guards, vault turrets, rarer loot and a longer raid clock. When a pilot
+boards, the facility turns red and the Raids list shows the intruder's Heat and time left live.
+*Sound the alarm* (50 credits) adds 25 Heat for them. A raid can reach 60% of each vault stack; the
+rest is in deep storage, and anything the raider doesn't carry out goes back in the vault.
+
+**Explorer (PC):** facilities orbit 25 km from the Spaceport and show on the map in red. Fly
+within 1.5 km, slow down and press **F** to board. Inside, on foot and in first person:
+
+- The facility is a grid of rooms. The **vault** is the room furthest from the airlock, behind a
+  red door: swipe an **access keycard** (one is hidden in some container) or drill it (loud, 30 s).
+- **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
+  Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
+- **Heat** rises with time, gunfire, being spotted and bodies found. At Alerted guards hunt you and
+  turrets wake, Lockdown seals the Escape Pod and sends reinforcements, Purge sends an elite team
+  and doubles extract timers.
+- **Extract** by standing in a zone: the Shuttle Pad outside the airlock (20 s, loud), the Service
+  Lift (8 s, silent, eats a keycard) or the Escape Pod (5 s, one use, after minute 3). With 5 minutes
+  left the extracts freeze as they are. If the clock runs out you're missing in action.
+- Extracted loot goes to your stash; sell it to the Fence at the Spaceport for half its value.
+
+| On foot | Keyboard and mouse | Gamepad |
+| --- | --- | --- |
+| Move, look | W A S D, mouse (or arrow keys) | Left stick, right stick |
+| Sprint / crouch (quiet) / jump | Shift / C / Space | Left stick click / B / Y |
+| Fire / aim / reload | Left / right mouse / R | RT / LT / X |
+| Search, swipe, drill, silent takedown from behind | F | A |
+| Inventory / use a trauma kit | Tab / H | Back / D-pad up |
+| Pause (bail out in the first 2 minutes) | Esc | Start |
+
 ## Flying (Explorer)
 
 Teal Prime is built at roughly real scale: Aster is 200 light seconds from the star, and a
@@ -86,8 +127,11 @@ set the server to `ws://<your computer's Wi-Fi address>:8080`. Both devices must
 ## Tests
 
 ```bash
-cd server && npm test     # builder + two pilots complete the ice job over real WebSockets
+cd server && npm test     # the ice job, raid rules, and a full raid over real WebSockets
 ```
+
+`game/tests/raid.tscn` plays a whole raid against a running server: board, find the keycard,
+open the vault, extract (instructions at the top of `game/tests/raid_test.gd`).
 
 `game/tests/flight_test.gd` checks the flight model on its own:
 `godot --headless --path game --script res://tests/flight_test.gd`
