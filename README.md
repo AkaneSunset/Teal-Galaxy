@@ -44,6 +44,12 @@ Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as 
 During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
 
+**Ship Foundry** (60 metal, 10 ice, needs a Spaceport, one per base) builds warships for your navy.
+Tap it and open the **Shipyard** to queue Corvettes (25 metal, 1 min), Frigates (50 metal, 10 alloy, 3 min)
+or Destroyers (100 metal, 25 alloy, 3 isotope cells, 8 min). Ships build one at a time, up to 5 in the
+queue and 10 in the hangar; cancelling the last one refunds it. Finished ships wait in the hangar
+(the navy count is in the top bar) for attacks on other Builders, which come next.
+
 ## The prototype loop
 
 1. **Builder:** build a Spaceport on planet Aster (costs 30 metal), then post the job

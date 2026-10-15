@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const G = require('./galaxy');
 const H = require('./heist');
+const N = require('./navy');
 
 const TICK_MS = 5000;
 const CHAT_MAX = 200;
@@ -194,7 +195,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (msg.type === 'hello') {
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      const catalog = { items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
+      const catalog = { ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
       send(ws, { type: 'welcome', id: me.id, name: me.name, state: galaxy, catalog });
       // Back after a dropped connection mid-raid: pick up where the run is.
       const run = me.role === 'explorer' && runs.get(me.name);
@@ -234,6 +235,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       }
       case 'sell':
         result = G.sell(galaxy, me.name);
+        break;
+      case 'queue_ship':
+        result = G.queueShip(galaxy, msg.planet, msg.slot, msg.ship, now());
+        break;
+      case 'cancel_ship':
+        result = G.cancelShip(galaxy, msg.planet, msg.slot);
         break;
       case 'chat': {
         // Chat is relayed to everyone (sender included, so all apps show the same order), not saved.
@@ -284,7 +291,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   });
 
   const ticker = setInterval(() => {
-    if (G.tick(galaxy)) changed();
+    if (G.tick(galaxy, now())) changed();
   }, tickMs);
   const raidTicker = setInterval(raidTick, RAID_TICK_MS);
 

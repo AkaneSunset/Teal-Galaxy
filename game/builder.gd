@@ -18,7 +18,10 @@ const BUILDING_INFO := {
 	"refinery": {"name": "Mining Refinery", "cost": {"metal": 40}, "about": "Makes alloy, isotopes and exotics. Pilots can raid it."},
 	"lab": {"name": "Research Outpost", "cost": {"metal": 30, "ice": 10}, "about": "Makes plans and drives. Pilots can raid it."},
 	"spire": {"name": "Data Spire", "cost": {"metal": 50, "credits": 150}, "about": "Makes intel. Pilots can raid it."},
+	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport", "limit": 1,
+		"about": "Builds warships for your navy. Open the Shipyard to queue them."},
 }
+const CARD_ICON := {"foundry": "ship_emblem"} # shop icons for buildings without their own
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 
 const PAD_RING := 34.0 # metres from the command centre to each pad
@@ -69,6 +72,11 @@ var _jobs: Label
 var _post_job: Button
 var _raids: Label
 var _info: Label
+var _yard_fleet: Label
+var _yard_queue: Label
+var _yard_cancel: Button
+var _yard_ships: VBoxContainer
+var _yard_buttons := {} # ship id -> Button
 var _chat_log: Label
 var _chat_lines := []
 var _shop: PanelContainer
@@ -458,7 +466,7 @@ func _build_hud() -> void:
 	res_row.alignment = BoxContainer.ALIGNMENT_END
 	res_row.add_theme_constant_override("separation", 8)
 	res_col.add_child(res_row)
-	for r in [["credits", "credits"], ["metal", "metal"], ["ice", "ice"], ["population", "group"]]:
+	for r in [["credits", "credits"], ["metal", "metal"], ["ice", "ice"], ["population", "group"], ["navy", "ship_emblem"]]:
 		_stock[r[0]] = _pill(res_row, r[1])
 	_goods = _label(res_col, 14)
 	_goods.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -521,8 +529,8 @@ func _build_hud() -> void:
 	layer.add_child(_select_box)
 	_select_name = _label(_select_box, 18)
 	_select_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_select_name.add_theme_constant_override("outline_size", 6)
-	_select_name.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	_select_name.add_theme_stylebox_override("normal", _box(C_PANEL, C_TEAL.darkened(0.4), 14, 4))
+	_select_name.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_actions = HBoxContainer.new()
 	_actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	_actions.add_theme_constant_override("separation", 8)
@@ -595,6 +603,23 @@ func _build_drawer(layer: Control) -> void:
 	_info = _label(body, 15)
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_pages["info"] = _info
+
+	# The Shipyard: the Foundry's queue, the navy, and a button per warship.
+	var yard := VBoxContainer.new()
+	yard.add_theme_constant_override("separation", 10)
+	body.add_child(yard)
+	_yard_fleet = _label(yard, 15)
+	_yard_fleet.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_yard_queue = _label(yard, 15)
+	_yard_queue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_yard_cancel = Button.new()
+	_yard_cancel.text = "Cancel last in queue (full refund)"
+	_yard_cancel.pressed.connect(func(): Net.send({"type": "cancel_ship", "planet": "aster", "slot": _foundry_slot()}))
+	yard.add_child(_yard_cancel)
+	_yard_ships = VBoxContainer.new()
+	_yard_ships.add_theme_constant_override("separation", 8)
+	yard.add_child(_yard_ships)
+	_pages["shipyard"] = yard
 
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -741,7 +766,7 @@ func _show_page(page: String) -> void:
 	for p in _pages:
 		_pages[p].visible = p == page
 	_drawer.visible = page != ""
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info"}.get(page, "")
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
@@ -856,6 +881,7 @@ func _refresh(state: Dictionary) -> void:
 	_stock.metal.text = str(int(stock.metal))
 	_stock.ice.text = str(int(stock.get("ice", 0)))
 	_stock.population.text = str(int(state.population))
+	_stock.navy.text = str(_fleet_size(state))
 	var goods := []
 	for id in stock:
 		if id not in ["metal", "ice"] and int(stock[id]) > 0:
@@ -867,6 +893,8 @@ func _refresh(state: Dictionary) -> void:
 	_refresh_selection(state)
 	_refresh_raids(state)
 	_refresh_jobs(state)
+	if _page == "shipyard":
+		_refresh_shipyard(state)
 	if _shop.visible:
 		_refresh_shop(state)
 	if _page == "info":
@@ -883,6 +911,8 @@ func _refresh_pads(state: Dictionary) -> void:
 		var key := ""
 		if not b.is_empty():
 			key = "%s:%d" % [b.type, int(b.get("security", 0))]
+			if b.type == "foundry":
+				key += ":%d" % mini(_fleet_size(state), 3)
 		if key != p.key:
 			if p.model:
 				p.model.queue_free()
@@ -901,6 +931,14 @@ func _refresh_pads(state: Dictionary) -> void:
 					tur.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RADIUS - 1.2)
 					tur.rotation.y = -ang - PI / 2
 					p.model.add_child(tur)
+				# Up to three finished warships parked beside the Foundry.
+				if b.type == "foundry":
+					for s in mini(_fleet_size(state), 3):
+						var ship := BaseModels.Models.starter_ship()
+						ship.scale = Vector3.ONE * 0.38
+						ship.position = Vector3(-6.0 + s * 3.2, 1.2, 5.6)
+						ship.rotation_degrees.y = 180.0
+						p.model.add_child(ship)
 			p.key = key
 		p.plus.visible = b.is_empty()
 		p.plus.modulate = Color(0.5, 1.0, 0.6, 0.95) if _placing != "" else Color(0.6, 1.0, 1.0, 0.6)
@@ -938,6 +976,10 @@ func _refresh_selection(state: Dictionary) -> void:
 		if b.type == "spaceport":
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
 				"disabled": not Net.open_job().is_empty()})
+		if b.type == "foundry":
+			var building: Array = b.get("queue", [])
+			acts.append({"id": "shipyard", "icon": "ship_emblem",
+				"text": "Shipyard" if building.is_empty() else "Shipyard (%d)" % building.size()})
 		if _is_facility(b.type) and not state.is_empty():
 			var now := Net.now_ms()
 			var wait := (float(b.shipReadyAt) - now) / 1000.0
@@ -991,6 +1033,8 @@ func _on_action(id: String) -> void:
 			_toggle_page("info")
 		"job":
 			_send_job()
+		"shipyard":
+			_toggle_page("shipyard")
 		"ship":
 			Net.send({"type": "ship_cargo", "planet": "aster", "slot": _selected})
 		"upgrade":
@@ -1008,15 +1052,22 @@ func _refresh_shop(state: Dictionary) -> void:
 		var info: Dictionary = BUILDING_INFO[type]
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(150, 166)
-		card.icon = load(ICONS + type + ".png") if ResourceLoader.exists(ICONS + type + ".png") else load(ICONS + "vault.png")
+		var icon: String = CARD_ICON.get(type, type)
+		card.icon = load(ICONS + icon + ".png") if ResourceLoader.exists(ICONS + icon + ".png") else load(ICONS + "vault.png")
 		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		card.add_theme_constant_override("icon_max_width", 72)
 		card.add_theme_font_size_override("font_size", 14)
 		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		var locked: bool = type not in state.unlocked
+		var why := "Locked: needs ice in stock" if locked else ""
+		if not locked and info.has("needs") and not Net.has_building(info.needs):
+			why = "Needs a %s" % BUILDING_INFO[info.needs].name
+		if not locked and info.has("limit") and _count(type) >= int(info.limit):
+			why = "Already built"
+		locked = locked or why != ""
 		var afford := _can_afford(info.cost)
-		card.text = "%s\n%s" % [info.name, "Locked: needs ice in stock" if locked else _cost_text(info.cost)]
+		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost)]
 		card.disabled = locked or not afford
 		if not locked and not afford:
 			card.add_theme_color_override("font_disabled_color", Color(1, 0.6, 0.55))
@@ -1058,6 +1109,73 @@ func _refresh_info(state: Dictionary) -> void:
 		elif float(b.cooldownUntil) > now:
 			lines.append("Guards on alert after a raid: no one can board for %d s" % ceili((float(b.cooldownUntil) - now) / 1000.0))
 	_info.text = "\n\n".join(lines)
+
+
+func _count(type: String) -> int:
+	var n := 0
+	for planet in Net.state.system.planets:
+		for b in planet.buildings:
+			if b.type == type:
+				n += 1
+	return n
+
+
+func _fleet_size(state: Dictionary) -> int:
+	var n := 0
+	var navy: Dictionary = state.get("navy", {})
+	for id in navy:
+		n += int(navy[id])
+	return n
+
+
+func _foundry_slot() -> int:
+	var planet := _planet()
+	if planet.is_empty():
+		return -1
+	for b in planet.buildings:
+		if b.type == "foundry":
+			return int(b.slot)
+	return -1
+
+
+func _refresh_shipyard(state: Dictionary) -> void:
+	var ships: Dictionary = Net.catalog.get("ships", {})
+	var slot := _foundry_slot()
+	var queue: Array = _building_at(slot).get("queue", []) if slot >= 0 else []
+	var navy: Dictionary = state.get("navy", {})
+	var fleet := []
+	for id in ships:
+		fleet.append("%d %s" % [int(navy.get(id, 0)), ships[id].name + ("s" if int(navy.get(id, 0)) != 1 else "")])
+	var hangar := int(Net.catalog.get("hangar", 10))
+	_yard_fleet.text = "Navy: %s\nHangar: %d of %d berths used" % [", ".join(fleet), _fleet_size(state) + queue.size(), hangar]
+	var lines := []
+	var now := Net.now_ms()
+	for i in queue.size():
+		var q: Dictionary = queue[i]
+		var name: String = ships.get(q.ship, {"name": q.ship}).name
+		if i == 0 and q.doneAt != null:
+			var left := maxf(0.0, (float(q.doneAt) - now) / 1000.0)
+			lines.append("Building: %s, %d:%02d left" % [name, int(left) / 60, int(left) % 60])
+		else:
+			lines.append("Next: %s" % name)
+	_yard_queue.text = "\n".join(lines) if lines else "Nothing building. Pick a warship below."
+	_yard_cancel.visible = not queue.is_empty()
+
+	var full := queue.size() >= int(Net.catalog.get("shipQueueMax", 5)) or _fleet_size(state) + queue.size() >= hangar
+	for id in ships:
+		var def: Dictionary = ships[id]
+		if not _yard_buttons.has(id):
+			var btn := Button.new()
+			btn.icon = load(ICONS + "ship_emblem.png")
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			btn.pressed.connect(func(): Net.send({"type": "queue_ship", "planet": "aster", "slot": _foundry_slot(), "ship": id}))
+			_yard_ships.add_child(btn)
+			_yard_buttons[id] = btn
+		var btn: Button = _yard_buttons[id]
+		btn.text = "%s   %s, %d:%02d\nAttack %d   Hull %d   Speed %d" % [def.name, _cost_text(def.cost),
+			int(def.seconds) / 60, int(def.seconds) % 60, def.attack, def.hull, def.speed]
+		btn.disabled = full or not _can_afford(def.cost)
 
 
 func _refresh_jobs(state: Dictionary) -> void:

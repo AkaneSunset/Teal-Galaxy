@@ -3,6 +3,7 @@
 // Facilities and raids on them are in heist.js; this file hooks them into the galaxy.
 
 const H = require('./heist');
+const N = require('./navy');
 
 const BUILDINGS = {
   mine: { name: 'Mine', cost: { metal: 10 }, needs: null },
@@ -13,6 +14,8 @@ const BUILDINGS = {
   refinery: { name: 'Mining Refinery', cost: { metal: 40 }, facility: true },
   lab: { name: 'Research Outpost', cost: { metal: 30, ice: 10 }, facility: true },
   spire: { name: 'Data Spire', cost: { metal: 50, credits: 150 }, facility: true },
+  // Builds warships for the Builder's navy (navy.js). One per base, after a Spaceport.
+  foundry: { name: 'Ship Foundry', cost: { metal: 60, ice: 10 }, needsBuilding: 'spaceport', limit: 1 },
 };
 
 const MINE_RATE = 1; // metal per mine per tick
@@ -28,12 +31,13 @@ function newGalaxy() {
     stock: { metal: 60, ice: 0 },
     credits: 500,
     population: 0,
-    unlocked: ['mine', 'habitat', 'spaceport', 'refinery', 'lab', 'spire'],
+    unlocked: ['mine', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
     jobs: [],
     raids: [], // raids in progress, as everyone may see them (no container contents)
     raidLog: [],
     pilots: {},
     feed: [],
+    navy: { corvette: 0, frigate: 0, destroyer: 0 },
     nextJobId: 1,
   };
 }
@@ -63,10 +67,14 @@ function build(g, planetId, slot, type) {
   if (!g.unlocked.includes(type)) return fail(`${def.name} is locked`);
   if (!Number.isInteger(slot) || slot < 0 || slot >= p.slots) return fail('bad slot');
   if (p.buildings.some((b) => b.slot === slot)) return fail('slot taken');
+  if (def.needsBuilding && !hasBuilding(g, def.needsBuilding)) return fail(`build a ${BUILDINGS[def.needsBuilding].name} first`);
+  if (def.limit && g.system.planets.reduce((n, q) => n + q.buildings.filter((x) => x.type === type).length, 0) >= def.limit)
+    return fail(`you already have a ${def.name}`);
   const err = pay(g, def.cost);
   if (err) return fail(err);
   const b = { slot, type };
   if (def.facility) Object.assign(b, { security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
+  if (type === 'foundry') b.queue = [];
   p.buildings.push(b);
   if (type === 'habitat') g.population += POPULATION_PER_HABITAT;
   log(g, `${def.name} built on ${p.name}`);
@@ -150,8 +158,12 @@ function completeJob(g, job) {
   }
 }
 
-function tick(g) {
+function tick(g, now = Date.now()) {
   let changed = false;
+  for (const name of N.tick(g, now)) {
+    log(g, `${name} launched from the Ship Foundry`);
+    changed = true;
+  }
   for (const p of g.system.planets) {
     for (const b of p.buildings) {
       if (b.type === 'mine') {
@@ -285,13 +297,27 @@ function endRaid(g, run, outcome, now) {
 function recoverRaids(g) {
   g.raids = [];
   g.raidLog ||= [];
-  for (const type of ['refinery', 'lab', 'spire']) if (!g.unlocked.includes(type)) g.unlocked.push(type);
+  N.ensure(g);
+  for (const type of ['refinery', 'lab', 'spire', 'foundry']) if (!g.unlocked.includes(type)) g.unlocked.push(type);
   for (const p of g.system.planets)
     for (const b of p.buildings) {
       if (!b.escrow) continue;
       for (const [item, qty] of Object.entries(b.escrow)) b.vault[item] = (b.vault[item] || 0) + qty;
       b.escrow = {};
     }
+}
+
+// The Builder queues a warship at the Ship Foundry.
+function queueShip(g, planetId, slot, shipId, now) {
+  const r = N.queueShip(g, planetId, slot, shipId, now, (cost) => pay(g, cost));
+  if (r.ok) log(g, `${r.name} queued at the Ship Foundry`);
+  return r;
+}
+
+function cancelShip(g, planetId, slot) {
+  const r = N.cancelShip(g, planetId, slot);
+  if (r.ok) log(g, `${r.name} cancelled and refunded`);
+  return r;
 }
 
 // The Fence at the Spaceport buys everything in a pilot's stash.
@@ -323,4 +349,6 @@ module.exports = {
   endRaid,
   recoverRaids,
   sell,
+  queueShip,
+  cancelShip,
 };

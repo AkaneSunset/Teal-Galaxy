@@ -8,7 +8,7 @@ const Models := preload("res://models.gd")
 
 ## Which models.gd model stands for each building type.
 const REAL_MODEL := {"habitat": "habitat_dome", "mine": "mine", "spaceport": "spaceport",
-	"hydroponics": "hydroponics", "refinery": "refinery", "lab": "research_outpost", "spire": "data_spire"}
+	"hydroponics": "hydroponics", "refinery": "refinery", "lab": "research_outpost", "spire": "data_spire", "foundry": "ship_foundry"}
 
 
 static func building(type: String) -> Node3D:
@@ -28,6 +28,8 @@ static func building(type: String) -> Node3D:
 			return research_outpost()
 		"spire":
 			return data_spire()
+		"foundry":
+			return ship_foundry()
 	return Models.habitat_dome()
 
 
@@ -185,6 +187,36 @@ static func data_spire() -> Node3D:
 	for a in 3:
 		var ang := a * TAU / 3.0
 		_b(n, Vector3(1.0, 8.0, 1.0), "navy", Vector3(cos(ang), 0, sin(ang)) * 4.0 + Vector3(0, 4.0, 0), 0.2)
+	return n
+
+
+## Ship Foundry: a dry dock with a warship hull half-built inside a gantry, a crane and welding lights.
+static func ship_foundry() -> Node3D:
+	var n := Node3D.new()
+	_b(n, Vector3(14, 1.0, 9), "navy", Vector3(0, 0.5, -1.0), 0.3) # dock floor
+	_b(n, Vector3(12, 0.3, 6.6), "steel", Vector3(0, 1.1, -1.0), 0.1)
+	for x in [-5.6, 0.0, 5.6]:
+		for z in [-4.6, 2.6]:
+			_b(n, Vector3(0.8, 8.0, 0.8), "teal", Vector3(x, 5.0, z), 0.2) # gantry legs
+		_b(n, Vector3(0.9, 0.9, 8.0), "teal_light", Vector3(x, 9.2, -1.0), 0.25) # gantry beams
+	_b(n, Vector3(12.4, 0.8, 0.8), "navy", Vector3(0, 9.6, -4.6), 0.2)
+	_b(n, Vector3(12.4, 0.8, 0.8), "navy", Vector3(0, 9.6, 2.6), 0.2)
+	# The hull on the slipway: finished bow, bare ribs at the stern.
+	_b(n, Vector3(3.4, 2.6, 4.6), "teal", Vector3(-2.6, 2.8, -1.0), 0.6, Vector3(0, 90, 0))
+	_b(n, Vector3(2.6, 2.0, 2.6), "teal_light", Vector3(-5.2, 2.6, -1.0), 0.7)
+	_b(n, Vector3(1.6, 0.9, 1.4), "glass", Vector3(-3.8, 4.3, -1.0), 0.3)
+	for x in [0.4, 1.8, 3.2]:
+		_b(n, Vector3(0.35, 3.0, 3.6), "navy", Vector3(x, 2.9, -1.0), 0.15) # ribs
+	_b(n, Vector3(5.0, 0.4, 0.5), "navy", Vector3(1.8, 4.2, -1.0), 0.1) # keel spine
+	for p in [Vector3(1.1, 4.0, 0.9), Vector3(2.5, 1.9, -2.9), Vector3(-0.6, 3.6, -2.9)]:
+		Models.ball(n, 0.3, "amber", p) # welding sparks
+	# Crane trolley hanging from the middle beam, lifting a hull plate.
+	_b(n, Vector3(1.6, 1.0, 1.6), "navy", Vector3(2.6, 8.4, -1.0), 0.2)
+	_d(n, 0.12, 2.6, "steel", Vector3(2.6, 6.6, -1.0), 6)
+	_b(n, Vector3(2.4, 0.3, 2.0), "teal", Vector3(2.6, 5.2, -1.0), 0.08)
+	# Control booth with a lit window.
+	_b(n, Vector3(3.0, 3.0, 2.4), "teal_light", Vector3(6.4, 1.5, 4.8), 0.4)
+	_b(n, Vector3(2.2, 1.0, 0.3), "amber", Vector3(6.4, 2.0, 3.55), 0.1)
 	return n
 
 
