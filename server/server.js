@@ -10,6 +10,8 @@ const { WebSocketServer } = require('ws');
 const G = require('./galaxy');
 
 const TICK_MS = 5000;
+const CHAT_MAX = 200;
+const CHAT_GAP_MS = 500; // at most two chat lines a second per player
 
 function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS } = {}) {
   let galaxy = G.newGalaxy();
@@ -67,6 +69,16 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS } = {}) {
       case 'deliver':
         result = G.deliver(galaxy, me.name, msg.job);
         break;
+      case 'chat': {
+        // Chat is relayed to everyone (sender included, so all apps show the same order), not saved.
+        const text = String(msg.text || '').replace(/\s+/g, ' ').trim().slice(0, CHAT_MAX);
+        if (!text) return;
+        const now = Date.now();
+        if (now - (me.lastChat || 0) < CHAT_GAP_MS) return send(ws, { type: 'error', reason: 'chat: slow down' });
+        me.lastChat = now;
+        broadcast({ type: 'chat', name: me.name, role: me.role, text });
+        return;
+      }
       case 'ship':
         // Ship positions are relayed, not saved.
         broadcast({ type: 'ship', id: me.id, name: me.name, pos: msg.pos, rot: msg.rot }, ws);

@@ -87,3 +87,28 @@ test('builder and two pilots complete the ice job', async () => {
     await server.close();
   }
 });
+
+test('chat reaches every app, trimmed and rate-limited', async () => {
+  const port = 18081;
+  const server = startServer({ port, tickMs: 60000 });
+  try {
+    const phone = await connect(port);
+    const pc = await connect(port);
+    phone.send({ type: 'hello', role: 'builder', name: 'Akane' });
+    pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
+    await phone.next((m) => m.type === 'welcome');
+    await pc.next((m) => m.type === 'welcome');
+
+    pc.send({ type: 'chat', text: '  on my   way to the port  ' });
+    const heard = await phone.next((m) => m.type === 'chat');
+    assert.deepStrictEqual(heard, { type: 'chat', name: 'Pilot A', role: 'explorer', text: 'on my way to the port' });
+    assert.strictEqual((await pc.next((m) => m.type === 'chat')).text, 'on my way to the port');
+
+    pc.send({ type: 'chat', text: 'too fast' });
+    assert.match((await pc.next((m) => m.type === 'error')).reason, /slow down/);
+
+    for (const c of [phone, pc]) c.close();
+  } finally {
+    await server.close();
+  }
+});

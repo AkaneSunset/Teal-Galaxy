@@ -15,6 +15,8 @@ var _slots: GridContainer
 var _post_job: Button
 var _jobs: Label
 var _feed: Label
+var _chat_log: Label
+var _chat_lines := []
 var _menu: PopupMenu
 var _menu_slot := -1
 
@@ -49,6 +51,27 @@ func _ready() -> void:
 	_label(col, 16).text = "Activity"
 	_feed = _label(col, 13)
 	_feed.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	# Chat with pilots in flight.
+	_label(col, 16).text = "Chat"
+	_chat_log = _label(col, 13)
+	var chat_row := HBoxContainer.new()
+	col.add_child(chat_row)
+	var chat_edit := LineEdit.new()
+	chat_edit.placeholder_text = "Message pilots"
+	chat_edit.max_length = 200
+	chat_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_row.add_child(chat_edit)
+	var send := Button.new()
+	send.text = "Send"
+	chat_row.add_child(send)
+	var send_chat := func(_text = ""):
+		if chat_edit.text.strip_edges() != "":
+			Net.send({"type": "chat", "text": chat_edit.text})
+		chat_edit.text = ""
+	send.pressed.connect(send_chat)
+	chat_edit.text_submitted.connect(send_chat)
+	Net.chat_received.connect(_on_chat)
 
 	_menu = PopupMenu.new()
 	_menu.id_pressed.connect(_on_build_chosen)
@@ -102,6 +125,13 @@ func _refresh(state: Dictionary) -> void:
 	for i in range(state.feed.size() - 1, max(-1, state.feed.size() - 9), -1):
 		feed.append(state.feed[i].text)
 	_feed.text = "\n".join(feed)
+
+
+func _on_chat(sender: String, _role: String, text: String) -> void:
+	_chat_lines.append("%s: %s" % [sender, text])
+	if _chat_lines.size() > 5:
+		_chat_lines.pop_front()
+	_chat_log.text = "\n".join(_chat_lines)
 
 
 func _open_menu(slot: int, unlocked: Array) -> void:

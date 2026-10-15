@@ -5,12 +5,15 @@ extends Node
 signal state_changed(state: Dictionary)
 signal ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3)
 signal ship_left(id: int)
+signal chat_received(sender: String, role: String, text: String)
 signal server_error(reason: String)
 signal connection_changed(online: bool)
 
 var state: Dictionary = {}
 var my_id := 0
 var my_name := ""
+## The last ship position exactly as the server sent it (64-bit numbers, metres from the star).
+var last_ship_pos: Array = []
 
 var _socket := WebSocketPeer.new()
 var _url := ""
@@ -78,8 +81,11 @@ func _handle(msg: Dictionary) -> void:
 			state_changed.emit(state)
 		"ship":
 			var p: Array = msg.pos
+			last_ship_pos = p
 			var r: Array = msg.rot
 			ship_moved.emit(int(msg.id), msg.name, Vector3(p[0], p[1], p[2]), Vector3(r[0], r[1], r[2]))
+		"chat":
+			chat_received.emit(str(msg.name), str(msg.get("role", "")), str(msg.text))
 		"left":
 			ship_left.emit(int(msg.id))
 		"error":
