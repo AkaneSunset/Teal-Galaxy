@@ -453,10 +453,11 @@ function briefing(run, now) {
   };
 }
 
+// What the raider carries, with names and values for the app to show.
 function inventoryView(run) {
   const out = [];
   for (const [gridName, grid] of [['backpack', run.inv.backpack], ['secure', run.inv.secure]])
-    for (const [uid, rect] of Object.entries(grid.placed)) out.push({ ...run.inv.items[uid], grid: gridName, rect });
+    for (const [uid, rect] of Object.entries(grid.placed)) out.push({ ...publicItem(run.inv.items[uid]), grid: gridName, rect });
   return out;
 }
 

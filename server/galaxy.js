@@ -281,9 +281,11 @@ function endRaid(g, run, outcome, now) {
 }
 
 // After a server restart nothing is inside any facility, so escrowed goods go home.
+// Also brings saves from before facilities existed up to date.
 function recoverRaids(g) {
   g.raids = [];
   g.raidLog ||= [];
+  for (const type of ['refinery', 'lab', 'spire']) if (!g.unlocked.includes(type)) g.unlocked.push(type);
   for (const p of g.system.planets)
     for (const b of p.buildings) {
       if (!b.escrow) continue;

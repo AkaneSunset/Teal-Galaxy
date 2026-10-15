@@ -37,7 +37,7 @@ const ACTIONS := [
 	["boost", "Boost", [KEY_SHIFT], ["button", JOY_BUTTON_B]],
 	["phase", "Phase-shift drive", [KEY_J], ["button", JOY_BUTTON_Y]],
 	["drift", "Drift (flight assist off)", [KEY_Z], ["button", JOY_BUTTON_X]],
-	["interact", "Mine / deliver", [KEY_F], ["button", JOY_BUTTON_A]],
+	["interact", "Mine / deliver / board / use", [KEY_F], ["button", JOY_BUTTON_A]],
 	["pip_sys", "Power to systems", [KEY_1], ["button", JOY_BUTTON_DPAD_LEFT]],
 	["pip_eng", "Power to engines", [KEY_2], ["button", JOY_BUTTON_DPAD_UP]],
 	["pip_wep", "Power to weapons", [KEY_3], ["button", JOY_BUTTON_DPAD_RIGHT]],
@@ -45,6 +45,23 @@ const ACTIONS := [
 	["nav_map", "Navigation map", [KEY_M], ["button", JOY_BUTTON_BACK]],
 	["chat", "Chat", [KEY_ENTER], ["button", JOY_BUTTON_GUIDE]],
 	["menu", "Settings", [KEY_ESCAPE], ["button", JOY_BUTTON_START]],
+	# On foot, inside a facility.
+	["foot_forward", "On foot: forward", [KEY_W], ["axis", JOY_AXIS_LEFT_Y, -1]],
+	["foot_back", "On foot: back", [KEY_S], ["axis", JOY_AXIS_LEFT_Y, 1]],
+	["foot_left", "On foot: step left", [KEY_A], ["axis", JOY_AXIS_LEFT_X, -1]],
+	["foot_right", "On foot: step right", [KEY_D], ["axis", JOY_AXIS_LEFT_X, 1]],
+	["foot_look_left", "On foot: look left", [KEY_LEFT], ["axis", JOY_AXIS_RIGHT_X, -1]],
+	["foot_look_right", "On foot: look right", [KEY_RIGHT], ["axis", JOY_AXIS_RIGHT_X, 1]],
+	["foot_look_up", "On foot: look up", [KEY_UP], ["axis", JOY_AXIS_RIGHT_Y, -1]],
+	["foot_look_down", "On foot: look down", [KEY_DOWN], ["axis", JOY_AXIS_RIGHT_Y, 1]],
+	["foot_sprint", "On foot: sprint", [KEY_SHIFT], ["button", JOY_BUTTON_LEFT_STICK]],
+	["foot_crouch", "On foot: crouch (quiet)", [KEY_C], ["button", JOY_BUTTON_B]],
+	["foot_jump", "On foot: jump", [KEY_SPACE], ["button", JOY_BUTTON_Y]],
+	["foot_fire", "On foot: fire", ["mouse", MOUSE_BUTTON_LEFT], ["axis", JOY_AXIS_TRIGGER_RIGHT, 1]],
+	["foot_aim", "On foot: aim down sights", ["mouse", MOUSE_BUTTON_RIGHT], ["axis", JOY_AXIS_TRIGGER_LEFT, 1]],
+	["foot_reload", "On foot: reload", [KEY_R], ["button", JOY_BUTTON_X]],
+	["foot_heal", "On foot: use a trauma kit", [KEY_H], ["button", JOY_BUTTON_DPAD_UP]],
+	["foot_inventory", "On foot: inventory", [KEY_TAB], ["button", JOY_BUTTON_BACK]],
 ]
 
 # Names on a standard gamepad. A HOTAS shows up as its own buttons and axes, named by number past these.

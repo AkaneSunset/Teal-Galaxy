@@ -194,7 +194,7 @@ func _draw_map() -> void:
 
 	for it in _visible_items():
 		var p := _to_screen(it.pos)
-		var col: Color = {"landmark": colour, "waypoint": Color(1.0, 0.75, 0.3), "pilot": Color(0.95, 0.45, 0.65)}.get(it.kind, colour)
+		var col: Color = {"landmark": colour, "waypoint": Color(1.0, 0.75, 0.3), "pilot": Color(0.95, 0.45, 0.65), "facility": Color(1.0, 0.45, 0.35)}.get(it.kind, colour)
 		var r := 5.0
 		if it.has("radius") and level == Level.SYSTEM:
 			r = clampf(it.radius / mpp, 4.0, 40.0)

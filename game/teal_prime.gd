@@ -31,6 +31,12 @@ const PORT_NAME := "Aster High Port"
 const FIELD_NAME := "Aster Ice Field"
 
 
+## Facilities a Builder builds on Aster orbit in a ring 25 km around the Spaceport, one per slot.
+static func facility_pos(slot: int) -> Array:
+	var a := slot * TAU / 6.0
+	return [PORT_POS[0] + cos(a) * 25_000.0, PORT_POS[1] + (slot % 2) * 1_500.0, PORT_POS[2] + sin(a) * 25_000.0]
+
+
 static func bodies() -> Array:
 	return [STAR] + PLANETS
 

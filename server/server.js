@@ -65,7 +65,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   }
 
   function sendInventory(run) {
-    toRaider(run, { ev: 'inventory', items: H.inventoryView(run).map((it) => ({ ...H.publicItem(it), grid: it.grid, rect: it.rect })) });
+    toRaider(run, { ev: 'inventory', items: H.inventoryView(run) });
   }
 
   function sendHeat(run) {
@@ -194,7 +194,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (msg.type === 'hello') {
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      send(ws, { type: 'welcome', id: me.id, name: me.name, state: galaxy });
+      const catalog = { items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
+      send(ws, { type: 'welcome', id: me.id, name: me.name, state: galaxy, catalog });
       // Back after a dropped connection mid-raid: pick up where the run is.
       const run = me.role === 'explorer' && runs.get(me.name);
       if (run) {
