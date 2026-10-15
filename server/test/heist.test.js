@@ -266,7 +266,7 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     assert.ok(fac.vault.isotope < 5, 'the Builder lost what was carried out');
     assert.strictEqual(after.state.raidLog[0].outcome, 'extracted');
 
-    server.galaxy.stock.metal = 100;
+    server.galaxy.bases.Akane.stock.metal = 100;
     phone.send({ type: 'build', planet: 'aster', slot: 0, building: 'spaceport' });
     await pc.next((m) => m.type === 'state' && m.state.system.planets[0].buildings.length === 2);
     pc.send({ type: 'sell' });

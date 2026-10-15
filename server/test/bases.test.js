@@ -1,0 +1,55 @@
+// Every Builder owns a home planet with its own economy.
+
+const test = require('node:test');
+const assert = require('node:assert');
+const G = require('../galaxy');
+
+test('the first Builder takes Aster and its starting economy; the next founds a new planet', () => {
+  const g = G.newGalaxy();
+  g.stock.metal = 77;
+  const a = G.claimBase(g, 'Akane');
+  assert.strictEqual(a.id, 'aster');
+  assert.strictEqual(g.bases.Akane.stock.metal, 77);
+  const b = G.claimBase(g, 'Rin');
+  assert.notStrictEqual(b.id, 'aster');
+  assert.strictEqual(b.owner, 'Rin');
+  assert.strictEqual(g.bases.Rin.stock.metal, 60);
+  assert.strictEqual(G.claimBase(g, 'Rin'), b, 'claiming again returns the same planet');
+  assert.strictEqual(g.system.planets.length, 2);
+});
+
+test('each base pays for, builds and earns on its own planet only', () => {
+  const g = G.newGalaxy();
+  G.claimBase(g, 'Akane');
+  const rin = G.claimBase(g, 'Rin');
+  assert.ok(G.owns(g, 'Rin', rin.id));
+  assert.ok(!G.owns(g, 'Rin', 'aster'));
+
+  assert.ok(G.build(g, rin.id, 0, 'mine').ok);
+  assert.strictEqual(g.bases.Rin.stock.metal, 50);
+  assert.strictEqual(g.bases.Akane.stock.metal, 60);
+  G.tick(g);
+  assert.strictEqual(g.bases.Rin.stock.metal, 51);
+  assert.strictEqual(g.bases.Akane.stock.metal, 60);
+
+  // A Spaceport on Aster doesn't let Rin build a Foundry or post jobs.
+  assert.ok(G.build(g, 'aster', 0, 'spaceport').ok);
+  assert.match(G.build(g, rin.id, 1, 'foundry').reason, /Spaceport first/);
+  assert.match(G.postJob(g, 'ice', 10, 100, rin.id).reason, /Spaceport first/);
+});
+
+test('deliveries land in the stock of the base that posted the job', () => {
+  const g = G.newGalaxy();
+  G.claimBase(g, 'Akane');
+  const rin = G.claimBase(g, 'Rin');
+  g.bases.Rin.stock.metal = 100;
+  G.build(g, rin.id, 0, 'spaceport');
+  const { job } = G.postJob(g, 'ice', 10, 100, rin.id);
+  assert.strictEqual(g.bases.Rin.credits, 400);
+  for (let i = 0; i < 2; i++) G.collect(g, 'Pilot A', 'ice', 5);
+  assert.ok(G.deliver(g, 'Pilot A', job.id).ok);
+  assert.strictEqual(g.bases.Rin.stock.ice, 10);
+  assert.strictEqual(g.bases.Akane.stock.ice, 0);
+  assert.ok(g.bases.Rin.unlocked.includes('hydroponics'));
+  assert.ok(!g.bases.Akane.unlocked.includes('hydroponics'));
+});

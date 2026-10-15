@@ -42,7 +42,7 @@ test('ships build one at a time, in order, and launch into the navy', () => {
   assert.strictEqual(g.navy.frigate, 0);
   G.tick(g, t + 60_000 + 180_000);
   assert.strictEqual(g.navy.frigate, 1);
-  assert.ok(g.feed.some((e) => e.text === 'Frigate launched from the Ship Foundry'));
+  assert.ok(g.feed.some((e) => e.text === 'Frigate launched from the Ship Foundry on Aster'));
 });
 
 test('costs, queue and hangar limits, and cancelling refunds', () => {

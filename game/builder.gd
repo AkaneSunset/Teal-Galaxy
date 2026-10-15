@@ -614,7 +614,7 @@ func _build_drawer(layer: Control) -> void:
 	_yard_queue.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_yard_cancel = Button.new()
 	_yard_cancel.text = "Cancel last in queue (full refund)"
-	_yard_cancel.pressed.connect(func(): Net.send({"type": "cancel_ship", "planet": "aster", "slot": _foundry_slot()}))
+	_yard_cancel.pressed.connect(func(): Net.send({"type": "cancel_ship", "planet": _pid(), "slot": _foundry_slot()}))
 	yard.add_child(_yard_cancel)
 	_yard_ships = VBoxContainer.new()
 	_yard_ships.add_theme_constant_override("separation", 8)
@@ -805,7 +805,7 @@ func _set_placing(type: String) -> void:
 
 
 func _on_banner() -> void:
-	var raids: Array = Net.state.get("raids", [])
+	var raids := _my_raids()
 	if raids.is_empty():
 		return
 	var slot := int(raids[0].slot)
@@ -815,11 +815,11 @@ func _on_banner() -> void:
 
 
 func _send_job() -> void:
-	Net.send({"type": "post_job", "resource": JOB.resource, "amount": JOB.amount, "reward": JOB.reward})
+	Net.send({"type": "post_job", "planet": _pid(), "resource": JOB.resource, "amount": JOB.amount, "reward": JOB.reward})
 
 
 func _build(slot: int, type: String) -> void:
-	Net.send({"type": "build", "planet": "aster", "slot": slot, "building": type})
+	Net.send({"type": "build", "planet": _pid(), "slot": slot, "building": type})
 
 
 func _shop_pick(type: String) -> void:
@@ -833,7 +833,22 @@ func _shop_pick(type: String) -> void:
 # --- State -------------------------------------------------------------------------------
 
 func _planet() -> Dictionary:
-	return Net.state.system.planets[0] if not Net.state.is_empty() else {}
+	return Net.my_planet()
+
+
+## The id of this Builder's home planet.
+func _pid() -> String:
+	return str(_planet().get("id", "aster"))
+
+
+## This Builder's economy: stock, credits, population, unlocks and navy.
+func _econ() -> Dictionary:
+	return Net.my_economy()
+
+
+## Live raids on this Builder's planet.
+func _my_raids() -> Array:
+	return Net.state.get("raids", []).filter(func(r): return r.planet == _pid())
 
 
 func _building_at(slot: int) -> Dictionary:
@@ -867,20 +882,21 @@ func _cost_text(cost: Dictionary) -> String:
 
 func _can_afford(cost: Dictionary) -> bool:
 	for id in cost:
-		var have := float(Net.state.credits) if id == "credits" else float(Net.state.stock.get(id, 0))
+		var have := float(_econ().credits) if id == "credits" else float(_econ().stock.get(id, 0))
 		if have < float(cost[id]):
 			return false
 	return true
 
 
 func _refresh(state: Dictionary) -> void:
-	var stock: Dictionary = state.stock
+	var e := _econ()
+	var stock: Dictionary = e.stock
 	_title.text = state.system.name
-	_subtitle.text = "Planet %s" % state.system.planets[0].name
-	_stock.credits.text = str(int(state.credits))
+	_subtitle.text = "Planet %s" % _planet().get("name", "")
+	_stock.credits.text = str(int(e.credits))
 	_stock.metal.text = str(int(stock.metal))
 	_stock.ice.text = str(int(stock.get("ice", 0)))
-	_stock.population.text = str(int(state.population))
+	_stock.population.text = str(int(e.population))
 	_stock.navy.text = str(_fleet_size(state))
 	var goods := []
 	for id in stock:
@@ -907,7 +923,7 @@ func _refresh_pads(state: Dictionary) -> void:
 	for i in _pads.size():
 		var p: Dictionary = _pads[i]
 		var b := _building_at(i)
-		var raid := Net.raid_on("aster", i) if not b.is_empty() else {}
+		var raid := Net.raid_on(_pid(), i) if not b.is_empty() else {}
 		var key := ""
 		if not b.is_empty():
 			key = "%s:%d" % [b.type, int(b.get("security", 0))]
@@ -975,7 +991,7 @@ func _refresh_selection(state: Dictionary) -> void:
 		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
 		if b.type == "spaceport":
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
-				"disabled": not Net.open_job().is_empty()})
+				"disabled": not Net.open_job(_pid()).is_empty()})
 		if b.type == "foundry":
 			var building: Array = b.get("queue", [])
 			acts.append({"id": "shipyard", "icon": "ship_emblem",
@@ -992,8 +1008,8 @@ func _refresh_selection(state: Dictionary) -> void:
 			var next: Dictionary = Net.catalog.security.get(str(int(b.security) + 1), {})
 			if not next.is_empty():
 				acts.append({"id": "upgrade", "icon": "rank", "text": "Tier %d" % (int(b.security) + 1),
-					"disabled": not Net.raid_on("aster", _selected).is_empty() or not _can_afford(next.cost)})
-			if not Net.raid_on("aster", _selected).is_empty():
+					"disabled": not Net.raid_on(_pid(), _selected).is_empty() or not _can_afford(next.cost)})
+			if not Net.raid_on(_pid(), _selected).is_empty():
 				var alarm_wait := (float(b.alarmReadyAt) - now) / 1000.0
 				acts.append({"id": "alarm", "icon": "alarm", "disabled": alarm_wait > 0, "danger": true,
 					"text": "Alarm (%d cr)" % Net.catalog.alarmCost if alarm_wait <= 0 else "Alarm %ds" % ceili(alarm_wait)})
@@ -1036,11 +1052,11 @@ func _on_action(id: String) -> void:
 		"shipyard":
 			_toggle_page("shipyard")
 		"ship":
-			Net.send({"type": "ship_cargo", "planet": "aster", "slot": _selected})
+			Net.send({"type": "ship_cargo", "planet": _pid(), "slot": _selected})
 		"upgrade":
-			Net.send({"type": "upgrade_security", "planet": "aster", "slot": _selected})
+			Net.send({"type": "upgrade_security", "planet": _pid(), "slot": _selected})
 		"alarm":
-			Net.send({"type": "sound_alarm", "planet": "aster", "slot": _selected})
+			Net.send({"type": "sound_alarm", "planet": _pid(), "slot": _selected})
 
 
 func _refresh_shop(state: Dictionary) -> void:
@@ -1059,9 +1075,9 @@ func _refresh_shop(state: Dictionary) -> void:
 		card.add_theme_constant_override("icon_max_width", 72)
 		card.add_theme_font_size_override("font_size", 14)
 		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		var locked: bool = type not in state.unlocked
+		var locked: bool = type not in _econ().unlocked
 		var why := "Locked: needs ice in stock" if locked else ""
-		if not locked and info.has("needs") and not Net.has_building(info.needs):
+		if not locked and info.has("needs") and not Net.has_building(info.needs, _pid()):
 			why = "Needs a %s" % BUILDING_INFO[info.needs].name
 		if not locked and info.has("limit") and _count(type) >= int(info.limit):
 			why = "Already built"
@@ -1103,7 +1119,7 @@ func _refresh_info(state: Dictionary) -> void:
 		var next: Dictionary = Net.catalog.security.get(str(tier + 1), {})
 		if not next.is_empty():
 			lines.append("Tier %d costs %s" % [tier + 1, _cost_text(next.cost)])
-		var raid := Net.raid_on("aster", _selected)
+		var raid := Net.raid_on(_pid(), _selected)
 		if not raid.is_empty():
 			lines.append("INTRUDER: %s is inside. Heat %d." % [raid.pilot, raid.heat])
 		elif float(b.cooldownUntil) > now:
@@ -1113,16 +1129,15 @@ func _refresh_info(state: Dictionary) -> void:
 
 func _count(type: String) -> int:
 	var n := 0
-	for planet in Net.state.system.planets:
-		for b in planet.buildings:
-			if b.type == type:
-				n += 1
+	for b in _planet().get("buildings", []):
+		if b.type == type:
+			n += 1
 	return n
 
 
 func _fleet_size(state: Dictionary) -> int:
 	var n := 0
-	var navy: Dictionary = state.get("navy", {})
+	var navy: Dictionary = _econ().get("navy", {})
 	for id in navy:
 		n += int(navy[id])
 	return n
@@ -1142,7 +1157,7 @@ func _refresh_shipyard(state: Dictionary) -> void:
 	var ships: Dictionary = Net.catalog.get("ships", {})
 	var slot := _foundry_slot()
 	var queue: Array = _building_at(slot).get("queue", []) if slot >= 0 else []
-	var navy: Dictionary = state.get("navy", {})
+	var navy: Dictionary = _econ().get("navy", {})
 	var fleet := []
 	for id in ships:
 		fleet.append("%d %s" % [int(navy.get(id, 0)), ships[id].name + ("s" if int(navy.get(id, 0)) != 1 else "")])
@@ -1169,7 +1184,7 @@ func _refresh_shipyard(state: Dictionary) -> void:
 			btn.icon = load(ICONS + "ship_emblem.png")
 			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			btn.pressed.connect(func(): Net.send({"type": "queue_ship", "planet": "aster", "slot": _foundry_slot(), "ship": id}))
+			btn.pressed.connect(func(): Net.send({"type": "queue_ship", "planet": _pid(), "slot": _foundry_slot(), "ship": id}))
 			_yard_ships.add_child(btn)
 			_yard_buttons[id] = btn
 		var btn: Button = _yard_buttons[id]
@@ -1179,9 +1194,9 @@ func _refresh_shipyard(state: Dictionary) -> void:
 
 
 func _refresh_jobs(state: Dictionary) -> void:
-	_post_job.disabled = not Net.has_building("spaceport") or not Net.open_job().is_empty()
+	_post_job.disabled = not Net.has_building("spaceport", _pid()) or not Net.open_job(_pid()).is_empty()
 	var lines := []
-	for job in state.jobs:
+	for job in state.jobs.filter(func(j): return j.get("planet", "aster") == _pid()):
 		lines.append("#%d  %s %d/%d  (%d cr)  %s" % [job.id, job.resource, job.delivered, job.amount, job.reward, job.status])
 	_jobs.text = "\n".join(lines) if lines else "No jobs yet. Build a Spaceport, then post one."
 
@@ -1189,7 +1204,7 @@ func _refresh_jobs(state: Dictionary) -> void:
 func _refresh_raids(state: Dictionary) -> void:
 	var lines := []
 	var levels: Array = Net.catalog.get("heatLevels", [])
-	var live: Array = state.get("raids", [])
+	var live := _my_raids()
 	for r in live:
 		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
 		lines.append("INTRUDER: %s inside %s\nHeat %d (%s)%s, %d:%02d left" % [r.pilot, r.facility, r.heat,

@@ -196,7 +196,13 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
       const catalog = { ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
-      send(ws, { type: 'welcome', id: me.id, name: me.name, state: galaxy, catalog });
+      // A Builder gets their own home planet the first time they connect.
+      const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
+      send(ws, { type: 'welcome', id: me.id, name: me.name, home, state: galaxy, catalog });
+      if (home) {
+        broadcast({ type: 'state', state: galaxy }, ws); // the new Builder already has it
+        save();
+      }
       // Back after a dropped connection mid-raid: pick up where the run is.
       const run = me.role === 'explorer' && runs.get(me.name);
       if (run) {
@@ -207,13 +213,20 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     }
     if (!me.role) return send(ws, { type: 'error', reason: 'say hello first' });
 
+    // Builders can only manage their own planets.
+    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship'];
+    if (MANAGE.includes(msg.type)) {
+      if (msg.type === 'post_job' && !msg.planet) msg.planet = galaxy.system.planets.find((p) => p.owner === me.name)?.id || 'aster';
+      if (!G.owns(galaxy, me.name, msg.planet)) return send(ws, { type: 'error', reason: 'that is not your planet' });
+    }
+
     let result = null;
     switch (msg.type) {
       case 'build':
         result = G.build(galaxy, msg.planet, msg.slot, msg.building);
         break;
       case 'post_job':
-        result = G.postJob(galaxy, msg.resource, msg.amount, msg.reward);
+        result = G.postJob(galaxy, msg.resource, msg.amount, msg.reward, msg.planet);
         break;
       case 'collect':
         result = G.collect(galaxy, me.name, msg.resource, msg.amount);

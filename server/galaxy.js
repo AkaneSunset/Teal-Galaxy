@@ -42,6 +42,60 @@ function newGalaxy() {
   };
 }
 
+// Each Builder owns a home planet and its own economy (stock, credits, population, unlocks, navy),
+// kept in g.bases by Builder name. A planet nobody has claimed yet uses the galaxy's own top-level
+// economy: that is how a fresh galaxy starts and how saves from before bases load.
+const PLANET_NAMES = ['Brisa', 'Corvo', 'Delmar', 'Eskar', 'Fenn', 'Galen', 'Hesper', 'Iridia', 'Juno', 'Kestra', 'Lumen', 'Mirren'];
+
+function newEconomy() {
+  return {
+    stock: { metal: 60, ice: 0 },
+    credits: 500,
+    population: 0,
+    unlocked: ['mine', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
+    navy: { corvette: 0, frigate: 0, destroyer: 0 },
+  };
+}
+
+// The economy that pays for and receives everything on a planet.
+function econ(g, planetId) {
+  const p = planet(g, planetId);
+  return (p && p.owner && g.bases?.[p.owner]) || g;
+}
+
+function owns(g, name, planetId) {
+  const p = planet(g, planetId);
+  return !!p && (!p.owner || p.owner === name);
+}
+
+// A Builder's home planet, claimed the first time they connect: Aster if nobody has it yet
+// (taking over the starting economy), otherwise a new planet with a fresh one.
+function claimBase(g, name) {
+  g.bases ||= {};
+  const mine = g.system.planets.find((p) => p.owner === name);
+  if (mine) return mine;
+  const aster = planet(g, 'aster');
+  if (aster && !aster.owner) {
+    aster.owner = name;
+    g.bases[name] = {
+      stock: g.stock,
+      credits: g.credits,
+      population: g.population,
+      unlocked: g.unlocked,
+      navy: g.navy || newEconomy().navy,
+    };
+    log(g, `${name} took charge of ${aster.name}`);
+    return aster;
+  }
+  const taken = new Set(g.system.planets.map((p) => p.name));
+  const pname = PLANET_NAMES.find((n) => !taken.has(n)) || `Colony ${g.system.planets.length + 1}`;
+  const p = { id: pname.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name: pname, owner: name, slots: 6, buildings: [] };
+  g.system.planets.push(p);
+  g.bases[name] = newEconomy();
+  log(g, `${name} founded a base on ${pname}`);
+  return p;
+}
+
 function fail(reason) {
   return { ok: false, reason };
 }
@@ -55,8 +109,10 @@ function planet(g, planetId) {
   return g.system.planets.find((p) => p.id === planetId);
 }
 
-function hasBuilding(g, type) {
-  return g.system.planets.some((p) => p.buildings.some((b) => b.type === type));
+// Whether any planet has this building, or with `planetId`, whether that planet's owner does.
+function hasBuilding(g, type, planetId = null) {
+  const owner = planetId && planet(g, planetId)?.owner;
+  return g.system.planets.some((p) => (!planetId || p.owner === owner) && p.buildings.some((b) => b.type === type));
 }
 
 function build(g, planetId, slot, type) {
@@ -64,43 +120,47 @@ function build(g, planetId, slot, type) {
   const def = BUILDINGS[type];
   if (!p) return fail('no such planet');
   if (!def) return fail('no such building');
-  if (!g.unlocked.includes(type)) return fail(`${def.name} is locked`);
+  const e = econ(g, planetId);
+  if (!e.unlocked.includes(type)) return fail(`${def.name} is locked`);
   if (!Number.isInteger(slot) || slot < 0 || slot >= p.slots) return fail('bad slot');
   if (p.buildings.some((b) => b.slot === slot)) return fail('slot taken');
-  if (def.needsBuilding && !hasBuilding(g, def.needsBuilding)) return fail(`build a ${BUILDINGS[def.needsBuilding].name} first`);
-  if (def.limit && g.system.planets.reduce((n, q) => n + q.buildings.filter((x) => x.type === type).length, 0) >= def.limit)
+  if (def.needsBuilding && !hasBuilding(g, def.needsBuilding, planetId)) return fail(`build a ${BUILDINGS[def.needsBuilding].name} first`);
+  if (def.limit && g.system.planets.reduce((n, q) => n + (q.owner === p.owner ? q.buildings.filter((x) => x.type === type).length : 0), 0) >= def.limit)
     return fail(`you already have a ${def.name}`);
-  const err = pay(g, def.cost);
+  const err = pay(e, def.cost);
   if (err) return fail(err);
   const b = { slot, type };
   if (def.facility) Object.assign(b, { security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
   if (type === 'foundry') b.queue = [];
   p.buildings.push(b);
-  if (type === 'habitat') g.population += POPULATION_PER_HABITAT;
+  if (type === 'habitat') e.population += POPULATION_PER_HABITAT;
   log(g, `${def.name} built on ${p.name}`);
   return { ok: true };
 }
 
-// Takes a cost ({resource: amount}, where `credits` means the wallet) or says what is short.
-function pay(g, cost) {
+// Takes a cost ({resource: amount}, where `credits` means the wallet) from an economy,
+// or says what is short.
+function pay(e, cost) {
   for (const [res, amount] of Object.entries(cost)) {
-    const have = res === 'credits' ? g.credits : g.stock[res] || 0;
+    const have = res === 'credits' ? e.credits : e.stock[res] || 0;
     if (have < amount) return `not enough ${res === 'credits' ? 'credits' : H.ITEMS[res]?.name || res}`;
   }
   for (const [res, amount] of Object.entries(cost)) {
-    if (res === 'credits') g.credits -= amount;
-    else g.stock[res] -= amount;
+    if (res === 'credits') e.credits -= amount;
+    else e.stock[res] -= amount;
   }
   return null;
 }
 
-function postJob(g, resource, amount, reward) {
-  if (!hasBuilding(g, 'spaceport')) return fail('build a Spaceport first');
+function postJob(g, resource, amount, reward, planetId = g.system.planets[0].id) {
+  if (!hasBuilding(g, 'spaceport', planetId)) return fail('build a Spaceport first');
   if (!(amount > 0) || !(reward > 0)) return fail('bad job');
-  if (g.credits < reward) return fail('not enough credits');
-  g.credits -= reward; // held until the job completes
+  const e = econ(g, planetId);
+  if (e.credits < reward) return fail('not enough credits');
+  e.credits -= reward; // held until the job completes
   const job = {
     id: g.nextJobId++,
+    planet: planetId,
     resource,
     amount,
     reward,
@@ -138,7 +198,8 @@ function deliver(g, name, jobId) {
   p.cargo[job.resource] = have - give;
   job.delivered += give;
   job.contributions[name] = (job.contributions[name] || 0) + give;
-  g.stock[job.resource] = (g.stock[job.resource] || 0) + give;
+  const e = econ(g, job.planet || g.system.planets[0].id);
+  e.stock[job.resource] = (e.stock[job.resource] || 0) + give;
   log(g, `${name} delivered ${give} ${job.resource}`);
   if (job.delivered >= job.amount) completeJob(g, job);
   return { ok: true, given: give };
@@ -152,22 +213,26 @@ function completeJob(g, job) {
     p.reputation += 1;
   }
   log(g, `Job ${job.id} complete`);
-  if (job.resource === 'ice' && !g.unlocked.includes('hydroponics')) {
-    g.unlocked.push('hydroponics');
+  const e = econ(g, job.planet || g.system.planets[0].id);
+  if (job.resource === 'ice' && !e.unlocked.includes('hydroponics')) {
+    e.unlocked.push('hydroponics');
     log(g, 'Ice in stock: Hydroponics unlocked');
   }
 }
 
 function tick(g, now = Date.now()) {
   let changed = false;
-  for (const name of N.tick(g, now)) {
-    log(g, `${name} launched from the Ship Foundry`);
-    changed = true;
-  }
+  for (const p of g.system.planets)
+    for (const b of p.buildings)
+      if (b.type === 'foundry')
+        for (const name of N.tick(econ(g, p.id), b, now)) {
+          log(g, `${name} launched from the Ship Foundry on ${p.name}`);
+          changed = true;
+        }
   for (const p of g.system.planets) {
     for (const b of p.buildings) {
       if (b.type === 'mine') {
-        g.stock.metal += MINE_RATE;
+        econ(g, p.id).stock.metal += MINE_RATE;
         changed = true;
       }
       const fac = H.FACILITIES[b.type];
@@ -205,8 +270,9 @@ function ship(g, planetId, slot, now) {
   if (!goods.length) return fail('the vault is empty');
   const parts = [];
   for (const [item, qty] of goods) {
-    if (H.ITEMS[item].cat === 'intel') g.credits += H.ITEMS[item].value * qty;
-    else g.stock[item] = (g.stock[item] || 0) + qty;
+    const e = econ(g, planetId);
+    if (H.ITEMS[item].cat === 'intel') e.credits += H.ITEMS[item].value * qty;
+    else e.stock[item] = (e.stock[item] || 0) + qty;
     parts.push(`${qty} ${H.ITEMS[item].name}`);
     b.vault[item] = 0;
   }
@@ -222,7 +288,7 @@ function secure(g, planetId, slot) {
   const next = H.SECURITY[b.security + 1];
   if (!next) return fail('security is already at the top tier');
   if (g.raids.some((r) => r.planet === planetId && r.slot === slot)) return fail('not during a raid');
-  const err = pay(g, next.cost);
+  const err = pay(econ(g, planetId), next.cost);
   if (err) return fail(err);
   b.security += 1;
   log(g, `${facilityName(g, planetId, b)} security raised to tier ${b.security}`);
@@ -259,7 +325,7 @@ function alarm(g, planetId, slot, run, now) {
   if (!b) return fail('no such facility');
   if (!run) return fail('nobody is inside');
   if (now < b.alarmReadyAt) return fail(`alarm ready in ${Math.ceil((b.alarmReadyAt - now) / 1000)} s`);
-  const err = pay(g, { credits: H.ALARM_COST });
+  const err = pay(econ(g, planetId), { credits: H.ALARM_COST });
   if (err) return fail(err);
   b.alarmReadyAt = now + H.ALARM_COOLDOWN_MS;
   H.addHeat(run, H.ALARM_HEAT);
@@ -297,8 +363,12 @@ function endRaid(g, run, outcome, now) {
 function recoverRaids(g) {
   g.raids = [];
   g.raidLog ||= [];
-  N.ensure(g);
-  for (const type of ['refinery', 'lab', 'spire', 'foundry']) if (!g.unlocked.includes(type)) g.unlocked.push(type);
+  g.bases ||= {};
+  for (const e of [g, ...Object.values(g.bases)]) {
+    N.ensure(e);
+    for (const type of ['refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
+  }
+  for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
   for (const p of g.system.planets)
     for (const b of p.buildings) {
       if (!b.escrow) continue;
@@ -309,13 +379,20 @@ function recoverRaids(g) {
 
 // The Builder queues a warship at the Ship Foundry.
 function queueShip(g, planetId, slot, shipId, now) {
-  const r = N.queueShip(g, planetId, slot, shipId, now, (cost) => pay(g, cost));
+  const p = planet(g, planetId);
+  const b = p && p.buildings.find((x) => x.slot === slot && x.type === 'foundry');
+  if (!b) return fail('no Ship Foundry there');
+  const e = econ(g, planetId);
+  const r = N.queueShip(e, b, shipId, now, (cost) => pay(e, cost));
   if (r.ok) log(g, `${r.name} queued at the Ship Foundry`);
   return r;
 }
 
 function cancelShip(g, planetId, slot) {
-  const r = N.cancelShip(g, planetId, slot);
+  const p = planet(g, planetId);
+  const b = p && p.buildings.find((x) => x.slot === slot && x.type === 'foundry');
+  if (!b) return fail('nothing in the queue');
+  const r = N.cancelShip(econ(g, planetId), b);
   if (r.ok) log(g, `${r.name} cancelled and refunded`);
   return r;
 }
@@ -351,4 +428,7 @@ module.exports = {
   sell,
   queueShip,
   cancelShip,
+  claimBase,
+  econ,
+  owns,
 };

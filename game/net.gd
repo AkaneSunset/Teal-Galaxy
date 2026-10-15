@@ -16,6 +16,8 @@ var state: Dictionary = {}
 var catalog: Dictionary = {}
 var my_id := 0
 var my_name := ""
+## A Builder's home planet id, from the server (empty for Explorers).
+var home := ""
 ## The last ship position exactly as the server sent it (64-bit numbers, metres from the star).
 var last_ship_pos: Array = []
 
@@ -78,6 +80,7 @@ func _handle(msg: Dictionary) -> void:
 		"welcome":
 			my_id = int(msg.id)
 			my_name = msg.name
+			home = str(msg.get("home", "")) if msg.get("home") != null else ""
 			catalog = msg.get("catalog", {})
 			state = msg.state
 			state_changed.emit(state)
@@ -99,23 +102,25 @@ func _handle(msg: Dictionary) -> void:
 			server_error.emit(msg.reason)
 
 
-## True when any planet in the system has a building of this type.
-func has_building(type: String) -> bool:
+## True when any planet in the system (or just `planet_id`) has a building of this type.
+func has_building(type: String, planet_id := "") -> bool:
 	if state.is_empty():
 		return false
 	for planet in state.system.planets:
+		if planet_id != "" and planet.id != planet_id:
+			continue
 		for b in planet.buildings:
 			if b.type == type:
 				return true
 	return false
 
 
-## The first open job, or an empty Dictionary.
-func open_job() -> Dictionary:
+## The first open job (on `planet_id`, if given), or an empty Dictionary.
+func open_job(planet_id := "") -> Dictionary:
 	if state.is_empty():
 		return {}
 	for job in state.jobs:
-		if job.status == "open":
+		if job.status == "open" and (planet_id == "" or job.get("planet", "aster") == planet_id):
 			return job
 	return {}
 
@@ -148,3 +153,22 @@ func item_name(id: String) -> String:
 ## Server timestamps are milliseconds since 1970.
 func now_ms() -> float:
 	return Time.get_unix_time_from_system() * 1000.0
+
+
+## This Builder's home planet: the one the server gave them, else the first.
+func my_planet() -> Dictionary:
+	if state.is_empty():
+		return {}
+	for planet in state.system.planets:
+		if planet.id == home:
+			return planet
+	return state.system.planets[0]
+
+
+## This Builder's economy (stock, credits, population, unlocked, navy). Before bases existed,
+## or for a planet nobody has claimed, it is the galaxy's own top-level economy.
+func my_economy() -> Dictionary:
+	if state.is_empty():
+		return {}
+	var owner = my_planet().get("owner")
+	return state.get("bases", {}).get(owner, state) if owner != null else state
