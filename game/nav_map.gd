@@ -5,6 +5,8 @@ extends Control
 ## to delete it. Seen from above, with the ship's heading drawn as a line.
 
 const System := preload("res://teal_prime.gd")
+const PILOT_ICON := preload("res://ui/hud_icons/pilot.png")
+const TITLE_ICON := preload("res://ui/hud_icons/nav_map.png")
 
 signal route_changed(route: Array)
 signal waypoint_added
@@ -57,10 +59,20 @@ func _ready() -> void:
 	_area.gui_input.connect(_on_map_input)
 	row.add_child(_area)
 
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 10)
+	side_panel.add_child(title_row)
+	var pic := TextureRect.new()
+	pic.texture = TITLE_ICON
+	pic.custom_minimum_size = Vector2(32, 32)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.modulate = colour
+	title_row.add_child(pic)
 	var title := Label.new()
 	title.text = "Navigation"
 	title.add_theme_font_size_override("font_size", 24)
-	side_panel.add_child(title)
+	title_row.add_child(title)
 	var levels := HBoxContainer.new()
 	side_panel.add_child(levels)
 	for l in [["Local", Level.LOCAL], ["System", Level.SYSTEM], ["Galactic", Level.GALACTIC]]:
@@ -204,12 +216,14 @@ func _draw_map() -> void:
 			_area.draw_circle(p, r, col)
 		_area.draw_string(font, p + Vector2(r + 6, 5), it.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
 
-	# The ship, with a line along its heading.
+	# The ship: an arrow pointing along its heading.
 	var s := _to_screen(ship_pos)
-	var h := Vector2(ship_heading.x, ship_heading.z).normalized()
-	_area.draw_line(s, s + h * 28.0, Color.WHITE, 2.0)
-	_area.draw_circle(s, 5, Color.WHITE)
-	_area.draw_string(font, s + Vector2(10, -8), "You", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+	var h := Vector2(ship_heading.x, ship_heading.z)
+	var angle := h.angle() + PI / 2 if h.length() > 0.001 else 0.0
+	_area.draw_set_transform(s, angle)
+	_area.draw_texture_rect(PILOT_ICON, Rect2(-12, -12, 24, 24), false, Color.WHITE)
+	_area.draw_set_transform(Vector2.ZERO)
+	_area.draw_string(font, s + Vector2(16, -8), "You", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
 
 
 func _on_map_input(event: InputEvent) -> void:
