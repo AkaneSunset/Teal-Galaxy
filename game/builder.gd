@@ -1033,8 +1033,9 @@ func _refresh(state: Dictionary) -> void:
 	for id in stock:
 		if id not in ["metal", "ice"] and int(stock[id]) > 0:
 			goods.append("%s %d" % [Net.item_name(id), stock[id]])
-	_goods.text = "   ".join(goods)
-	_goods.visible = not goods.is_empty()
+	var income := _income_text()
+	_goods.text = "\n".join([income, "   ".join(goods)].filter(func(l): return l != ""))
+	_goods.visible = _goods.text != ""
 
 	_follow_new_site()
 	if _view != "" and Net.planet(_view).is_empty():
@@ -1467,6 +1468,20 @@ func _refresh_info(state: Dictionary) -> void:
 		elif float(b.cooldownUntil) > now:
 			lines.append("Guards on alert after a raid: no one can board for %d s" % ceili((float(b.cooldownUntil) - now) / 1000.0))
 	_info.text = "\n\n".join(lines)
+
+
+## What the home planet's buildings earn a minute, e.g. "+12 metal  +2 ice  +12 credits a minute".
+func _income_text() -> String:
+	var per_tick := {}
+	var produces: Dictionary = Net.catalog.get("produces", {})
+	for b in Net.my_planet().get("buildings", []):
+		for res in produces.get(b.type, {}):
+			per_tick[res] = per_tick.get(res, 0.0) + float(produces[b.type][res])
+	var parts := []
+	for res in ["metal", "ice", "credits"]:
+		if per_tick.has(res):
+			parts.append("+%s %s" % [str(snappedf(per_tick[res] * 12.0, 0.1)).trim_suffix(".0"), res])
+	return ("  ".join(parts) + " a minute") if parts else ""
 
 
 func _count(type: String) -> int:
