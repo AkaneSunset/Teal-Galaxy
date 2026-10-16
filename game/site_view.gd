@@ -156,6 +156,12 @@ func _piece_model(p: Dictionary) -> Node3D:
 			BaseModels.Models.block(n, Vector3(4.6, 1.2, 4.6), "teal_light", Vector3(0, 6.6, 0), 0.3)
 			BaseModels.Models.block(n, Vector3(3.0, 0.5, 0.3), "amber", Vector3(0, 6.6, -2.35), 0.1)
 			BaseModels.Models.ball(n, 0.5, "amber", Vector3(0, 7.6, 0))
+		"power": # a generator with two cooling stacks and a glowing core
+			BaseModels.Models.block(n, Vector3(6.6, 0.8, 6.6), "navy", Vector3(0, 0.4, 0), 0.3)
+			BaseModels.Models.block(n, Vector3(4.4, 2.6, 3.0), "teal", Vector3(0, 2.1, 0.8), 0.4)
+			BaseModels.Models.ball(n, 1.1, "amber", Vector3(0, 3.6, 0.8))
+			for sx in [-1.6, 1.6]:
+				BaseModels.Models.block(n, Vector3(1.4, 4.2, 1.4), "teal_light", Vector3(sx, 2.9, -1.8), 0.3)
 	return n
 
 

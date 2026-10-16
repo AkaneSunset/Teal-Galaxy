@@ -1335,7 +1335,7 @@ func _refresh_shop(state: Dictionary) -> void:
 func _refresh_defence_shop() -> void:
 	_shop_hint.text = "  Defences for this site. Pick one, then tap the grid."
 	var pieces: Dictionary = Net.catalog.get("sites", {}).get("pieces", {})
-	var icons := {"turret": "rank", "wall": "vault", "guardpost": "pilot_arrow"}
+	var icons := {"turret": "rank", "wall": "vault", "guardpost": "pilot_arrow", "power": "crystal"}
 	for type in pieces:
 		var def: Dictionary = pieces[type]
 		var card := Button.new()
@@ -1348,6 +1348,10 @@ func _refresh_defence_shop() -> void:
 		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		card.text = "%s  (%dx%d)\n%s\nAttack %d  Hull %d" % [def.name, def.w, def.h, _cost_text(def.cost), def.attack, def.hull]
 		card.disabled = not _can_afford(def.cost)
+		if def.has("max"):
+			var have: int = _planet().get("pieces", []).filter(func(p): return p.type == type).size()
+			card.text += "\n%d per site" % int(def.max)
+			card.disabled = card.disabled or have >= int(def.max)
 		card.pressed.connect(_shop_pick.bind(type))
 		_shop_cards.add_child(card)
 

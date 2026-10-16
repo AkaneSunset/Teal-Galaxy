@@ -82,6 +82,8 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   assert.match(G.placePiece(g, site.id, 'turret', 11, 0).reason, /edge/);
   assert.ok(G.placePiece(g, site.id, 'wall', 2, 0).ok);
   assert.deepStrictEqual(S.defence(site), { attack: 4, hull: 30 });
+  assert.ok(G.placePiece(g, site.id, 'power', 0, 10).ok);
+  assert.match(G.placePiece(g, site.id, 'power', 10, 10).reason, /only 1 Power plant per site/);
 
   const metal = e.stock.metal;
   assert.ok(G.removePiece(g, site.id, site.pieces[0].id).ok);

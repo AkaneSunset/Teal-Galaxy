@@ -11,6 +11,9 @@ const PIECES = {
   turret: { name: 'Turret', w: 2, h: 2, cost: { metal: 20, alloy: 5 }, attack: 4, hull: 20, seconds: 30 },
   wall: { name: 'Wall', w: 1, h: 1, cost: { metal: 5 }, attack: 0, hull: 10, seconds: 5 },
   guardpost: { name: 'Guard post', w: 2, h: 2, cost: { metal: 15 }, attack: 1, hull: 15, seconds: 20 },
+  // Powers the facility's main door. Raiders who knock it out walk in the front; without one the
+  // door stays sealed and the only way in is a vent.
+  power: { name: 'Power plant', w: 2, h: 2, cost: { metal: 25 }, attack: 0, hull: 25, seconds: 45, max: 1 },
 };
 
 // Obstacles a new site comes with, cleared for credits like Clash of Clans' rocks and trees.
@@ -102,6 +105,7 @@ function place(site, type, x, y, pay, now = Date.now(), speed = 1) {
   if (x < 0 || y < 0 || x + def.w > GRID || y + def.h > GRID) return fail('off the edge of the site');
   if (overlaps(r, coreRect())) return fail('the facility is there');
   if (taken(site, r)) return fail('something is already there');
+  if (def.max && site.pieces.filter((p) => p.type === type).length >= def.max) return fail(`only ${def.max} ${def.name} per site`);
   const err = pay(def.cost);
   if (err) return fail(err);
   const piece = { id: site.nextPiece++, type, x, y };
