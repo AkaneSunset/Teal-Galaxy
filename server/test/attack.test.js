@@ -12,6 +12,7 @@ function twoBuilders() {
   g.bases.Rin.stock.metal = 500;
   g.bases.Rin.stock.alloy = 50;
   const { site } = G.foundSite(g, 'Rin', 'refinery');
+  site.obstacles = []; // a clear site, so defences go where the test puts them
   site.buildings[0].vault = { alloy: 10, isotope: 3 };
   return { g, site };
 }

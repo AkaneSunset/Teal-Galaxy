@@ -15,6 +15,7 @@ var _highlight: MeshInstance3D
 var _raid_light: OmniLight3D
 var _label: Label3D
 var _pieces := [] # copies of the site's pieces, for picking
+var _obstacles := [] # boulders, ice and wreckage the Builder pays to clear
 var _clock := 0.0
 
 
@@ -57,8 +58,9 @@ func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int) -
 	var c: Dictionary = Net.catalog.get("sites", {}).get("core", {"w": 4, "h": 4})
 	core = Rect2i((grid - int(c.w)) / 2, (grid - int(c.h)) / 2, int(c.w), int(c.h))
 	_pieces = site.get("pieces", [])
+	_obstacles = site.get("obstacles", [])
 	var b: Dictionary = site.buildings[0] if site.buildings else {}
-	var key := JSON.stringify([site.id, b.get("type", ""), tier_turrets, _pieces])
+	var key := JSON.stringify([site.id, b.get("type", ""), tier_turrets, _pieces, _obstacles])
 	if key != _key:
 		_key = key
 		_rebuild(b.get("type", ""), tier_turrets)
@@ -115,6 +117,8 @@ func _rebuild(type: String, tier_turrets: int) -> void:
 
 	for p in _pieces:
 		_content.add_child(_piece_model(p))
+	for o in _obstacles:
+		_content.add_child(_obstacle_model(o))
 
 
 func _piece_model(p: Dictionary) -> Node3D:
@@ -142,6 +146,40 @@ func _piece_model(p: Dictionary) -> Node3D:
 	return n
 
 
+func _obstacle_model(o: Dictionary) -> Node3D:
+	var r := obstacle_rect(o)
+	var n := Node3D.new()
+	n.position = rect_centre(r)
+	var spin := float(int(o.id) * 47 % 360)
+	match o.type:
+		"boulder":
+			var rock := BaseModels.boulder(3.4, int(o.id))
+			rock.rotation_degrees.y = spin
+			n.add_child(rock)
+			var small := BaseModels.boulder(1.6, int(o.id) + 7)
+			small.position = Vector3(2.4, 0, 1.8)
+			n.add_child(small)
+		"crystals":
+			for i in 3:
+				var c := Node3D.new()
+				c.position = Vector3(cos(i * 2.1), 0, sin(i * 2.1)) * 0.7
+				c.rotation_degrees = Vector3(12 - i * 9, spin + i * 50, 10 + i * 6)
+				c.scale = Vector3.ONE * 1.7
+				BaseModels.Models.drum(c, 0.45 - i * 0.08, 2.6 - i * 0.6, "ice", Vector3(0, 1.2 - i * 0.3, 0), Vector3.ZERO, 6)
+				n.add_child(c)
+		"wreck":
+			BaseModels.Models.block(n, Vector3(6.0, 1.6, 2.6), "navy", Vector3(0, 0.6, 0), 0.4, Vector3(0, 0, 8))
+			BaseModels.Models.block(n, Vector3(2.6, 1.2, 2.2), "teal", Vector3(1.6, 1.6, 0.2), 0.3, Vector3(14, 20, -10))
+			BaseModels.Models.block(n, Vector3(0.4, 3.2, 0.4), "steel", Vector3(-1.8, 1.8, 0), 0.05, Vector3(0, 0, -28))
+			BaseModels.Models.block(n, Vector3(1.2, 0.3, 0.8), "amber", Vector3(-0.6, 1.5, -1.0), 0.05, Vector3(0, 30, 0))
+	return n
+
+
+func obstacle_rect(o: Dictionary) -> Rect2i:
+	var def: Dictionary = Net.catalog.sites.obstacles[o.type]
+	return Rect2i(int(o.x), int(o.y), int(def.w), int(def.h))
+
+
 func _flat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
@@ -164,7 +202,7 @@ func tile_at(world: Vector3) -> Vector2i:
 	return t
 
 
-## What sits on a tile: {"kind": "core"}, {"kind": "piece", "piece": {...}}, or {}.
+## What sits on a tile: {"kind": "core"}, {"kind": "piece", "piece": {...}}, {"kind": "obstacle", ...}, or {}.
 func what_at(t: Vector2i) -> Dictionary:
 	if core.has_point(t):
 		return {"kind": "core"}
@@ -172,6 +210,9 @@ func what_at(t: Vector2i) -> Dictionary:
 		var def: Dictionary = Net.catalog.sites.pieces[p.type]
 		if Rect2i(int(p.x), int(p.y), int(def.w), int(def.h)).has_point(t):
 			return {"kind": "piece", "piece": p}
+	for o in _obstacles:
+		if obstacle_rect(o).has_point(t):
+			return {"kind": "obstacle", "obstacle": o}
 	return {}
 
 

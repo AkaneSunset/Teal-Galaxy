@@ -328,6 +328,7 @@ function foundSite(g, owner, type) {
   const err = pay(e, def.cost);
   if (err) return fail(err);
   r.site.buildings.push({ slot: 0, type, security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
+  S.scatter(r.site);
   g.system.planets.push(r.site);
   log(g, `${owner} founded ${r.site.name}`);
   return { ok: true, site: r.site };
@@ -345,6 +346,15 @@ function placePiece(g, siteId, type, x, y) {
   const e = econ(g, siteId);
   const r = S.place(st, type, x, y, (cost) => pay(e, cost));
   if (r.ok) log(g, `${r.name} built at ${st.name}`);
+  return r;
+}
+
+function clearObstacle(g, siteId, obstacleId) {
+  const st = site(g, siteId);
+  if (!st) return fail('no such satellite site');
+  if (g.raids.some((r) => r.planet === siteId)) return fail('not during a raid');
+  const r = S.clear(st, obstacleId, econ(g, siteId));
+  if (r.ok) log(g, `${r.name} cleared at ${st.name}`);
   return r;
 }
 
@@ -466,6 +476,7 @@ function recoverRaids(g) {
     for (const type of ['extractor', 'refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
   }
   for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
+  for (const p of g.system.planets) if (p.kind === 'satellite' && !p.obstacles) S.scatter(p); // sites from before obstacles
   for (const p of g.system.planets)
     for (const b of p.buildings) {
       if (!b.escrow) continue;
@@ -623,6 +634,7 @@ module.exports = {
   foundSite,
   placePiece,
   removePiece,
+  clearObstacle,
   econ,
   owns,
 };

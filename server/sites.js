@@ -13,6 +13,15 @@ const PIECES = {
   guardpost: { name: 'Guard post', w: 2, h: 2, cost: { metal: 15 }, attack: 1, hull: 15 },
 };
 
+// Obstacles a new site comes with, cleared for credits like Clash of Clans' rocks and trees.
+// Some leave salvage behind. They block placing defences until cleared.
+const OBSTACLES = {
+  boulder: { name: 'Boulder', w: 2, h: 2, clear: 120, salvage: { metal: 10 } },
+  crystals: { name: 'Ice crystals', w: 1, h: 1, clear: 40, salvage: { ice: 4 } },
+  wreck: { name: 'Old wreckage', w: 2, h: 1, clear: 200, salvage: { metal: 25, alloy: 2 } },
+};
+const SCATTER = ['boulder', 'boulder', 'boulder', 'wreck', 'wreck', 'crystals', 'crystals', 'crystals', 'crystals'];
+
 function fail(reason) {
   return { ok: false, reason };
 }
@@ -28,7 +37,7 @@ function overlaps(a, b) {
 }
 
 function pieceRect(p) {
-  const def = PIECES[p.type];
+  const def = PIECES[p.type] || OBSTACLES[p.type];
   return { x: p.x, y: p.y, w: def.w, h: def.h };
 }
 
@@ -53,10 +62,34 @@ function newSite(g, owner, home, facilityName) {
       slots: 1,
       grid: GRID,
       pieces: [],
+      obstacles: [],
       nextPiece: 1,
       buildings: [],
     },
   };
+}
+
+// Scatters the starting obstacles on free tiles, the same way every time for a given site id.
+function scatter(site) {
+  site.obstacles ||= [];
+  let seed = [...site.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const rand = (n) => {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    return (seed >>> 8) % n;
+  };
+  for (const type of SCATTER) {
+    const def = OBSTACLES[type];
+    for (let tries = 0; tries < 40; tries++) {
+      const r = { x: rand(GRID - def.w + 1), y: rand(GRID - def.h + 1), w: def.w, h: def.h };
+      if (overlaps(r, coreRect()) || taken(site, r)) continue;
+      site.obstacles.push({ id: site.nextPiece++, type, x: r.x, y: r.y });
+      break;
+    }
+  }
+}
+
+function taken(site, r) {
+  return [...site.pieces, ...(site.obstacles || [])].some((p) => overlaps(r, pieceRect(p)));
 }
 
 // Places a defence on a site's grid, or says why not. `pay` takes the cost or says what is short.
@@ -67,7 +100,7 @@ function place(site, type, x, y, pay) {
   const r = { x, y, w: def.w, h: def.h };
   if (x < 0 || y < 0 || x + def.w > GRID || y + def.h > GRID) return fail('off the edge of the site');
   if (overlaps(r, coreRect())) return fail('the facility is there');
-  if (site.pieces.some((p) => overlaps(r, pieceRect(p)))) return fail('something is already there');
+  if (taken(site, r)) return fail('something is already there');
   const err = pay(def.cost);
   if (err) return fail(err);
   const piece = { id: site.nextPiece++, type, x, y };
@@ -88,6 +121,18 @@ function remove(site, pieceId, e) {
   return { ok: true, name: PIECES[piece.type].name };
 }
 
+// Clears an obstacle for its price in credits from economy `e`; any salvage goes to its stock.
+function clear(site, obstacleId, e) {
+  const i = (site.obstacles || []).findIndex((o) => o.id === obstacleId);
+  if (i < 0) return fail('nothing there');
+  const def = OBSTACLES[site.obstacles[i].type];
+  if (e.credits < def.clear) return fail(`clearing the ${def.name} costs ${def.clear} credits`);
+  e.credits -= def.clear;
+  site.obstacles.splice(i, 1);
+  for (const [res, n] of Object.entries(def.salvage)) e.stock[res] = (e.stock[res] || 0) + n;
+  return { ok: true, name: def.name, salvage: def.salvage };
+}
+
 // Total attack and hull of a site's defences, for fleet attacks.
 function defence(site) {
   let attack = 0;
@@ -99,4 +144,4 @@ function defence(site) {
   return { attack, hull };
 }
 
-module.exports = { GRID, CORE, MAX_SITES, PIECES, coreRect, newSite, place, remove, defence };
+module.exports = { GRID, CORE, MAX_SITES, PIECES, OBSTACLES, coreRect, newSite, scatter, place, remove, clear, defence };

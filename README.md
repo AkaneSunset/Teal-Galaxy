@@ -60,6 +60,9 @@ jobs are still the fast way to get ice: one delivery is 10.
 planet (up to 3), opened from **Sites**. A site is a free 12x12 grid with the facility in the middle;
 Build opens the defence shop there: Turrets (2x2, 20 metal, 5 alloy), Walls (1x1, 5 metal) and
 Guard posts (2x2, 15 metal), placed on any free tiles. Tap a piece to remove it for half its cost back.
+A new site also comes scattered with obstacles that block building until you clear them for credits:
+Boulders (120 credits, leave 10 metal), Ice crystals (40 credits, leave 4 ice) and Old wreckage
+(200 credits, leave 25 metal and 2 alloy). Tap one and press *Clear*.
 
 **Ship Foundry** (60 metal, 10 ice, needs a Spaceport, one per base) builds warships for your navy.
 Tap it and open the **Shipyard** to queue Corvettes (25 metal, 1 min), Frigates (50 metal, 10 alloy, 3 min)

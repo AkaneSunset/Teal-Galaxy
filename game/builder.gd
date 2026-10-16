@@ -46,7 +46,8 @@ var _cam: Camera3D
 var _home: Node3D # the home base's pads and buildings
 var _site: Node3D # the satellite site being shown (site_view.gd)
 var _view := "" # "" for the home base, or the id of the satellite site on screen
-var _sel_piece := -1 # id of the defence selected on a site, or -1
+var _sel_piece := -1 # id of the defence or obstacle selected on a site, or -1
+var _sel_is_obstacle := false
 var _sites_btn: Button
 var _jobs_btn: Button
 var _home_btn: Button
@@ -429,6 +430,10 @@ func _tap_site(hit) -> void:
 		_selected = 0
 	elif what.get("kind", "") == "piece":
 		_sel_piece = int(what.piece.id)
+		_sel_is_obstacle = false
+	elif what.get("kind", "") == "obstacle":
+		_sel_piece = int(what.obstacle.id)
+		_sel_is_obstacle = true
 	select_pad(_selected)
 
 
@@ -1132,6 +1137,14 @@ func _refresh_selection(state: Dictionary) -> void:
 			_sel_piece = -1
 			_select_box.visible = false
 			return
+		if _sel_is_obstacle:
+			var od: Dictionary = Net.catalog.sites.obstacles[piece.type]
+			var salvage := []
+			for res in od.salvage:
+				salvage.append("%d %s" % [od.salvage[res], Net.item_name(res) if res not in ["metal", "ice"] else res])
+			_select_name.text = "%s  (clearing leaves %s)" % [od.name, ", ".join(salvage)]
+			_set_actions([{"id": "clear", "text": "Clear  %d" % int(od.clear), "icon": "credits"}])
+			return
 		_select_name.text = Net.catalog.sites.pieces[piece.type].name
 		_set_actions([{"id": "remove", "text": "Remove", "icon": "economy"}])
 		return
@@ -1207,6 +1220,9 @@ func _on_action(id: String) -> void:
 		"remove":
 			Net.send({"type": "remove_piece", "planet": _view, "piece": _sel_piece})
 			_sel_piece = -1
+		"clear":
+			Net.send({"type": "clear_obstacle", "planet": _view, "obstacle": _sel_piece})
+			_sel_piece = -1
 		"ship":
 			Net.send({"type": "ship_cargo", "planet": _pid(), "slot": _selected})
 		"upgrade":
@@ -1274,8 +1290,9 @@ func _refresh_defence_shop() -> void:
 		_shop_cards.add_child(card)
 
 
+## The selected defence, or obstacle when _sel_is_obstacle.
 func _piece(id: int) -> Dictionary:
-	for p in _planet().get("pieces", []):
+	for p in _planet().get("obstacles" if _sel_is_obstacle else "pieces", []):
 		if int(p.id) == id:
 			return p
 	return {}
@@ -1292,7 +1309,7 @@ func _refresh_site(state: Dictionary) -> void:
 		_site.highlight(_site.core)
 	elif _sel_piece >= 0 and not _piece(_sel_piece).is_empty():
 		var p := _piece(_sel_piece)
-		var def: Dictionary = Net.catalog.sites.pieces[p.type]
+		var def: Dictionary = Net.catalog.sites.obstacles[p.type] if _sel_is_obstacle else Net.catalog.sites.pieces[p.type]
 		_site.highlight(Rect2i(int(p.x), int(p.y), int(def.w), int(def.h)))
 	else:
 		_site.highlight(Rect2i())

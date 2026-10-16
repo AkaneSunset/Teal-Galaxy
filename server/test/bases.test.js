@@ -64,6 +64,8 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   e.stock.ice = 20;
   assert.match(G.build(g, 'aster', 0, 'refinery').reason, /satellite site/);
   const { site } = G.foundSite(g, 'Akane', 'refinery');
+  assert.ok(site.obstacles.length > 0, 'a new site comes with obstacles');
+  site.obstacles = []; // a clear site, so defences go where the test puts them
   assert.strictEqual(site.parent, 'aster');
   assert.strictEqual(site.name, 'Aster Mining Refinery');
   assert.strictEqual(e.stock.metal, 460);
@@ -87,4 +89,31 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   // Someone else can't touch Akane's site.
   G.claimBase(g, 'Rin');
   assert.ok(!G.owns(g, 'Rin', site.id));
+});
+
+test('obstacles block defences until cleared for credits, and some leave salvage', () => {
+  const S = require('../sites');
+  const g = G.newGalaxy();
+  G.claimBase(g, 'Akane');
+  const e = g.bases.Akane;
+  e.stock.metal = 500;
+  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const again = { id: site.id, pieces: [], nextPiece: 1 };
+  S.scatter(again);
+  assert.deepStrictEqual(again.obstacles, site.obstacles, 'the same site id always gets the same obstacles');
+  const boulder = site.obstacles.find((o) => o.type === 'boulder');
+  assert.ok(boulder);
+  assert.match(G.placePiece(g, site.id, 'wall', boulder.x, boulder.y).reason, /already there/);
+  e.credits = 100;
+  assert.match(G.clearObstacle(g, site.id, boulder.id).reason, /costs 120 credits/);
+  e.credits = 500;
+  const metal = e.stock.metal;
+  assert.ok(G.clearObstacle(g, site.id, boulder.id).ok);
+  assert.strictEqual(e.credits, 380);
+  assert.strictEqual(e.stock.metal, metal + 10, 'salvage');
+  assert.ok(G.placePiece(g, site.id, 'wall', boulder.x, boulder.y).ok);
+  // Sites from older saves get obstacles when the server loads them.
+  delete site.obstacles;
+  G.recoverRaids(g);
+  assert.ok(site.obstacles.length > 0);
 });

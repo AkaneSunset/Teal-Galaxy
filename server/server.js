@@ -197,7 +197,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (msg.type === 'hello') {
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      const catalog = { attack: { travel: N.TRAVEL_S, loot: N.LOOT_SHARE, shield: N.SHIELD_MS }, sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS };
+      const catalog = { attack: { travel: N.TRAVEL_S, loot: N.LOOT_SHARE, shield: N.SHIELD_MS }, sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS };
       // A Builder gets their own home planet the first time they connect.
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
       if (demo && home) G.demoTopUp(G.econ(galaxy, home));
@@ -217,7 +217,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (!me.role) return send(ws, { type: 'error', reason: 'say hello first' });
 
     // Builders can only manage their own planets.
-    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship', 'place_piece', 'remove_piece'];
+    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship', 'place_piece', 'remove_piece', 'clear_obstacle'];
     if (MANAGE.includes(msg.type)) {
       if (msg.type === 'post_job' && !msg.planet) msg.planet = galaxy.system.planets.find((p) => p.owner === me.name)?.id || 'aster';
       if (!G.owns(galaxy, me.name, msg.planet)) return send(ws, { type: 'error', reason: 'that is not your planet' });
@@ -263,6 +263,9 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'remove_piece':
         result = G.removePiece(galaxy, msg.planet, msg.piece);
+        break;
+      case 'clear_obstacle':
+        result = G.clearObstacle(galaxy, msg.planet, msg.obstacle);
         break;
       case 'queue_ship':
         result = G.queueShip(galaxy, msg.planet, msg.slot, msg.ship, now());
