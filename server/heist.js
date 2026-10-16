@@ -380,12 +380,10 @@ function siteLayout(site, tier, r, now) {
   const grid = site?.grid || SITE_GRID;
   const half = (grid * TILE) / 2;
   const coreAt = (grid - CORE_TILES) / 2;
-  const list = site?.kind === 'satellite'
-    ? [
-        ...(site.pieces || []).filter((p) => !(p.readyAt && now < p.readyAt)).map((p) => ({ ...p, id: `p${p.id}` })),
-        ...(site.obstacles || []).map((o) => ({ ...o, id: `o${o.id}` })),
-      ]
-    : defaultPieces(grid, coreAt, tier, r);
+  const satellite = site?.kind === 'satellite';
+  const placed = satellite ? (site.pieces || []).filter((p) => !(p.readyAt && now < p.readyAt)) : defaultPieces(grid, coreAt, tier, r);
+  const obstacles = satellite ? site.obstacles || [] : [];
+  const list = [...placed.map((p) => ({ ...p, id: `p${p.id}` })), ...obstacles.map((o) => ({ ...o, id: `o${o.id}` }))];
   const pieces = list.map((p) => {
     const def = SITE_PIECES[p.type] || { w: p.w || 1, h: p.h || 1, hp: 0 };
     return {
@@ -396,16 +394,25 @@ function siteLayout(site, tier, r, now) {
       hp: def.hp,
     };
   });
+  // The turrets the security tier mounts round the core, where the Builder's view draws them.
+  const ring = SECURITY[tier].turrets;
+  for (let t = 0; t < ring; t++) {
+    const ang = (2 * Math.PI * (t + 0.5)) / ring + 0.6;
+    pieces.push({ id: `ct${t}`, type: 'turret', ring: true, size: [2, 2], pos: [Math.cos(ang) * 6.6, Math.sin(ang) * 6.6], hp: SITE_PIECES.turret.hp });
+  }
   const core = CORE_TILES * TILE;
   return {
+    // The site as the Builder sees it, for the raider's app to draw with the same models.
+    view: { id: site?.id || 'facility', grid, pieces: placed, obstacles },
+    ringTurrets: ring,
     grid,
     half,
     core, // the core building's side, in metres
     pieces,
     powered: pieces.some((p) => p.type === 'power') ? 'plant' : 'core',
-    door: [0, core / 2], // the blast door, middle of the south wall
+    door: [0, core / 2], // the blast door, on the south edge of the core's pad
     vents: [{ id: 'v0', pos: [-core / 2, 0], side: 'west' }, { id: 'v1', pos: [core / 2, 0], side: 'east' }, { id: 'v2', pos: [0, -core / 2], side: 'north' }],
-    pad: [0, half + 12], // the landing pad, off the south edge of the site
+    pad: [0, half + 10], // where the raider's ship sets down, just off the south edge of the site
   };
 }
 

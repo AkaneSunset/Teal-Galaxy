@@ -1,6 +1,6 @@
 extends Node
 ## Headless smoke test of the two modes against a running galaxy server.
-## Run the server, then in two terminals:
+## Run the server with instant buildings (cd server && BUILD_SPEED=0 npm start), then in two terminals:
 ##   godot --headless --path game res://tests/smoke.tscn -- --role=builder
 ##   godot --headless --path game res://tests/smoke.tscn -- --role=explorer
 ## Each prints PASS or FAIL and quits.

@@ -3,6 +3,8 @@
 //
 //   node server.js            (listens on port 8080, saves to galaxy.json)
 //   PORT=9000 SAVE_FILE=x.json node server.js
+//   DEMO=1 node server.js     (every base starts with enough to build everything, and builds 10x faster)
+//   BUILD_SPEED=0 node server.js   (buildings finish instantly, for the game smoke tests)
 
 const fs = require('fs');
 const path = require('path');
@@ -10,6 +12,8 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const G = require('./galaxy');
 const H = require('./heist');
+const N = require('./navy');
+const S = require('./sites');
 
 const TICK_MS = 5000;
 const CHAT_MAX = 200;
@@ -17,13 +21,15 @@ const CHAT_GAP_MS = 500; // at most two chat lines a second per player
 const RAID_TICK_MS = 200; // reveals, Heat and the run clock
 const RAID_MSGS_PER_S = 30; // per raider; more than this is dropped
 
-function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now } = {}) {
+function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, buildSpeed = null } = {}) {
   let galaxy = G.newGalaxy();
   if (saveFile && fs.existsSync(saveFile)) {
     galaxy = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
     G.recoverRaids(galaxy);
     console.log(`Loaded galaxy from ${saveFile}`);
   }
+  // Demo mode builds 10 times faster; tests can pass Infinity for instant buildings.
+  galaxy.buildSpeed = buildSpeed ?? (demo ? 10 : 1);
   const runs = new Map(); // pilot name -> live raid run (server only: holds container contents)
 
   const wss = new WebSocketServer({ port });
@@ -219,8 +225,15 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (msg.type === 'hello') {
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      const catalog = { items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
-      send(ws, { type: 'welcome', id: me.id, name: me.name, state: galaxy, catalog });
+      const catalog = { attack: { travel: N.TRAVEL_S, loot: N.LOOT_SHARE, shield: N.SHIELD_MS }, sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH, buildSpeed: Number.isFinite(galaxy.buildSpeed) ? galaxy.buildSpeed : 0 };
+      // A Builder gets their own home planet the first time they connect.
+      const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
+      if (demo && home) G.demoTopUp(G.econ(galaxy, home));
+      send(ws, { type: 'welcome', id: me.id, name: me.name, home, state: galaxy, catalog });
+      if (home) {
+        broadcast({ type: 'state', state: galaxy }, ws); // the new Builder already has it
+        save();
+      }
       // Back after a dropped connection mid-raid: pick up where the run is.
       const run = me.role === 'explorer' && runs.get(me.name);
       if (run) {
@@ -231,13 +244,20 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     }
     if (!me.role) return send(ws, { type: 'error', reason: 'say hello first' });
 
+    // Builders can only manage their own planets.
+    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship', 'place_piece', 'remove_piece', 'clear_obstacle', 'upgrade_building'];
+    if (MANAGE.includes(msg.type)) {
+      if (msg.type === 'post_job' && !msg.planet) msg.planet = galaxy.system.planets.find((p) => p.owner === me.name)?.id || 'aster';
+      if (!G.owns(galaxy, me.name, msg.planet)) return send(ws, { type: 'error', reason: 'that is not your planet' });
+    }
+
     let result = null;
     switch (msg.type) {
       case 'build':
-        result = G.build(galaxy, msg.planet, msg.slot, msg.building);
+        result = G.build(galaxy, msg.planet, msg.slot, msg.building, now());
         break;
       case 'post_job':
-        result = G.postJob(galaxy, msg.resource, msg.amount, msg.reward);
+        result = G.postJob(galaxy, msg.resource, msg.amount, msg.reward, msg.planet);
         break;
       case 'collect':
         result = G.collect(galaxy, me.name, msg.resource, msg.amount);
@@ -259,6 +279,30 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       }
       case 'sell':
         result = G.sell(galaxy, me.name);
+        break;
+      case 'found_site':
+        result = me.role === 'builder' ? G.foundSite(galaxy, me.name, msg.facility) : { ok: false, reason: 'only Builders found sites' };
+        break;
+      case 'launch_attack':
+        result = me.role === 'builder' ? G.launchAttack(galaxy, me.name, msg.target, now(), msg.ships || null) : { ok: false, reason: 'only Builders command fleets' };
+        break;
+      case 'place_piece':
+        result = G.placePiece(galaxy, msg.planet, msg.piece, msg.x, msg.y);
+        break;
+      case 'remove_piece':
+        result = G.removePiece(galaxy, msg.planet, msg.piece);
+        break;
+      case 'upgrade_building':
+        result = G.upgradeBuilding(galaxy, msg.planet, msg.slot, now());
+        break;
+      case 'clear_obstacle':
+        result = G.clearObstacle(galaxy, msg.planet, msg.obstacle);
+        break;
+      case 'queue_ship':
+        result = G.queueShip(galaxy, msg.planet, msg.slot, msg.ship, now());
+        break;
+      case 'cancel_ship':
+        result = G.cancelShip(galaxy, msg.planet, msg.slot);
         break;
       case 'chat': {
         // Chat is relayed to everyone (sender included, so all apps show the same order), not saved.
@@ -309,7 +353,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   });
 
   const ticker = setInterval(() => {
-    if (G.tick(galaxy)) changed();
+    if (G.tick(galaxy, now())) changed();
   }, tickMs);
   const raidTicker = setInterval(raidTick, RAID_TICK_MS);
 
@@ -332,8 +376,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 if (require.main === module) {
   const port = Number(process.env.PORT) || 8080;
   const saveFile = process.env.SAVE_FILE || path.join(__dirname, 'galaxy.json');
-  startServer({ port, saveFile });
-  console.log(`Galaxy server listening on ws://0.0.0.0:${port}`);
+  const demo = process.env.DEMO === '1';
+  // BUILD_SPEED=0 builds instantly (the game smoke tests use it); any other number divides build times.
+  const speed = process.env.BUILD_SPEED;
+  const buildSpeed = speed === undefined ? null : Number(speed) === 0 ? Infinity : Number(speed);
+  startServer({ port, saveFile, demo, buildSpeed });
+  console.log(`Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich)' : ''}`);
 }
 
 module.exports = { startServer };

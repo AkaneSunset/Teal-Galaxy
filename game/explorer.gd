@@ -52,9 +52,9 @@ var _dust: MultiMeshInstance3D
 var _dust_points := PackedVector3Array()
 var _others := {} # id -> {"node": Node3D, "pos": Array, "shown": Array}
 var _waypoints := [] # {"id", "name", "pos"}
-var _facilities := {} # slot -> {"node", "type", "label"} for Builders' facilities around Aster
+var _facilities := {} # key -> {"node", "type", "label", "planet", "slot", "name", "pos"} for facilities near Aster
 var _raid: Node3D # the on-foot raid while one is running
-var _raid_at := {} # the facility being raided: {"planet", "slot"}
+var _raid_at := {} # the facility being raided: {"planet", "slot", "pos"}
 var _world_env: WorldEnvironment
 var _sky_layer: CanvasLayer
 var _hud_layer: CanvasLayer
@@ -442,9 +442,9 @@ func _flight_env() -> Dictionary:
 
 
 func _place_world(delta: float) -> void:
-	for slot in _facilities:
-		var f: Node3D = _facilities[slot].node
-		f.position = System.diff(System.facility_pos(slot), _pos)
+	for key in _facilities:
+		var f: Node3D = _facilities[key].node
+		f.position = System.diff(_facilities[key].pos, _pos)
 		f.visible = f.position.length() < LOCAL_RANGE
 	for pair in [[_port, System.PORT_POS], [_field, System.FIELD_POS]]:
 		var rel := System.diff(pair[1], _pos)
@@ -484,8 +484,8 @@ func _collide() -> void:
 		spheres.append([System.diff(System.FIELD_POS, _pos) + rock.node.position, rock.radius])
 	if _port.visible:
 		spheres.append([System.diff(System.PORT_POS, _pos), PORT_RADIUS])
-	for slot in _facilities:
-		spheres.append([System.diff(System.facility_pos(slot), _pos), FACILITY_RADIUS])
+	for key in _facilities:
+		spheres.append([System.diff(_facilities[key].pos, _pos), FACILITY_RADIUS])
 	for s in spheres:
 		var rel: Vector3 = s[0]
 		var reach: float = s[1] + SHIP_RADIUS
@@ -533,9 +533,9 @@ func _nav_items() -> Array:
 	if _port.visible:
 		items.append(_port_item())
 	items.append({"id": "field", "name": System.FIELD_NAME, "kind": "landmark", "pos": System.FIELD_POS, "standoff": 2_500.0, "local": true})
-	for f in Net.facilities():
-		if f.planet == "aster":
-			items.append({"id": "facility-%d" % f.slot, "name": f.name, "kind": "facility", "pos": System.facility_pos(f.slot), "standoff": 1_200.0, "local": true})
+	for key in _facilities:
+		var f: Dictionary = _facilities[key]
+		items.append({"id": "facility-" + key, "name": f.name, "kind": "facility", "pos": f.pos, "standoff": 1_200.0, "local": true})
 	for w in _waypoints:
 		items.append({"id": w.id, "name": w.name, "kind": "waypoint", "pos": w.pos, "standoff": 0.0})
 	for id in _others:
@@ -606,7 +606,7 @@ func _interact() -> void:
 			if holding and _mine_timer <= 0 and flight.draw(Flight.WEP, MINE_ENERGY):
 				_mine_timer = MINE_EVERY
 				Net.send({"type": "collect", "resource": "ice", "amount": 1})
-	elif _near_facility() >= 0:
+	elif _near_facility() != "":
 		_facility_prompt(_near_facility(), holding)
 	elif _port.visible and System.distance(System.PORT_POS, _pos) < DOCK_RANGE:
 		var job := Net.open_job()
@@ -631,17 +631,19 @@ func _interact() -> void:
 		_prompt.text = ""
 
 
-func _near_facility() -> int:
-	for slot in _facilities:
-		if System.distance(System.facility_pos(slot), _pos) < DOCK_RANGE:
-			return slot
-	return -1
+## The key of the facility within docking range, or "".
+func _near_facility() -> String:
+	for key in _facilities:
+		if System.distance(_facilities[key].pos, _pos) < DOCK_RANGE:
+			return key
+	return ""
 
 
-func _facility_prompt(slot: int, holding: bool) -> void:
+func _facility_prompt(key: String, holding: bool) -> void:
+	var spot: Dictionary = _facilities[key]
 	var fac := {}
 	for f in Net.facilities():
-		if f.planet == "aster" and f.slot == slot:
+		if f.planet == spot.planet and f.slot == spot.slot:
 			fac = f
 	if fac.is_empty():
 		_prompt.text = ""
@@ -651,7 +653,7 @@ func _facility_prompt(slot: int, holding: bool) -> void:
 	for id in b.vault:
 		vault += int(b.vault[id])
 	var cool := (float(b.cooldownUntil) - Net.now_ms()) / 1000.0
-	if not Net.raid_on("aster", slot).is_empty():
+	if not Net.raid_on(spot.planet, spot.slot).is_empty():
 		_prompt.text = "%s: someone is already inside" % fac.name
 	elif cool > 0:
 		_prompt.text = "%s: security on alert after a raid (%d s)" % [fac.name, ceili(cool)]
@@ -661,13 +663,14 @@ func _facility_prompt(slot: int, holding: bool) -> void:
 		_prompt.text = "%s, security tier %d, %d items in the vault\nPress %s to board and raid it" % [fac.name, int(b.security), vault, controls.binding_text("interact", false)]
 		if holding and _mine_timer <= 0:
 			_mine_timer = 2.0
-			board(slot)
+			board(key)
 
 
-## Asks the server to start a raid on a facility; the raid begins when it answers.
-func board(slot: int) -> void:
-	_raid_at = {"planet": "aster", "slot": slot}
-	Net.send({"type": "raid_start", "planet": "aster", "slot": slot})
+## Asks the server to start a raid on a facility (by its key in _facilities); the raid begins when it answers.
+func board(key: String) -> void:
+	var spot: Dictionary = _facilities[key]
+	_raid_at = {"planet": spot.planet, "slot": spot.slot, "pos": spot.pos}
+	Net.send({"type": "raid_start", "planet": spot.planet, "slot": spot.slot})
 
 
 func _stash_value() -> int:
@@ -904,22 +907,34 @@ func _on_state(_state: Dictionary) -> void:
 
 # --- Facilities and raids -------------------------------------------------------------
 
+## Facilities near Aster: satellite sites orbiting it (keyed by site id), and any older facility
+## still on one of Aster's pads (keyed "aster:<slot>").
 func _sync_facilities() -> void:
 	var live := {}
 	for f in Net.facilities():
-		if f.planet != "aster":
-			continue
-		live[f.slot] = true
-		if not _facilities.has(f.slot) or _facilities[f.slot].type != f.type:
-			if _facilities.has(f.slot):
-				_facilities[f.slot].node.queue_free()
-			_facilities[f.slot] = _build_facility(f.type)
-		var raid := Net.raid_on("aster", f.slot)
-		_facilities[f.slot].label.text = "%s\nSecurity tier %d%s" % [f.name, int(f.building.security), "\nRAID IN PROGRESS" if not raid.is_empty() else ""]
-	for slot in _facilities.keys():
-		if not live.has(slot):
-			_facilities[slot].node.queue_free()
-			_facilities.erase(slot)
+		var key := ""
+		var pos: Array
+		if f.planet == "aster":
+			key = "aster:%d" % f.slot
+			pos = System.facility_pos(f.slot)
+		else:
+			var site := Net.planet(f.planet)
+			if site.get("parent", "") != "aster":
+				continue
+			key = f.planet
+			pos = System.site_pos(int(site.orbit))
+		live[key] = true
+		if not _facilities.has(key) or _facilities[key].type != f.type:
+			if _facilities.has(key):
+				_facilities[key].node.queue_free()
+			_facilities[key] = _build_facility(f.type)
+		_facilities[key].merge({"planet": f.planet, "slot": f.slot, "name": f.name, "pos": pos}, true)
+		var raid := Net.raid_on(f.planet, f.slot)
+		_facilities[key].label.text = "%s\nSecurity tier %d%s" % [f.name, int(f.building.security), "\nRAID IN PROGRESS" if not raid.is_empty() else ""]
+	for key in _facilities.keys():
+		if not live.has(key):
+			_facilities[key].node.queue_free()
+			_facilities.erase(key)
 
 
 func _build_facility(type: String) -> Dictionary:
@@ -1007,7 +1022,7 @@ func _leave_raid(result: Dictionary) -> void:
 		_say("Your ship went down with the facility. A replacement is waiting at %s." % System.PORT_NAME)
 		return
 	if not _raid_at.is_empty():
-		teleport(System.offset(System.facility_pos(int(_raid_at.slot)), Vector3(0, 0, 1_200)))
+		teleport(System.offset(_raid_at.pos, Vector3(0, 0, 1_200)))
 	_say("Back aboard. Sell your loot to the Fence at %s." % System.PORT_NAME)
 
 
@@ -1016,8 +1031,8 @@ func _set_space_visible(on: bool) -> void:
 		node.visible = on
 	_port.visible = on and Net.has_building("spaceport")
 	_field.visible = on
-	for slot in _facilities:
-		_facilities[slot].node.visible = on
+	for key in _facilities:
+		_facilities[key].node.visible = on
 	for id in _others:
 		_others[id].node.visible = on
 	_sky.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED

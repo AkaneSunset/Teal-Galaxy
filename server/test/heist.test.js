@@ -48,6 +48,7 @@ test('the raid map mirrors the Builder\'s site', () => {
   };
   const L = H.generateLayout(7, 1, 'lab', { site, now: 1000 });
   assert.deepStrictEqual(L.pieces.map((p) => p.id), ['p1', 'p2', 'p3', 'o5']);
+  assert.deepStrictEqual(L.view.pieces.map((p) => p.id), [1, 2, 3], 'the raider draws exactly what the Builder placed');
   const turret = L.pieces[0];
   assert.deepStrictEqual(turret.pos, [-20, -20], 'top-left 2x2 tile, in metres round the core');
   assert.deepStrictEqual(turret.size, [8, 8]);
@@ -56,7 +57,8 @@ test('the raid map mirrors the Builder\'s site', () => {
   // A facility without a site gets a power plant and defences from its tier.
   const d = H.generateLayout(7, 3, 'lab');
   assert.strictEqual(d.pieces.filter((p) => p.type === 'power').length, 1);
-  assert.strictEqual(d.pieces.filter((p) => p.type === 'turret').length, 3);
+  assert.strictEqual(d.pieces.filter((p) => p.type === 'turret' && !p.ring).length, 3);
+  assert.strictEqual(d.pieces.filter((p) => p.ring).length, H.SECURITY[3].turrets, 'and the turrets its tier mounts on the core');
 });
 
 test('the same seed builds the same facility', () => {
@@ -89,14 +91,27 @@ test('inventory grid places, rotates and refuses overlaps', () => {
 });
 
 // A facility with a known vault, and a run on it at a fixed time.
-function setup(vault = { alloy: 10, drive: 2 }, { security = 1, inside = true } = {}) {
+// The site's defences: two turrets, a guard post, a wall and the power plant.
+const DEFENCES = [
+  { id: 1, type: 'turret', x: 0, y: 0 },
+  { id: 2, type: 'guardpost', x: 9, y: 0 },
+  { id: 3, type: 'wall', x: 5, y: 1 },
+  { id: 4, type: 'power', x: 10, y: 10 },
+  { id: 5, type: 'turret', x: 0, y: 9 },
+];
+
+function setup(vault = { alloy: 10, drive: 2 }, { security = 1, levels = 1, inside = true, pieces = DEFENCES } = {}) {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 999;
-  assert.ok(G.build(g, 'aster', 0, 'refinery').ok);
-  const fac = G.facility(g, 'aster', 0);
+  G.claimBase(g, 'Akane');
+  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const fac = G.facility(g, site.id, 0);
   fac.vault = { ...vault };
   fac.security = security;
-  const r = G.startRaid(g, 'Pilot A', 'aster', 0, 0, 1234, 99);
+  fac.level = levels;
+  if (pieces) site.pieces = pieces;
+  const r = G.startRaid(g, 'Pilot A', site.id, 0, 0, 1234, 99);
   assert.ok(r.ok, r.reason);
   if (inside) {
     H.ventStart(r.run, 'v0', 0);
@@ -169,7 +184,7 @@ test('every minute inside brings a bigger wave', () => {
 });
 
 test('each level of the facility adds a level of better loot below', () => {
-  const { run } = setup({}, { security: 3 });
+  const { run } = setup({}, { security: 3, levels: 3 });
   assert.strictEqual(run.floors, 3);
   assert.strictEqual(run.layout.rooms.filter((r) => r.floor === 3).length, 16);
   const key = run.layout.containers.find((c) => run.boxes[c.id].items.some((it) => it.item === 'keycard'));
@@ -216,7 +231,7 @@ test('the Builder loses only what a raider carries out; the rest goes back in th
   assert.deepStrictEqual(fac.vault, { alloy: 10, drive: 1 });
   assert.deepStrictEqual(g.pilots['Pilot A'].stash, [{ item: 'drive', qty: 1, fih: true }]);
   assert.ok(fac.cooldownUntil > 320_000, 'facility recovers before the next raid');
-  assert.match(G.startRaid(g, 'Pilot B', 'aster', 0, 330_000, 1, 1).reason, /alert/);
+  assert.match(G.startRaid(g, 'Pilot B', run.planet, 0, 330_000, 1, 1).reason, /alert/);
 });
 
 test('dying keeps only the Secure Case', () => {
@@ -245,18 +260,20 @@ test('blueprint cases are too big to protect', () => {
 
 test('facilities fill their vaults, ship to HQ and buy security', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 999;
   g.credits = 5000;
-  G.build(g, 'aster', 1, 'refinery');
+  G.claimBase(g, 'Akane');
+  const id = G.foundSite(g, 'Akane', 'refinery').site.id;
   for (let i = 0; i < 15; i++) G.tick(g);
-  const fac = G.facility(g, 'aster', 1);
+  const fac = G.facility(g, id, 0);
   assert.deepStrictEqual(fac.vault, { alloy: 15, isotope: 2 });
-  assert.ok(G.ship(g, 'aster', 1, 0).ok);
-  assert.strictEqual(g.stock.alloy, 15);
-  assert.match(G.ship(g, 'aster', 1, 1000).reason, /freighter/);
-  assert.match(G.secure(g, 'aster', 1).reason, /Design drive/);
-  g.stock.drive = 1;
-  assert.ok(G.secure(g, 'aster', 1).ok);
+  assert.ok(G.ship(g, id, 0, 0).ok);
+  assert.strictEqual(g.bases.Akane.stock.alloy, 15);
+  assert.match(G.ship(g, id, 0, 1000).reason, /freighter/);
+  assert.match(G.secure(g, id, 0).reason, /Design drive/);
+  g.bases.Akane.stock.drive = 1;
+  assert.ok(G.secure(g, id, 0).ok);
   assert.strictEqual(fac.security, 2);
 });
 
@@ -291,7 +308,7 @@ function connect(port) {
 test('a raid over the wire: board, search, steal from the vault, alarm, extract', async () => {
   const port = 18090;
   let clock = 1_000_000;
-  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
   try {
     const phone = await connect(port);
     const pc = await connect(port);
@@ -300,11 +317,13 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await phone.next((m) => m.type === 'welcome');
     await pc.next((m) => m.type === 'welcome');
 
-    phone.send({ type: 'build', planet: 'aster', slot: 2, building: 'refinery' });
-    await phone.next((m) => m.type === 'state' && m.state.system.planets[0].buildings.length === 1);
-    server.galaxy.system.planets[0].buildings[0].vault = { isotope: 5 };
+    phone.send({ type: 'found_site', facility: 'refinery' });
+    await phone.next((m) => m.type === 'state' && m.state.system.planets.length === 2);
+    const site = server.galaxy.system.planets[1].id;
+    server.galaxy.system.planets[1].buildings[0].vault = { isotope: 5 };
+    server.galaxy.system.planets[1].pieces = DEFENCES.map((p) => ({ ...p })); // as if the Builder placed them
 
-    pc.send({ type: 'raid_start', planet: 'aster', slot: 2 });
+    pc.send({ type: 'raid_start', planet: site, slot: 0 });
     const begin = await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     assert.ok(begin.run.layout.rooms.length >= 9);
     assert.ok(!JSON.stringify(begin).includes('"isotope"'), 'no container contents in the briefing');
@@ -347,7 +366,7 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await pc.next((m) => m.type === 'raid' && m.ev === 'inventory' && m.items.length === 2);
 
     // The Builder hears about it and sounds the alarm from the phone.
-    phone.send({ type: 'sound_alarm', planet: 'aster', slot: 2 });
+    phone.send({ type: 'sound_alarm', planet: site, slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.heat >= 25);
     await phone.next((m) => m.type === 'state' && m.state.raids[0]?.heat >= 25);
 
@@ -361,13 +380,13 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     assert.ok(end.result.kept.some((k) => k.item === 'isotope'));
 
     const after = await phone.next((m) => m.type === 'state' && m.state.raids.length === 0);
-    const fac = after.state.system.planets[0].buildings[0];
+    const fac = after.state.system.planets[1].buildings[0];
     assert.ok(fac.vault.isotope < 5, 'the Builder lost what was carried out');
     assert.strictEqual(after.state.raidLog[0].outcome, 'extracted');
 
-    server.galaxy.stock.metal = 100;
+    server.galaxy.bases.Akane.stock.metal = 100;
     phone.send({ type: 'build', planet: 'aster', slot: 0, building: 'spaceport' });
-    await pc.next((m) => m.type === 'state' && m.state.system.planets[0].buildings.length === 2);
+    await pc.next((m) => m.type === 'state' && m.state.system.planets[0].buildings.length === 1);
     pc.send({ type: 'sell' });
     const sold = await pc.next((m) => m.type === 'state' && m.state.pilots['Pilot A']?.credits > 0);
     assert.strictEqual(sold.state.pilots['Pilot A'].stash.length, 0);
@@ -381,14 +400,15 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
 test('the run clock ends a raid as missing in action', async () => {
   const port = 18091;
   let clock = 0;
-  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
   try {
     const pc = await connect(port);
     pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
     await pc.next((m) => m.type === 'welcome');
     server.galaxy.stock.metal = 999;
-    G.build(server.galaxy, 'aster', 0, 'spire');
-    pc.send({ type: 'raid_start', planet: 'aster', slot: 0 });
+    G.claimBase(server.galaxy, 'Akane');
+    const { site } = G.foundSite(server.galaxy, 'Akane', 'spire');
+    pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     clock += 17 * 60_000;
     const end = await pc.next((m) => m.type === 'raid' && m.ev === 'end');
@@ -402,15 +422,14 @@ test('the run clock ends a raid as missing in action', async () => {
 test('the self-destruct kills a raider still inside when it ends', async () => {
   const port = 18092;
   let clock = 0;
-  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
   try {
     const pc = await connect(port);
     pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
     await pc.next((m) => m.type === 'welcome');
-    server.galaxy.stock.metal = 999;
-    server.galaxy.stock.ice = 99;
-    assert.ok(G.build(server.galaxy, 'aster', 0, 'lab').ok);
-    pc.send({ type: 'raid_start', planet: 'aster', slot: 0 });
+    G.claimBase(server.galaxy, 'Akane');
+    const { site } = G.foundSite(server.galaxy, 'Akane', 'refinery');
+    pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     pc.send({ type: 'raid_vent_start', vent: 'v2' });
     await pc.next((m) => m.type === 'raid' && m.ev === 'vent');
