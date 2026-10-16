@@ -220,6 +220,7 @@ func _build_world() -> void:
 		_pads.append(_make_pad(_home, pos))
 
 	_site = SiteView.new()
+	_site.position.y = SiteView.DECK_TOP # the site's deck stands clear of the ground, so the two never flicker
 	_site.visible = false
 	world.add_child(_site)
 
@@ -317,13 +318,13 @@ func _place_camera() -> void:
 	_cam.look_at(_focus, Vector3.UP)
 
 
-## Where a point on the screen lands on the ground, or null when it misses.
-func _ground_at(screen: Vector2) -> Variant:
+## Where a point on the screen lands on the ground (or on a level `height` above it), or null when it misses.
+func _ground_at(screen: Vector2, height := 0.0) -> Variant:
 	var from := _cam.project_ray_origin(screen)
 	var dir := _cam.project_ray_normal(screen)
 	if absf(dir.y) < 0.0001:
 		return null
-	var t := -from.y / dir.y
+	var t := (height - from.y) / dir.y
 	return from + dir * t if t > 0.0 else null
 
 
@@ -399,7 +400,7 @@ func _touch_spread() -> float:
 
 
 func _tap(screen: Vector2) -> void:
-	var hit = _ground_at(screen)
+	var hit = _ground_at(screen, _site.position.y if _view != "" else 0.0)
 	if _view != "":
 		_tap_site(hit)
 		return

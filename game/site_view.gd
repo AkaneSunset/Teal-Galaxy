@@ -5,6 +5,7 @@ extends Node3D
 
 const BaseModels := preload("res://base_models.gd")
 const TILE := 4.0 # metres per tile
+const DECK_TOP := 0.6 # how far the deck's surface stands above the ground around it
 
 var grid := 12
 var core := Rect2i(4, 4, 4, 4)
@@ -92,7 +93,7 @@ func _rebuild(type: String, tier_turrets: int) -> void:
 			var lm := BoxMesh.new()
 			lm.size = Vector3(size, 0.06, 0.18) if along_x else Vector3(0.18, 0.06, size)
 			line.mesh = lm
-			line.position = Vector3(0, 0.03, off) if along_x else Vector3(off, 0.03, 0)
+			line.position = Vector3(0, 0.1, off) if along_x else Vector3(off, 0.1, 0) # raised off the deck so the two never share a surface
 			line.material_override = line_mat
 			_content.add_child(line)
 
