@@ -8,6 +8,7 @@ const S = require('./sites');
 
 const BUILDINGS = {
   mine: { name: 'Mine', cost: { metal: 10 }, needs: null },
+  extractor: { name: 'Ice Extractor', cost: { metal: 15 }, needs: null },
   habitat: { name: 'Habitat', cost: { metal: 20 }, needs: null },
   spaceport: { name: 'Spaceport', cost: { metal: 30 }, needs: null },
   hydroponics: { name: 'Hydroponics', cost: { metal: 20, ice: 10 }, needs: 'ice' },
@@ -19,7 +20,15 @@ const BUILDINGS = {
   foundry: { name: 'Ship Foundry', cost: { metal: 60, ice: 10 }, needsBuilding: 'spaceport', limit: 1 },
 };
 
-const MINE_RATE = 1; // metal per mine per tick
+// Passive income, so a Builder progresses with no pilots online. A tick is 5 s.
+// Pilots' ice jobs still pay off: one delivery is 10 ice, an Extractor takes 30 s per ice.
+const PRODUCES = {
+  mine: { metal: 1 }, // 12 metal a minute
+  extractor: { ice: 1 / 6 }, // 2 ice a minute
+  habitat: { credits: 1 }, // rent: 12 credits a minute
+  hydroponics: { credits: 2 }, // sells food: 24 credits a minute
+};
+const AUTO_SHIP_MS = 5 * 60_000; // a facility's freighter takes the vault home on its own this often
 const POPULATION_PER_HABITAT = 50;
 
 function newGalaxy() {
@@ -32,7 +41,7 @@ function newGalaxy() {
     stock: { metal: 60, ice: 0 },
     credits: 500,
     population: 0,
-    unlocked: ['mine', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
+    unlocked: ['mine', 'extractor', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
     jobs: [],
     raids: [], // raids in progress, as everyone may see them (no container contents)
     raidLog: [],
@@ -55,7 +64,7 @@ function newEconomy() {
     stock: { metal: 60, ice: 0 },
     credits: 500,
     population: 0,
-    unlocked: ['mine', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
+    unlocked: ['mine', 'extractor', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'],
     navy: { corvette: 0, frigate: 0, destroyer: 0 },
   };
 }
@@ -236,12 +245,28 @@ function tick(g, now = Date.now()) {
         }
   for (const p of g.system.planets) {
     for (const b of p.buildings) {
-      if (b.type === 'mine') {
-        econ(g, p.id).stock.metal += MINE_RATE;
+      const makes = PRODUCES[b.type];
+      if (makes) {
+        const e = econ(g, p.id);
+        for (const [res, rate] of Object.entries(makes)) {
+          // Fractional rates build up in b.carry and pay out whole units.
+          b.carry = (b.carry || 0) + rate;
+          const whole = Math.floor(b.carry + 1e-9);
+          if (whole < 1) continue;
+          b.carry -= whole;
+          if (res === 'credits') e.credits += whole;
+          else e.stock[res] = (e.stock[res] || 0) + whole;
+        }
         changed = true;
       }
       const fac = H.FACILITIES[b.type];
       if (!fac) continue;
+      // The automatic freighter: goods sit in the vault (and can be raided) until it comes.
+      b.autoShipAt ||= now + AUTO_SHIP_MS;
+      if (now >= b.autoShipAt) {
+        b.autoShipAt = now + AUTO_SHIP_MS;
+        if (!g.raids.some((r) => r.planet === p.id && r.slot === b.slot) && ship(g, p.id, b.slot, now, true).ok) changed = true;
+      }
       b.made += 1;
       for (const m of fac.makes) {
         if (b.made % m.every === 0 && (b.vault[m.item] || 0) < m.cap) {
@@ -251,6 +276,13 @@ function tick(g, now = Date.now()) {
       }
     }
   }
+  // However ice arrived (an Extractor, a pilot's delivery, loot), it unlocks Hydroponics.
+  for (const e of [g, ...Object.values(g.bases || {})])
+    if (e.stock.ice > 0 && !e.unlocked.includes('hydroponics')) {
+      e.unlocked.push('hydroponics');
+      log(g, 'Ice in stock: Hydroponics unlocked');
+      changed = true;
+    }
   return changed;
 }
 
@@ -310,10 +342,10 @@ function removePiece(g, siteId, pieceId) {
 }
 
 // The Builder sends a freighter: the vault's goods go to HQ stock. Intel sells on arrival.
-function ship(g, planetId, slot, now) {
+function ship(g, planetId, slot, now, auto = false) {
   const b = facility(g, planetId, slot);
   if (!b) return fail('no such facility');
-  if (now < b.shipReadyAt) return fail(`freighter back in ${Math.ceil((b.shipReadyAt - now) / 1000)} s`);
+  if (!auto && now < b.shipReadyAt) return fail(`freighter back in ${Math.ceil((b.shipReadyAt - now) / 1000)} s`);
   const goods = Object.entries(b.vault).filter(([, q]) => q > 0);
   if (!goods.length) return fail('the vault is empty');
   const parts = [];
@@ -325,7 +357,8 @@ function ship(g, planetId, slot, now) {
     b.vault[item] = 0;
   }
   b.shipReadyAt = now + H.SHIP_COOLDOWN_MS;
-  log(g, `Freighter from ${facilityName(g, planetId, b)} delivered ${parts.join(', ')}`);
+  b.autoShipAt = now + AUTO_SHIP_MS;
+  log(g, `${auto ? 'Scheduled freighter' : 'Freighter'} from ${facilityName(g, planetId, b)} delivered ${parts.join(', ')}`);
   return { ok: true };
 }
 
@@ -416,7 +449,7 @@ function recoverRaids(g) {
   g.attackLog ||= [];
   for (const e of [g, ...Object.values(g.bases)]) {
     N.ensure(e);
-    for (const type of ['refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
+    for (const type of ['extractor', 'refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
   }
   for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
   for (const p of g.system.planets)
@@ -550,6 +583,8 @@ function sell(g, name) {
 
 module.exports = {
   BUILDINGS,
+  PRODUCES,
+  AUTO_SHIP_MS,
   newGalaxy,
   build,
   postJob,

@@ -45,6 +45,13 @@ Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as 
 During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
 
+**Passive income.** Buildings produce on their own, so a Builder grows even with no pilots online:
+Mines dig 12 metal a minute, Ice Extractors (15 metal) melt 2 ice a minute, Habitats pay 12 credits a
+minute in rent and Hydroponics sells 24 credits of food a minute. The first ice unlocks Hydroponics, however
+it arrives. Facilities fill their vaults as before, and a freighter brings the goods home every 5 minutes
+on its own (*Ship cargo* sends one sooner); until then the vault is there for pilots to raid. Pilots' ice
+jobs are still the fast way to get ice: one delivery is 10.
+
 **Satellite sites.** Facilities (below) don't go on pads: buying one founds its own satellite site off your
 planet (up to 3), opened from **Sites**. A site is a free 12x12 grid with the facility in the middle;
 Build opens the defence shop there: Turrets (2x2, 20 metal, 5 alloy), Walls (1x1, 5 metal) and

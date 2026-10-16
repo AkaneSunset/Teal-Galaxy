@@ -12,17 +12,18 @@ const SiteView := preload("res://site_view.gd")
 const ICONS := "res://ui/icons/"
 
 const BUILDING_INFO := {
-	"mine": {"name": "Mine", "cost": {"metal": 10}, "about": "Digs 1 metal every tick."},
-	"habitat": {"name": "Habitat", "cost": {"metal": 20}, "about": "Houses 50 people."},
+	"mine": {"name": "Mine", "cost": {"metal": 10}, "about": "Digs 12 metal a minute."},
+	"extractor": {"name": "Ice Extractor", "cost": {"metal": 15}, "about": "Melts 2 ice a minute out of the crust. Pilots' ice jobs are faster."},
+	"habitat": {"name": "Habitat", "cost": {"metal": 20}, "about": "Houses 50 people, who pay 12 credits a minute in rent."},
 	"spaceport": {"name": "Spaceport", "cost": {"metal": 30}, "about": "Pilots land here. Post jobs for them to fly."},
-	"hydroponics": {"name": "Hydroponics", "cost": {"metal": 20, "ice": 10}, "about": "Grows food for the colony."},
-	"refinery": {"name": "Mining Refinery", "cost": {"metal": 40}, "about": "Makes alloy, isotopes and exotics. Pilots can raid it."},
-	"lab": {"name": "Research Outpost", "cost": {"metal": 30, "ice": 10}, "about": "Makes plans and drives. Pilots can raid it."},
-	"spire": {"name": "Data Spire", "cost": {"metal": 50, "credits": 150}, "about": "Makes intel. Pilots can raid it."},
+	"hydroponics": {"name": "Hydroponics", "cost": {"metal": 20, "ice": 10}, "about": "Grows food and sells it: 24 credits a minute."},
+	"refinery": {"name": "Mining Refinery", "cost": {"metal": 40}, "about": "Makes alloy, isotopes and exotics. A freighter brings them home every 5 minutes; pilots can raid the vault before then."},
+	"lab": {"name": "Research Outpost", "cost": {"metal": 30, "ice": 10}, "about": "Makes plans and drives. A freighter brings them home every 5 minutes; pilots can raid the vault before then."},
+	"spire": {"name": "Data Spire", "cost": {"metal": 50, "credits": 150}, "about": "Makes intel, sold for credits when the freighter brings it home every 5 minutes. Pilots can raid it."},
 	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport", "limit": 1,
 		"about": "Builds warships for your navy. Open the Shipyard to queue them."},
 }
-const CARD_ICON := {"foundry": "ship_emblem"} # shop icons for buildings without their own
+const CARD_ICON := {"foundry": "ship_emblem", "extractor": "ice"} # shop icons for buildings without their own
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 
 const PAD_RING := 34.0 # metres from the command centre to each pad
@@ -1446,6 +1447,9 @@ func _refresh_info(state: Dictionary) -> void:
 			if int(b.vault[id]) > 0:
 				vault.append("%d %s" % [b.vault[id], Net.item_name(id)])
 		lines.append("Vault: %s" % (", ".join(vault) if vault else "empty"))
+		if b.has("autoShipAt"):
+			var left := maxf(0.0, (float(b.autoShipAt) - now) / 1000.0)
+			lines.append("Next freighter home in %d:%02d" % [int(left) / 60, int(left) % 60])
 		var escrow := []
 		for id in b.get("escrow", {}):
 			escrow.append("%d %s" % [b.escrow[id], Net.item_name(id)])

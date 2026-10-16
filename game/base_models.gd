@@ -18,6 +18,8 @@ static func building(type: String) -> Node3D:
 	match type:
 		"mine":
 			return mine()
+		"extractor":
+			return ice_extractor()
 		"spaceport":
 			return spaceport()
 		"hydroponics":
@@ -140,6 +142,24 @@ static func _green() -> StandardMaterial3D:
 	m.albedo_color = Color(0.35, 0.8, 0.4)
 	m.roughness = 0.8
 	return m
+
+
+## Ice Extractor: a heated drill shaft over frozen ground, feeding a tall glass meltwater tank.
+static func ice_extractor() -> Node3D:
+	var n := Node3D.new()
+	_b(n, Vector3(11, 0.8, 9), "navy", Vector3(0, 0.4, 0), 0.25)
+	_d(n, 3.4, 1.0, "ice", Vector3(-2.4, 1.2, 0), 10) # frozen bore hole
+	_d(n, 1.0, 9.0, "steel", Vector3(-2.4, 5.0, 0), 8) # drill shaft
+	_b(n, Vector3(3.6, 2.2, 3.6), "teal", Vector3(-2.4, 9.4, 0), 0.4) # drill head housing
+	_b(n, Vector3(3.8, 0.4, 3.8), "amber", Vector3(-2.4, 10.7, 0), 0.1)
+	_d(n, 2.2, 7.0, "glass", Vector3(3.2, 4.3, 0), 12) # meltwater tank
+	_d(n, 2.4, 0.5, "navy", Vector3(3.2, 0.9, 0), 12)
+	_d(n, 2.4, 0.5, "navy", Vector3(3.2, 7.9, 0), 12)
+	_d(n, 1.7, 5.0, "teal_light", Vector3(3.2, 3.6, 0), 12) # the water inside
+	_b(n, Vector3(4.0, 0.6, 0.6), "steel", Vector3(0.4, 6.4, 0), 0.1) # pipe from drill to tank
+	for z in [-3.4, 3.4]:
+		_b(n, Vector3(0.6, 1.2, 0.6), "amber", Vector3(-5.0, 1.2, z), 0.1)
+	return n
 
 
 ## Mining Refinery: a smelter block with two chimneys and an ore conveyor.
