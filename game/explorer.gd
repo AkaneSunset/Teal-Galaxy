@@ -14,10 +14,16 @@ const SkyView := preload("res://sky.gd")
 const NavMap := preload("res://nav_map.gd")
 const SettingsMenu := preload("res://settings_menu.gd")
 const ChatBox := preload("res://chat_box.gd")
+const Models := preload("res://models.gd")
 const Raid := preload("res://raid.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
+const HUD_ICONS := {
+	"boost": preload("res://ui/hud_icons/boost.png"),
+	"phase": preload("res://ui/hud_icons/phase.png"),
+	"mass_lock": preload("res://ui/hud_icons/mass_lock.png"),
+}
 const MINE_ENERGY := 1.2 # from the weapons capacitor, per tick
 const MINE_RANGE := 150.0 # metres from a rock's surface
 const DOCK_RANGE := 1_500.0 # metres from the Spaceport to trade, or from a facility to board
@@ -141,6 +147,11 @@ func _build_local_space() -> void:
 		spoke.mesh.size = Vector3(460, 14, 14)
 		spoke.rotation.y = i * PI / 4.0
 		ring.add_child(spoke)
+	for side in [-1, 1]:
+		var beacon := Models.nav_beacon()
+		beacon.scale = Vector3.ONE * 2.0
+		beacon.position = Vector3(45 * side, 122, 45)
+		_port.add_child(beacon)
 	var pad := _mesh(BoxMesh.new(), Color(0.95, 0.6, 0.2), true)
 	pad.mesh.size = Vector3(70, 4, 70)
 	pad.position = Vector3(0, 122, 0)
@@ -162,17 +173,15 @@ func _build_local_space() -> void:
 	rng.seed = 7 # same field for every player
 	for i in 40:
 		var radius := rng.randf_range(15.0, 90.0)
-		var rock_mesh := SphereMesh.new()
-		rock_mesh.radius = radius
-		rock_mesh.height = radius * 2.0
-		rock_mesh.radial_segments = 9
-		rock_mesh.rings = 6
-		var rock := _mesh(rock_mesh, Color(0.75, 0.85, 0.95))
+		var rock := Models.ice_asteroid(radius, i + 1)
 		rock.position = Vector3(rng.randf_range(-1500, 1500), rng.randf_range(-400, 400), rng.randf_range(-1500, 1500))
 		rock.rotation = Vector3(rng.randf() * TAU, rng.randf() * TAU, 0)
-		rock.scale = Vector3(rng.randf_range(0.8, 1.25), rng.randf_range(0.7, 1.0), rng.randf_range(0.8, 1.25))
 		_field.add_child(rock)
 		_rocks.append({"node": rock, "radius": radius})
+	var field_beacon := Models.nav_beacon()
+	field_beacon.scale = Vector3.ONE * 4.0
+	field_beacon.position = Vector3(0, -30, 0)
+	_field.add_child(field_beacon)
 	add_child(_field)
 
 	# Dust drifting past the canopy, so speed can be felt with nothing else nearby.
@@ -843,6 +852,28 @@ func _draw_hud() -> void:
 		_hud.draw_rect(Rect2(x, base.y - 14, 36 * cap, 4), white)
 		_hud.draw_string(font, Vector2(x + 4, base.y + 4), names[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, white)
 
+	# Drive status icons, bottom centre: boost, phase-shift, and mass lock when it applies.
+	var icons := []
+	if flight.mode == Flight.Mode.SUBLIGHT:
+		var ready := flight.boost_left > 0.0 or flight.boost_ready()
+		var cool := 1.0 - clampf(flight.boost_cooldown / flight.stats.boost_cooldown, 0.0, 1.0)
+		icons.append([HUD_ICONS.boost, 1.0 if ready else 0.3, 1.0 if ready else cool])
+	var phase_alpha := 1.0 if flight.mode == Flight.Mode.PHASE else 0.3
+	var phase_fill := 0.0
+	if flight.mode == Flight.Mode.CHARGING:
+		phase_alpha = 0.6 + 0.4 * sin(Time.get_ticks_msec() / 120.0)
+		phase_fill = 1.0 - flight.charge_left / flight.stats.phase_charge
+	icons.append([HUD_ICONS.phase, phase_alpha, phase_fill])
+	if _flight_env().mass_locked:
+		icons.append([HUD_ICONS.mass_lock, 1.0, 0.0])
+	var ix := c.x - icons.size() * 26.0
+	for icon in icons:
+		var r := Rect2(ix + 4, size.y - 64, 44, 44)
+		_hud.draw_texture_rect(icon[0], r, false, Color(white, icon[1]))
+		if icon[2] > 0.0 and icon[2] < 1.0:
+			_hud.draw_arc(r.get_center(), 27, -PI / 2, -PI / 2 + TAU * icon[2], 32, white, 2.0)
+		ix += 52.0
+
 	# Shields and hull.
 	var sx := base.x + 150.0
 	_hud.draw_string(font, Vector2(sx, base.y - 34), "Shields", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, white)
@@ -997,10 +1028,7 @@ func _on_ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3) -> 
 	var world: Array = Net.last_ship_pos if Net.last_ship_pos.size() == 3 else [pos.x, pos.y, pos.z]
 	if not _others.has(id):
 		var node := Node3D.new()
-		var body := _mesh(PrismMesh.new(), Color(0.95, 0.4, 0.6))
-		body.mesh.size = Vector3(9, 15, 3)
-		body.rotation_degrees.x = -90 # tip points forward (-Z)
-		node.add_child(body)
+		node.add_child(Models.starter_ship())
 		var tag := Label3D.new()
 		tag.text = pilot_name
 		tag.position = Vector3(0, 10, 0)

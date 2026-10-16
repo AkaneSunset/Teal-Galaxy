@@ -28,10 +28,20 @@ func _ready() -> void:
 	col.add_theme_constant_override("separation", 10)
 	center.add_child(col)
 
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 10)
+	col.add_child(title_row)
+	var pic := TextureRect.new()
+	pic.texture = preload("res://ui/hud_icons/settings.png")
+	pic.custom_minimum_size = Vector2(32, 32)
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.modulate = controls.hud_color()
+	title_row.add_child(pic)
 	var title := Label.new()
 	title.text = "Settings"
 	title.add_theme_font_size_override("font_size", 26)
-	col.add_child(title)
+	title_row.add_child(title)
 
 	var drift := CheckBox.new()
 	drift.text = "Start with drift on (flight assist off)"
