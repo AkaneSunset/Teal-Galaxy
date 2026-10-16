@@ -48,6 +48,11 @@ func _ready() -> void:
 	_add_background_stars()
 
 
+## Adds a planet that appeared after the sky was built (a new Builder's home).
+func add_body(body: Dictionary) -> void:
+	_bodies.append({"node": _make_body(body), "pos": body.pos, "radius": body.radius})
+
+
 func _make_body(body: Dictionary) -> Node3D:
 	var mesh := SphereMesh.new()
 	mesh.radius = body.radius / KM

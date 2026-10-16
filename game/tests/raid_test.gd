@@ -1,11 +1,12 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
-## a Builder founds a facility's satellite site, the pilot flies to it, boards, search containers until the keycard turns up,
+## a Builder founds a facility's satellite site, the pilot docks at the planet's High Port, picks it in the transit menu, search containers until the keycard turns up,
 ## open the vault, take something from it, extract at the Shuttle Pad, and fly on with the loot.
 ## (Selling it is covered by the server tests.)
 ##   cd server && BUILD_SPEED=0 npm start
 ##   godot --headless --path game res://tests/raid.tscn
-## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way.
+## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way,
+## and `-- --server=ws://127.0.0.1:9000` to use a server on another port.
 ## Prints PASS or FAIL and quits.
 
 const ExplorerMode := preload("res://explorer.gd")
@@ -23,14 +24,17 @@ var _shots := ""
 var _shot_n := 0
 var _took_from_vault := false
 var _builder := WebSocketPeer.new() # a second connection playing the Builder who owns the site
-var _key := "" # the site's key in the explorer's facility list
+var _server := "ws://127.0.0.1:8080"
+var _key := "" # the planet whose High Port the pilot docks at
 
 
 func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--shots="):
 			_shots = arg.substr(8)
-	Net.connect_to("ws://127.0.0.1:8080", "explorer", "Raid Tester")
+		elif arg.begins_with("--server="):
+			_server = arg.substr(9)
+	Net.connect_to(_server, "explorer", "Raid Tester")
 	_explorer = ExplorerMode.new()
 	add_child(_explorer)
 	Net.server_error.connect(func(r): print("server: ", r))
@@ -47,7 +51,7 @@ func _process(delta: float) -> void:
 	match _step:
 		"build":
 			if _builder.get_ready_state() == WebSocketPeer.STATE_CLOSED:
-				_builder.connect_to_url("ws://127.0.0.1:8080")
+				_builder.connect_to_url(_server)
 			_builder.poll()
 			if _builder.get_ready_state() != WebSocketPeer.STATE_OPEN:
 				return
@@ -56,17 +60,26 @@ func _process(delta: float) -> void:
 			_step = "fly"
 		"fly":
 			_builder.poll()
-			if _facility().is_empty() or not _explorer._facilities.has(_facility().planet):
+			if _facility().is_empty():
 				return
-			_key = _facility().planet
-			_explorer.teleport(_explorer.System.offset(_explorer._facilities[_key].pos, Vector3(0, 0, 900)))
+			_key = Net.planet(_facility().planet).get("parent", _facility().planet)
+			if not _explorer._stations.has(_key):
+				return
+			_explorer.teleport(_explorer.System.offset(_explorer._stations[_key].pos, Vector3(0, 0, 900)))
 			_wait = 0.5
+			_step = "dock"
+		"dock":
+			_shot("1-at-high-port")
+			if not _explorer._prompt.text.contains("dock"):
+				_finish(false, "no docking prompt: " + _explorer._prompt.text)
+			_explorer.dock(_key)
+			_wait = 0.3
 			_step = "board"
 		"board":
-			_shot("1-at-facility")
-			if not _explorer._prompt.text.contains("board"):
-				_finish(false, "no boarding prompt: " + _explorer._prompt.text)
-			_explorer.board(_key)
+			var raid_button: Array = _explorer._dock_list.get_children().filter(func(c): return c is Button and c.text.contains(_facility().name))
+			if raid_button.is_empty():
+				_finish(false, "no raid option in the transit menu")
+			raid_button[0].pressed.emit()
 			_step = "inside"
 		"inside":
 			_raid = _explorer._raid

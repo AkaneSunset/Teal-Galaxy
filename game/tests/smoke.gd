@@ -54,7 +54,7 @@ func _builder_steps() -> void:
 func _explorer_steps() -> void:
 	match _step:
 		0:
-			if _mode._port.visible and not Net.open_job().is_empty():
+			if Net.has_building("spaceport") and not Net.open_job().is_empty():
 				_mode.teleport(_mode.System.offset(_mode.rock_position(0), Vector3(0, 0, _mode._rocks[0].radius + 40)))
 				for i in 10:
 					Net.send({"type": "collect", "resource": "ice", "amount": 1})

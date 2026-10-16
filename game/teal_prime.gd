@@ -30,21 +30,44 @@ const SPAWN_POS := [1_000_000.0, 2_000_000.0 + 300.0, -60_000_000_000.0 + 7_000_
 const PORT_NAME := "Aster High Port"
 const FIELD_NAME := "Aster Ice Field"
 
+# Every Builder's home planet has a High Port in orbit, placed off the planet like Aster's.
+const STATION_OFFSET := Vector3(1_000_000.0, 2_000_000.0, 7_000_000.0)
 
-## Facilities a Builder builds on Aster orbit in a ring 25 km around the Spaceport, one per slot.
-static func facility_pos(slot: int) -> Array:
-	var a := slot * TAU / 6.0
-	return [PORT_POS[0] + cos(a) * 25_000.0, PORT_POS[1] + (slot % 2) * 1_500.0, PORT_POS[2] + sin(a) * 25_000.0]
+## Builder home planets other than Aster (Brisa, Corvo, ...), added as Builders join.
+static var homes: Array = []
 
 
-## Satellite sites off Aster orbit in a wider ring, 40 km around the Spaceport, one per orbit slot.
-static func site_pos(orbit: int) -> Array:
-	var a := (orbit + 0.5) * TAU / 8.0
-	return [PORT_POS[0] + cos(a) * 40_000.0, PORT_POS[1] + (orbit % 2) * 2_000.0 - 1_000.0, PORT_POS[2] + sin(a) * 40_000.0]
+## A Builder home planet other than Aster: the `index`th one founded gets its own orbit around the star.
+static func home_planet(id: String, planet_name: String, index: int) -> Dictionary:
+	var a := 1.1 + index * 2.4
+	var r := (90.0 + index * 35.0) * 1_000_000_000.0
+	var h := absi(hash(id))
+	return {"id": id, "name": planet_name, "kind": "planet", "pos": [cos(a) * r, sin(index * 1.7) * 3_000_000_000.0, sin(a) * r],
+		"radius": 4_000_000.0 + (h % 4) * 1_000_000.0, "color": Color.from_hsv(fposmod(h * 0.618034, 1.0), 0.45, 0.62), "bands": false}
+
+
+## A Builder planet by id: Aster or one of the homes, else an empty Dictionary.
+static func builder_planet(id: String) -> Dictionary:
+	for p in PLANETS + homes:
+		if p.id == id:
+			return p
+	return {}
+
+
+## Where a Builder planet's High Port orbits. Aster's is PORT_POS.
+static func station_pos(planet_id: String) -> Array:
+	if planet_id == "aster":
+		return PORT_POS
+	var p := builder_planet(planet_id)
+	return offset(p.pos, STATION_OFFSET) if not p.is_empty() else PORT_POS
+
+
+static func station_name(planet_name: String) -> String:
+	return "%s High Port" % planet_name
 
 
 static func bodies() -> Array:
-	return [STAR] + PLANETS
+	return [STAR] + PLANETS + homes
 
 
 static func diff(a: Array, b: Array) -> Vector3:

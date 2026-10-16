@@ -1,6 +1,9 @@
 extends Node3D
 ## Explorer mode (PC): fly from the pilot's seat around Teal Prime, mine ice, deliver jobs,
-## and board Builders' facilities to raid them on foot (raid.gd).
+## and raid Builders' facilities on foot (raid.gd).
+## Every Builder planet has a High Port in orbit. Docking there opens the transit menu, which
+## shuttles the pilot down to the planet's Spaceport (jobs and the Fence) or into one of its
+## facilities to raid it.
 ## Everything is built from simple shapes in code, so there are no art assets yet.
 ##
 ## The ship always sits at the scene origin and the system is drawn around it (a floating
@@ -26,9 +29,8 @@ const HUD_ICONS := {
 }
 const MINE_ENERGY := 1.2 # from the weapons capacitor, per tick
 const MINE_RANGE := 150.0 # metres from a rock's surface
-const DOCK_RANGE := 1_500.0 # metres from the Spaceport to trade, or from a facility to board
-const FACILITY_RADIUS := 260.0
-const DOCK_SPEED := 80.0 # m/s or slower to trade
+const DOCK_RANGE := 1_500.0 # metres from a High Port to dock
+const DOCK_SPEED := 80.0 # m/s or slower to dock
 const PORT_RADIUS := 300.0
 const LOCAL_RANGE := 150_000.0 # local objects further than this aren't drawn
 const ARRIVE_DISTANCE := 1_000.0
@@ -45,16 +47,20 @@ var _cockpit_screens: Array[Label3D] = []
 var _accent: StandardMaterial3D
 var _sun: DirectionalLight3D
 var _sky: SubViewport
-var _port: Node3D
+var _stations := {} # planet id -> {"node", "pos", "name", "planet"}: the High Port over each Builder planet
+var _docked := "" # the planet whose High Port we're docked at, or ""
+var _at_spaceport := false # docked and shuttled down to the planet's Spaceport
+var _dock_panel: PanelContainer
+var _dock_title: Label
+var _dock_list: VBoxContainer
 var _field: Node3D
 var _rocks := [] # {"node": Node3D, "radius": float}
 var _dust: MultiMeshInstance3D
 var _dust_points := PackedVector3Array()
 var _others := {} # id -> {"node": Node3D, "pos": Array, "shown": Array}
 var _waypoints := [] # {"id", "name", "pos"}
-var _facilities := {} # key -> {"node", "type", "label", "planet", "slot", "name", "pos"} for facilities near Aster
 var _raid: Node3D # the on-foot raid while one is running
-var _raid_at := {} # the facility being raided: {"planet", "slot", "pos"}
+var _raid_from := "" # the High Port (planet id) the raid left from, to return to
 var _world_env: WorldEnvironment
 var _sky_layer: CanvasLayer
 var _hud_layer: CanvasLayer
@@ -129,44 +135,7 @@ func _build_sky() -> void:
 
 
 func _build_local_space() -> void:
-	# The Spaceport only appears once a builder has built it on the phone.
-	_port = Node3D.new()
-	var hub := _mesh(CylinderMesh.new(), Color(0.55, 0.58, 0.62))
-	hub.mesh.top_radius = 60
-	hub.mesh.bottom_radius = 60
-	hub.mesh.height = 240
-	_port.add_child(hub)
-	var ring := _mesh(TorusMesh.new(), Color(0.7, 0.72, 0.75))
-	ring.mesh.inner_radius = 230
-	ring.mesh.outer_radius = 280
-	ring.mesh.rings = 64
-	ring.name = "Ring"
-	_port.add_child(ring)
-	for i in 4:
-		var spoke := _mesh(BoxMesh.new(), Color(0.5, 0.52, 0.55))
-		spoke.mesh.size = Vector3(460, 14, 14)
-		spoke.rotation.y = i * PI / 4.0
-		ring.add_child(spoke)
-	for side in [-1, 1]:
-		var beacon := Models.nav_beacon()
-		beacon.scale = Vector3.ONE * 2.0
-		beacon.position = Vector3(45 * side, 122, 45)
-		_port.add_child(beacon)
-	var pad := _mesh(BoxMesh.new(), Color(0.95, 0.6, 0.2), true)
-	pad.mesh.size = Vector3(70, 4, 70)
-	pad.position = Vector3(0, 122, 0)
-	_port.add_child(pad)
-	var tag := Label3D.new()
-	tag.text = System.PORT_NAME
-	tag.position = Vector3(0, 340, 0)
-	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.fixed_size = true
-	tag.pixel_size = 0.0006
-	tag.font_size = 48
-	tag.no_depth_test = true
-	_port.add_child(tag)
-	_port.visible = false
-	add_child(_port)
+	_add_station("aster", System.PORT_NAME, System.PORT_POS)
 
 	_field = Node3D.new()
 	var rng := RandomNumberGenerator.new()
@@ -202,6 +171,62 @@ func _build_local_space() -> void:
 	_dust = MultiMeshInstance3D.new()
 	_dust.multimesh = mm
 	add_child(_dust)
+
+
+## A High Port: the orbital station over a Builder planet, where pilots dock to go down to the surface.
+func _add_station(planet_id: String, station_name: String, pos: Array) -> void:
+	var port := Node3D.new()
+	var hub := _mesh(CylinderMesh.new(), Color(0.55, 0.58, 0.62))
+	hub.mesh.top_radius = 60
+	hub.mesh.bottom_radius = 60
+	hub.mesh.height = 240
+	port.add_child(hub)
+	var ring := _mesh(TorusMesh.new(), Color(0.7, 0.72, 0.75))
+	ring.mesh.inner_radius = 230
+	ring.mesh.outer_radius = 280
+	ring.mesh.rings = 64
+	ring.name = "Ring"
+	port.add_child(ring)
+	for i in 4:
+		var spoke := _mesh(BoxMesh.new(), Color(0.5, 0.52, 0.55))
+		spoke.mesh.size = Vector3(460, 14, 14)
+		spoke.rotation.y = i * PI / 4.0
+		ring.add_child(spoke)
+	for side in [-1, 1]:
+		var beacon := Models.nav_beacon()
+		beacon.scale = Vector3.ONE * 2.0
+		beacon.position = Vector3(45 * side, 122, 45)
+		port.add_child(beacon)
+	var pad := _mesh(BoxMesh.new(), Color(0.95, 0.6, 0.2), true)
+	pad.mesh.size = Vector3(70, 4, 70)
+	pad.position = Vector3(0, 122, 0)
+	port.add_child(pad)
+	var tag := Label3D.new()
+	tag.text = station_name
+	tag.position = Vector3(0, 340, 0)
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.fixed_size = true
+	tag.pixel_size = 0.0006
+	tag.font_size = 48
+	tag.no_depth_test = true
+	port.add_child(tag)
+	add_child(port)
+	_stations[planet_id] = {"node": port, "pos": pos, "name": station_name, "planet": planet_id}
+
+
+## Every Builder home planet gets a High Port; planets beyond Aster are added to the sky as they appear.
+func _sync_stations() -> void:
+	var index := 0
+	for p in Net.state.system.planets:
+		if p.get("kind", "") == "satellite" or p.id == "aster":
+			continue
+		if System.builder_planet(p.id).is_empty():
+			var body := System.home_planet(p.id, p.name, index)
+			System.homes.append(body)
+			_sky.add_body(body)
+		index += 1
+		if not _stations.has(p.id):
+			_add_station(p.id, System.station_name(p.name), System.station_pos(p.id))
 
 
 func _mesh(mesh: Mesh, color: Color, glow := false) -> MeshInstance3D:
@@ -331,6 +356,8 @@ func _build_hud() -> void:
 	_nav.waypoint_added.connect(_add_waypoint)
 	_nav.waypoint_removed.connect(_remove_waypoint)
 
+	_build_dock_panel(layer)
+
 	_settings = SettingsMenu.new()
 	_settings.controls = controls
 	_settings.visible = false
@@ -351,6 +378,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _chat.is_typing():
 		if event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel"):
 			_chat.close()
+			get_viewport().set_input_as_handled()
+		return
+	if _docked != "" and not _nav.visible:
+		if event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel"):
+			if _at_spaceport:
+				_at_spaceport = false
+				_refresh_dock()
+			else:
+				undock()
+			get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("chat"):
+			_chat.open()
 			get_viewport().set_input_as_handled()
 		return
 	if _nav.visible:
@@ -384,7 +423,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _refresh_focus() -> void:
-	var overlay: bool = _settings.visible or _nav.visible
+	var overlay: bool = _settings.visible or _nav.visible or _dock_panel.visible
 	controls.enabled = not overlay and not _chat.is_typing()
 	if overlay:
 		controls.release_mouse()
@@ -400,6 +439,9 @@ func _process(delta: float) -> void:
 	if controls.drift_hold and controls.enabled:
 		flight.drift = Input.is_action_pressed("drift")
 	var input: Dictionary = controls.read()
+	if _docked != "":
+		flight.velocity = Vector3.ZERO
+		flight.throttle = 0.0
 	for said in flight.step(input, _flight_env(), delta):
 		_say(said)
 	_pos = System.offset(_pos, flight.velocity * delta)
@@ -422,7 +464,10 @@ func _process(delta: float) -> void:
 		Net.send({"type": "ship", "pos": _pos, "rot": [r.x, r.y, r.z]})
 
 	_mine_timer -= delta
-	_interact()
+	if _docked == "":
+		_interact()
+	else:
+		_prompt.text = ""
 	_nav_timer -= delta
 	if _nav_timer <= 0.0:
 		_nav_timer = 0.25
@@ -435,23 +480,20 @@ func _flight_env() -> Dictionary:
 	for body in System.bodies():
 		altitude = minf(altitude, System.distance(body.pos, _pos) - body.radius)
 	return {
-		"mass_locked": _port.visible and System.distance(System.PORT_POS, _pos) < Flight.MASS_LOCK_DISTANCE,
+		"mass_locked": _near_station(Flight.MASS_LOCK_DISTANCE) != "",
 		"altitude": altitude,
 		"dest_distance": _dest_distance(),
 	}
 
 
 func _place_world(delta: float) -> void:
-	for key in _facilities:
-		var f: Node3D = _facilities[key].node
-		f.position = System.diff(_facilities[key].pos, _pos)
-		f.visible = f.position.length() < LOCAL_RANGE
-	for pair in [[_port, System.PORT_POS], [_field, System.FIELD_POS]]:
-		var rel := System.diff(pair[1], _pos)
-		pair[0].position = rel
-		if pair[0] == _field:
-			_field.visible = rel.length() < LOCAL_RANGE
-	_port.get_node("Ring").rotate_y(0.03 * delta)
+	for id in _stations:
+		var port: Node3D = _stations[id].node
+		port.position = System.diff(_stations[id].pos, _pos)
+		port.visible = port.position.length() < LOCAL_RANGE
+		port.get_node("Ring").rotate_y(0.03 * delta)
+	_field.position = System.diff(System.FIELD_POS, _pos)
+	_field.visible = _field.position.length() < LOCAL_RANGE
 
 	for id in _others:
 		var o: Dictionary = _others[id]
@@ -482,10 +524,8 @@ func _collide() -> void:
 	var spheres := []
 	for rock in _rocks:
 		spheres.append([System.diff(System.FIELD_POS, _pos) + rock.node.position, rock.radius])
-	if _port.visible:
-		spheres.append([System.diff(System.PORT_POS, _pos), PORT_RADIUS])
-	for key in _facilities:
-		spheres.append([System.diff(_facilities[key].pos, _pos), FACILITY_RADIUS])
+	for id in _stations:
+		spheres.append([System.diff(_stations[id].pos, _pos), PORT_RADIUS])
 	for s in spheres:
 		var rel: Vector3 = s[0]
 		var reach: float = s[1] + SHIP_RADIUS
@@ -521,21 +561,15 @@ func _respawn() -> void:
 
 # --- Navigation ----------------------------------------------------------------
 
-func _port_item() -> Dictionary:
-	return {"id": "port", "name": System.PORT_NAME, "kind": "landmark", "pos": System.PORT_POS, "standoff": 5_500.0, "local": true}
-
-
 func _nav_items() -> Array:
 	var items := []
 	for body in System.bodies():
 		items.append({"id": body.id, "name": body.name, "kind": "landmark", "pos": body.pos,
 			"radius": body.radius, "standoff": body.radius + 300_000.0})
-	if _port.visible:
-		items.append(_port_item())
+	for id in _stations:
+		var st: Dictionary = _stations[id]
+		items.append({"id": "port-" + id, "name": st.name, "kind": "landmark", "pos": st.pos, "standoff": 5_500.0, "local": id == "aster"})
 	items.append({"id": "field", "name": System.FIELD_NAME, "kind": "landmark", "pos": System.FIELD_POS, "standoff": 2_500.0, "local": true})
-	for key in _facilities:
-		var f: Dictionary = _facilities[key]
-		items.append({"id": "facility-" + key, "name": f.name, "kind": "facility", "pos": f.pos, "standoff": 1_200.0, "local": true})
 	for w in _waypoints:
 		items.append({"id": w.id, "name": w.name, "kind": "waypoint", "pos": w.pos, "standoff": 0.0})
 	for id in _others:
@@ -606,71 +640,151 @@ func _interact() -> void:
 			if holding and _mine_timer <= 0 and flight.draw(Flight.WEP, MINE_ENERGY):
 				_mine_timer = MINE_EVERY
 				Net.send({"type": "collect", "resource": "ice", "amount": 1})
-	elif _near_facility() != "":
-		_facility_prompt(_near_facility(), holding)
-	elif _port.visible and System.distance(System.PORT_POS, _pos) < DOCK_RANGE:
-		var job := Net.open_job()
-		var stash: Array = _me().get("stash", [])
+	elif _near_station(DOCK_RANGE) != "":
+		var id := _near_station(DOCK_RANGE)
 		if flight.speed() > DOCK_SPEED:
-			_prompt.text = "Slow below %d m/s to trade with the Spaceport" % DOCK_SPEED
-		elif not stash.is_empty() and (job.is_empty() or _cargo(job.resource) <= 0):
-			_prompt.text = "Press %s to sell %d raided items to the Fence for %d credits" % [controls.binding_text("interact", false), stash.size(), _stash_value() / 2]
-			if holding and _mine_timer <= 0:
-				_mine_timer = 1.0
-				Net.send({"type": "sell"})
-		elif job.is_empty():
-			_prompt.text = "At the Spaceport. No open jobs."
-		elif _cargo(job.resource) <= 0:
-			_prompt.text = "Job #%d wants %s. Go mine some." % [job.id, job.resource]
+			_prompt.text = "Slow below %d m/s to dock at %s" % [DOCK_SPEED, _stations[id].name]
 		else:
-			_prompt.text = "Press %s to deliver %d %s for job #%d" % [controls.binding_text("interact", false), _cargo(job.resource), job.resource, job.id]
-			if holding and _mine_timer <= 0:
-				_mine_timer = 1.0
-				Net.send({"type": "deliver", "job": int(job.id)})
+			_prompt.text = "Press %s to dock at %s" % [controls.binding_text("interact", false), _stations[id].name]
+			if holding:
+				dock(id)
 	else:
 		_prompt.text = ""
 
 
-## The key of the facility within docking range, or "".
-func _near_facility() -> String:
-	for key in _facilities:
-		if System.distance(_facilities[key].pos, _pos) < DOCK_RANGE:
-			return key
+## The planet whose High Port is within `range_m`, or "".
+func _near_station(range_m: float) -> String:
+	for id in _stations:
+		if System.distance(_stations[id].pos, _pos) < range_m:
+			return id
 	return ""
 
 
-func _facility_prompt(key: String, holding: bool) -> void:
-	var spot: Dictionary = _facilities[key]
-	var fac := {}
-	for f in Net.facilities():
-		if f.planet == spot.planet and f.slot == spot.slot:
-			fac = f
-	if fac.is_empty():
-		_prompt.text = ""
+# --- Docking and surface transit ----------------------------------------------------------
+
+func dock(planet_id: String) -> void:
+	_docked = planet_id
+	_at_spaceport = false
+	flight.velocity = Vector3.ZERO
+	flight.throttle = 0.0
+	_dock_panel.visible = true
+	_refresh_focus()
+	_refresh_dock()
+
+
+func undock() -> void:
+	_docked = ""
+	_at_spaceport = false
+	_dock_panel.visible = false
+	_refresh_focus()
+	_say("Undocked. Fly safe.")
+
+
+## Facilities on a planet's satellite sites (and any still on its own pads).
+func facilities_on(planet_id: String) -> Array:
+	return Net.facilities().filter(func(f): return f.planet == planet_id or Net.planet(f.planet).get("parent", "") == planet_id)
+
+
+func _refresh_dock() -> void:
+	if _docked == "" or Net.state.is_empty():
 		return
-	var b: Dictionary = fac.building
-	var vault := 0
-	for id in b.vault:
-		vault += int(b.vault[id])
-	var cool := (float(b.cooldownUntil) - Net.now_ms()) / 1000.0
-	if not Net.raid_on(spot.planet, spot.slot).is_empty():
-		_prompt.text = "%s: someone is already inside" % fac.name
-	elif cool > 0:
-		_prompt.text = "%s: security on alert after a raid (%d s)" % [fac.name, ceili(cool)]
-	elif flight.speed() > DOCK_SPEED:
-		_prompt.text = "Slow below %d m/s to board %s" % [DOCK_SPEED, fac.name]
+	for child in _dock_list.get_children():
+		child.queue_free()
+	var p := Net.planet(_docked)
+	var owner: String = str(p.get("owner", "nobody")) if p.get("owner") != null else "nobody"
+	if _at_spaceport:
+		_dock_title.text = "%s's Spaceport, on %s" % [owner, p.get("name", _docked)]
+		var job := Net.open_job(_docked)
+		var stash: Array = _me().get("stash", [])
+		if job.is_empty():
+			_dock_note("No open jobs here.")
+		elif _cargo(job.resource) <= 0:
+			_dock_note("Job #%d wants %d %s (%d delivered). Go mine some." % [job.id, job.amount, job.resource, job.delivered])
+		else:
+			_dock_button("Deliver %d %s for job #%d" % [_cargo(job.resource), job.resource, job.id],
+				func(): Net.send({"type": "deliver", "job": int(job.id)}))
+		if stash.is_empty():
+			_dock_note("Nothing to sell to the Fence.")
+		else:
+			_dock_button("Sell %d raided items to the Fence for %d credits" % [stash.size(), _stash_value() / 2],
+				func(): Net.send({"type": "sell"}))
+		_dock_button("Shuttle back up to %s" % _stations[_docked].name, func():
+			_at_spaceport = false
+			_refresh_dock())
 	else:
-		_prompt.text = "%s, security tier %d, %d items in the vault\nPress %s to board and raid it" % [fac.name, int(b.security), vault, controls.binding_text("interact", false)]
-		if holding and _mine_timer <= 0:
-			_mine_timer = 2.0
-			board(key)
+		_dock_title.text = "Docked at %s, orbiting %s" % [_stations[_docked].name, p.get("name", _docked)]
+		if Net.has_building("spaceport", _docked):
+			_dock_button("Shuttle down to %s's Spaceport" % owner, func():
+				_at_spaceport = true
+				_say("Your ship is shuttled down to %s's Spaceport." % owner)
+				_refresh_dock())
+		else:
+			_dock_note("%s has no Spaceport yet." % p.get("name", _docked))
+		var facs := facilities_on(_docked)
+		if facs.is_empty():
+			_dock_note("No facilities to raid on %s." % p.get("name", _docked))
+		for f in facs:
+			var b: Dictionary = f.building
+			var vault := 0
+			for id in b.vault:
+				vault += int(b.vault[id])
+			var cool := (float(b.get("cooldownUntil", 0)) - Net.now_ms()) / 1000.0
+			var label := "Raid %s (%s's): security tier %d, %d items in the vault" % [f.name, owner, int(b.security), vault]
+			if not Net.raid_on(f.planet, f.slot).is_empty():
+				_dock_note("%s: someone is already inside" % f.name)
+			elif cool > 0:
+				_dock_note("%s: security on alert after a raid (%d s)" % [f.name, ceili(cool)])
+			else:
+				_dock_button(label, board.bind(f.planet, f.slot))
+		_dock_button("Undock", undock)
+	var first := _dock_list.get_children().filter(func(c): return c is Button and not c.is_queued_for_deletion())
+	if not first.is_empty():
+		first[0].grab_focus.call_deferred()
 
 
-## Asks the server to start a raid on a facility (by its key in _facilities); the raid begins when it answers.
-func board(key: String) -> void:
-	var spot: Dictionary = _facilities[key]
-	_raid_at = {"planet": spot.planet, "slot": spot.slot, "pos": spot.pos}
-	Net.send({"type": "raid_start", "planet": spot.planet, "slot": spot.slot})
+func _dock_button(text: String, action: Callable) -> void:
+	var b := Button.new()
+	b.text = text
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_font_size_override("font_size", 18)
+	b.pressed.connect(action)
+	_dock_list.add_child(b)
+
+
+func _dock_note(text: String) -> void:
+	var l := Label.new()
+	l.text = text
+	l.modulate = Color(1, 1, 1, 0.6)
+	_dock_list.add_child(l)
+
+
+func _build_dock_panel(layer: CanvasLayer) -> void:
+	_dock_panel = PanelContainer.new()
+	_dock_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_dock_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_dock_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_dock_panel.custom_minimum_size = Vector2(620, 0)
+	_dock_panel.visible = false
+	layer.add_child(_dock_panel)
+	var margin := MarginContainer.new()
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 20)
+	_dock_panel.add_child(margin)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	margin.add_child(col)
+	_dock_title = Label.new()
+	_dock_title.add_theme_font_size_override("font_size", 24)
+	col.add_child(_dock_title)
+	_dock_list = VBoxContainer.new()
+	_dock_list.add_theme_constant_override("separation", 8)
+	col.add_child(_dock_list)
+
+
+## Asks the server to start a raid on a facility; the raid begins when it answers.
+func board(planet_id: String, slot: int) -> void:
+	_raid_from = _docked
+	Net.send({"type": "raid_start", "planet": planet_id, "slot": slot})
 
 
 func _stash_value() -> int:
@@ -736,7 +850,7 @@ func _update_hud(delta: float) -> void:
 		_cargo("ice"),
 		int(me.get("credits", 0)),
 		int(me.get("reputation", 0)),
-		("Job #%d: deliver %s %d/%d to %s" % [job.id, job.resource, job.delivered, job.amount, System.PORT_NAME]) if not job.is_empty() else "No open jobs",
+		("Job #%d: deliver %s %d/%d to %s's Spaceport" % [job.id, job.resource, job.delivered, job.amount, Net.planet(job.get("planet", "aster")).get("name", "Aster")]) if not job.is_empty() else "No open jobs",
 		("\nRaided loot: %d items, about %d credits at the Fence" % [stash.size(), _stash_value() / 2]) if not stash.is_empty() else "",
 	]
 
@@ -901,97 +1015,12 @@ func _draw_hud() -> void:
 # --- Server events ----------------------------------------------------------------
 
 func _on_state(_state: Dictionary) -> void:
-	_port.visible = Net.has_building("spaceport") and _raid == null
-	_sync_facilities()
+	_sync_stations()
+	if _docked != "" and _raid == null:
+		_refresh_dock()
 
 
-# --- Facilities and raids -------------------------------------------------------------
-
-## Facilities near Aster: satellite sites orbiting it (keyed by site id), and any older facility
-## still on one of Aster's pads (keyed "aster:<slot>").
-func _sync_facilities() -> void:
-	var live := {}
-	for f in Net.facilities():
-		var key := ""
-		var pos: Array
-		if f.planet == "aster":
-			key = "aster:%d" % f.slot
-			pos = System.facility_pos(f.slot)
-		else:
-			var site := Net.planet(f.planet)
-			if site.get("parent", "") != "aster":
-				continue
-			key = f.planet
-			pos = System.site_pos(int(site.orbit))
-		live[key] = true
-		if not _facilities.has(key) or _facilities[key].type != f.type:
-			if _facilities.has(key):
-				_facilities[key].node.queue_free()
-			_facilities[key] = _build_facility(f.type)
-		_facilities[key].merge({"planet": f.planet, "slot": f.slot, "name": f.name, "pos": pos}, true)
-		var raid := Net.raid_on(f.planet, f.slot)
-		_facilities[key].label.text = "%s\nSecurity tier %d%s" % [f.name, int(f.building.security), "\nRAID IN PROGRESS" if not raid.is_empty() else ""]
-	for key in _facilities.keys():
-		if not live.has(key):
-			_facilities[key].node.queue_free()
-			_facilities.erase(key)
-
-
-func _build_facility(type: String) -> Dictionary:
-	var root := Node3D.new()
-	var hull := Color(0.42, 0.44, 0.48)
-	match type:
-		"refinery":
-			var body := _mesh(BoxMesh.new(), hull)
-			body.mesh.size = Vector3(320, 110, 200)
-			root.add_child(body)
-			for x in [-110, 0, 110]:
-				var stack := _mesh(CylinderMesh.new(), Color(0.3, 0.3, 0.32))
-				stack.mesh.top_radius = 18
-				stack.mesh.bottom_radius = 24
-				stack.mesh.height = 160
-				stack.position = Vector3(x, 130, -40)
-				root.add_child(stack)
-			var glow := _mesh(BoxMesh.new(), Color(1.0, 0.55, 0.15), true)
-			glow.mesh.size = Vector3(300, 8, 4)
-			glow.position = Vector3(0, 20, 101)
-			root.add_child(glow)
-		"lab":
-			var dome := _mesh(SphereMesh.new(), Color(0.7, 0.78, 0.82))
-			dome.mesh.radius = 150
-			dome.mesh.height = 300
-			root.add_child(dome)
-			var ring := _mesh(TorusMesh.new(), Color(0.3, 0.8, 1.0), true)
-			ring.mesh.inner_radius = 170
-			ring.mesh.outer_radius = 185
-			root.add_child(ring)
-		_:
-			var spire := _mesh(BoxMesh.new(), Color(0.2, 0.22, 0.28))
-			spire.mesh.size = Vector3(70, 520, 70)
-			root.add_child(spire)
-			for y in [-150, 0, 150]:
-				var band := _mesh(TorusMesh.new(), Color(0.55, 0.45, 1.0), true)
-				band.mesh.inner_radius = 70
-				band.mesh.outer_radius = 82
-				band.position.y = y
-				root.add_child(band)
-	var light := _mesh(SphereMesh.new(), Color(1.0, 0.2, 0.15), true)
-	light.mesh.radius = 6
-	light.mesh.height = 12
-	light.position = Vector3(0, 200, 0)
-	root.add_child(light)
-	var tag := Label3D.new()
-	tag.position = Vector3(0, 320, 0)
-	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.fixed_size = true
-	tag.pixel_size = 0.0006
-	tag.font_size = 40
-	tag.no_depth_test = true
-	tag.modulate = Color(1.0, 0.7, 0.6)
-	root.add_child(tag)
-	add_child(root)
-	return {"node": root, "type": type, "label": tag}
-
+# --- Raids -------------------------------------------------------------------------------
 
 func _on_raid_event(msg: Dictionary) -> void:
 	if msg.ev == "begin" and _raid == null:
@@ -1002,6 +1031,7 @@ func _enter_raid(briefing: Dictionary) -> void:
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
 	controls.enabled = false
+	_dock_panel.visible = false
 	_set_space_visible(false)
 	_raid = Raid.new(briefing)
 	_raid.controls = controls
@@ -1015,19 +1045,18 @@ func _leave_raid(_result: Dictionary) -> void:
 	_set_space_visible(true)
 	_camera.make_current()
 	controls.enabled = true
-	controls.capture_mouse()
-	if not _raid_at.is_empty():
-		teleport(System.offset(_raid_at.pos, Vector3(0, 0, 1_200)))
-	_say("Back aboard. Sell your loot to the Fence at %s." % System.PORT_NAME)
+	var back := _raid_from if _stations.has(_raid_from) else "aster"
+	teleport(System.offset(_stations[back].pos, Vector3(0, 0, 900)))
+	dock(back)
+	_say("Shuttled back up to %s. Sell your loot to the Fence at a Spaceport." % _stations[back].name)
 
 
 func _set_space_visible(on: bool) -> void:
 	for node in [_ship, _dust, _sun, _sky_layer, _hud_layer]:
 		node.visible = on
-	_port.visible = on and Net.has_building("spaceport")
 	_field.visible = on
-	for key in _facilities:
-		_facilities[key].node.visible = on
+	for id in _stations:
+		_stations[id].node.visible = on
 	for id in _others:
 		_others[id].node.visible = on
 	_sky.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED

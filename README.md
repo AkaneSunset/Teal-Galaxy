@@ -119,8 +119,11 @@ boards, the facility turns red and the Raids list shows the intruder's Heat and 
 *Sound the alarm* (50 credits) adds 25 Heat for them. A raid can reach 60% of each vault stack; the
 rest is in deep storage, and anything the raider doesn't carry out goes back in the vault.
 
-**Explorer (PC):** facilities orbit 25 km from the Spaceport and show on the map in red. Fly
-within 1.5 km, slow down and press **F** to board. Inside, on foot and in first person:
+**Explorer (PC):** every Builder planet (Aster, Brisa, Corvo...) has a **High Port** in orbit, on the
+nav map. Fly within 1.5 km, slow down and press **F** to dock. Docking opens the transit menu: shuttle
+down to the planet's Spaceport (deliver jobs, sell loot to the Fence) or pick one of the planet's
+facilities to be taken straight down to it and raid it. After a raid you're shuttled back up to the
+High Port, docked. Esc goes back a step or undocks. Inside a facility, on foot and in first person:
 
 - The facility is a grid of rooms. The **vault** is the room furthest from the airlock, behind a
   red door: swipe an **access keycard** (one is hidden in some container) or drill it (loud, 30 s).
@@ -132,7 +135,7 @@ within 1.5 km, slow down and press **F** to board. Inside, on foot and in first 
 - **Extract** by standing in a zone: the Shuttle Pad outside the airlock (20 s, loud), the Service
   Lift (8 s, silent, eats a keycard) or the Escape Pod (5 s, one use, after minute 3). With 5 minutes
   left the extracts freeze as they are. If the clock runs out you're missing in action.
-- Extracted loot goes to your stash; sell it to the Fence at the Spaceport for half its value.
+- Extracted loot goes to your stash; sell it to the Fence at any Spaceport for half its value.
 
 | On foot | Keyboard and mouse | Gamepad |
 | --- | --- | --- |

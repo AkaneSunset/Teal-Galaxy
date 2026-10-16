@@ -194,7 +194,7 @@ func _draw_map() -> void:
 	_area.draw_string(font, c0 + Vector2(ring_step / mpp + 4, -4), System.format_distance(ring_step), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(colour, 0.5))
 
 	if level == Level.SYSTEM:
-		for body in System.PLANETS:
+		for body in System.PLANETS + System.homes:
 			_area.draw_arc(c0, System.distance(body.pos, System.STAR.pos) / mpp, 0, TAU, 128, Color(colour, 0.2), 1.0)
 
 	# Route.
