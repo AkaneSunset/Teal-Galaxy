@@ -6,6 +6,7 @@ const G = require('../galaxy');
 
 test('the first Builder takes Aster and its starting economy; the next founds a new planet', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 77;
   const a = G.claimBase(g, 'Akane');
   assert.strictEqual(a.id, 'aster');
@@ -20,6 +21,7 @@ test('the first Builder takes Aster and its starting economy; the next founds a 
 
 test('each base pays for, builds and earns on its own planet only', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const rin = G.claimBase(g, 'Rin');
   assert.ok(G.owns(g, 'Rin', rin.id));
@@ -40,6 +42,7 @@ test('each base pays for, builds and earns on its own planet only', () => {
 
 test('deliveries land in the stock of the base that posted the job', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const rin = G.claimBase(g, 'Rin');
   g.bases.Rin.stock.metal = 100;
@@ -57,6 +60,7 @@ test('deliveries land in the stock of the base that posted the job', () => {
 test('facilities go on satellite sites with a free grid of defences', () => {
   const S = require('../sites');
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   e.stock.metal = 500;
@@ -94,6 +98,7 @@ test('facilities go on satellite sites with a free grid of defences', () => {
 test('obstacles block defences until cleared for credits, and some leave salvage', () => {
   const S = require('../sites');
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   e.stock.metal = 500;

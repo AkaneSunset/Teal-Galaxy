@@ -23,6 +23,18 @@ const BUILDING_INFO := {
 	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport", "limit": 1,
 		"about": "Builds warships for your navy. Open the Shipyard to queue them."},
 }
+## What each level adds, for the Info page.
+const LEVEL_EFFECT := {
+	"mine": "Each level digs another 12 metal a minute.",
+	"extractor": "Each level melts another 2 ice a minute.",
+	"habitat": "Each level houses 50 more people paying another 12 credits a minute.",
+	"hydroponics": "Each level sells another 24 credits of food a minute.",
+	"spaceport": "Each level makes your facilities' freighters come sooner (every 5 minutes divided by the level).",
+	"foundry": "Each level builds warships 25% faster.",
+	"refinery": "Each level makes more per batch and holds more in the vault.",
+	"lab": "Each level makes more per batch and holds more in the vault.",
+	"spire": "Each level makes more per batch and holds more in the vault.",
+}
 const CARD_ICON := {"foundry": "ship_emblem", "extractor": "ice"} # shop icons for buildings without their own
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 
@@ -1010,6 +1022,50 @@ func _pad_name(slot: int) -> String:
 	return "%s  (Tier %d)" % [n, int(b.security)] if _is_facility(b.type) else n
 
 
+# --- Build times and levels (server: BUILD_S, levelCost, upgradeBuilding) ---------------
+
+## Seconds until a building (or defence) finishes its construction or upgrade; 0 when it's working.
+func _work_left(b: Dictionary) -> float:
+	if not b.has("readyAt"):
+		return 0.0
+	return maxf(0.0, (float(b.readyAt) - Net.now_ms()) / 1000.0)
+
+
+func _clock_text(secs: float) -> String:
+	var s := ceili(secs)
+	return "%d:%02d" % [s / 60, s % 60]
+
+
+## What taking a building from `level` to the next costs (level 0 is building it).
+func _level_cost(type: String, level: int) -> Dictionary:
+	var out := {}
+	var growth := pow(float(Net.catalog.get("levelGrowth", 2)), level)
+	for res in BUILDING_INFO[type].cost:
+		out[res] = roundi(float(BUILDING_INFO[type].cost[res]) * growth)
+	return out
+
+
+func _level_secs(type: String, level: int) -> float:
+	var base := float(Net.catalog.get("buildTimes", {}).get(type, 0))
+	var speed := float(Net.catalog.get("buildSpeed", 1))
+	if speed <= 0.0:
+		return 0.0 # the server builds instantly
+	return base * pow(float(Net.catalog.get("levelGrowth", 2)), level) / speed
+
+
+## "Mine L2", or "Mine  building 0:12" / "Mine L2  upgrading 0:30" while it works.
+func _building_label(b: Dictionary) -> String:
+	var n: String = BUILDING_INFO.get(b.type, {"name": b.type}).name
+	var level := int(b.get("level", 1))
+	var left := _work_left(b)
+	if left > 0 and level == 0:
+		return "%s  building %s" % [n, _clock_text(left)]
+	n += " L%d" % level
+	if left > 0:
+		n += "  upgrading %s" % _clock_text(left)
+	return n
+
+
 func _cost_text(cost: Dictionary) -> String:
 	var parts := []
 	for id in cost:
@@ -1075,8 +1131,9 @@ func _refresh_pads(state: Dictionary) -> void:
 		var b := _building_at(i)
 		var raid := Net.raid_on(_pid(), i) if not b.is_empty() else {}
 		var key := ""
+		var constructing := not b.is_empty() and int(b.get("level", 1)) == 0 and _work_left(b) > 0
 		if not b.is_empty():
-			key = "%s:%d" % [b.type, int(b.get("security", 0))]
+			key = "%s:%d:%s" % [b.type, int(b.get("security", 0)), constructing]
 			if b.type == "foundry":
 				key += ":%d" % mini(_fleet_size(state), 3)
 		if key != p.key:
@@ -1088,7 +1145,7 @@ func _refresh_pads(state: Dictionary) -> void:
 				p.model.position.y = 1.0
 				p.model.rotation_degrees.y = 45.0 + 60.0 * i
 				p.root.add_child(p.model)
-				p.model.add_child(BaseModels.building(b.type))
+				p.model.add_child(BaseModels.construction(14.0) if constructing else BaseModels.building(b.type))
 				# Security turrets around a facility, one per turret its tier adds.
 				var turrets := int(tiers.get(str(int(b.get("security", 0))), {}).get("turrets", 0))
 				for t in turrets:
@@ -1110,7 +1167,7 @@ func _refresh_pads(state: Dictionary) -> void:
 		p.plus.modulate = Color(0.5, 1.0, 0.6, 0.95) if _placing != "" else Color(0.6, 1.0, 1.0, 0.6)
 		p.label.visible = not b.is_empty()
 		if not b.is_empty():
-			var n: String = BUILDING_INFO.get(b.type, {"name": b.type}).name
+			var n := _building_label(b)
 			if _is_facility(b.type):
 				n += "  T%d" % int(b.security)
 			p.label.text = ("RAID!  " + n) if not raid.is_empty() else n
@@ -1147,6 +1204,8 @@ func _refresh_selection(state: Dictionary) -> void:
 			_set_actions([{"id": "clear", "text": "Clear  %d" % int(od.clear), "icon": "credits"}])
 			return
 		_select_name.text = Net.catalog.sites.pieces[piece.type].name
+		if _work_left(piece) > 0:
+			_select_name.text += "  (building %s)" % _clock_text(_work_left(piece))
 		_set_actions([{"id": "remove", "text": "Remove", "icon": "economy"}])
 		return
 	_select_name.text = _pad_name(_selected)
@@ -1156,6 +1215,18 @@ func _refresh_selection(state: Dictionary) -> void:
 		acts.append({"id": "build", "text": "Build here", "icon": "launch"})
 	else:
 		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
+		var left := _work_left(b)
+		var level := int(b.get("level", 1))
+		if left > 0:
+			# Nothing else works while it's being built or upgraded.
+			acts.append({"id": "", "icon": "phase", "disabled": true,
+				"text": ("Building %s" if level == 0 else "Upgrading %s") % _clock_text(left)})
+			_set_actions(acts)
+			return
+		if level < int(Net.catalog.get("maxLevel", 5)):
+			var cost := _level_cost(b.type, level)
+			acts.append({"id": "level", "icon": "rank", "disabled": not _can_afford(cost),
+				"text": "Level %d\n%s" % [level + 1, _cost_text(cost)]})
 		if b.type == "spaceport":
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
 				"disabled": not Net.open_job(_pid()).is_empty()})
@@ -1218,6 +1289,8 @@ func _on_action(id: String) -> void:
 			_send_job()
 		"shipyard":
 			_toggle_page("shipyard")
+		"level":
+			Net.send({"type": "upgrade_building", "planet": _pid(), "slot": _selected})
 		"remove":
 			Net.send({"type": "remove_piece", "planet": _view, "piece": _sel_piece})
 			_sel_piece = -1
@@ -1262,7 +1335,7 @@ func _refresh_shop(state: Dictionary) -> void:
 			why = "All satellite sites used"
 		locked = locked or why != ""
 		var afford := _can_afford(info.cost)
-		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost) + ("\nNew satellite site" if _is_facility(type) else "")]
+		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost) + "  " + _clock_text(_level_secs(type, 0)) + ("\nNew satellite site" if _is_facility(type) else "")]
 		card.disabled = locked or not afford
 		if not locked and not afford:
 			card.add_theme_color_override("font_disabled_color", Color(1, 0.6, 0.55))
@@ -1305,7 +1378,14 @@ func _refresh_site(state: Dictionary) -> void:
 	var tier := int(b.get("security", 1))
 	var turrets := int(Net.catalog.get("security", {}).get(str(tier), {}).get("turrets", 0))
 	var raid := not Net.raid_on(_view, 0).is_empty()
-	_site.show_site(site, "%s  T%d" % [site.name, tier], raid, turrets)
+	var label := "%s  T%d" % [site.name, tier]
+	if not b.is_empty():
+		var work := _work_left(b)
+		if int(b.get("level", 1)) >= 1:
+			label = "%s  L%d  T%d" % [site.name, int(b.get("level", 1)), tier]
+		if work > 0:
+			label += ("  building %s" if int(b.get("level", 1)) == 0 else "  upgrading %s") % _clock_text(work)
+	_site.show_site(site, label, raid, turrets, not b.is_empty() and int(b.get("level", 1)) == 0 and _work_left(b) > 0)
 	if _selected == 0:
 		_site.highlight(_site.core)
 	elif _sel_piece >= 0 and not _piece(_sel_piece).is_empty():
@@ -1459,6 +1539,17 @@ func _refresh_info(state: Dictionary) -> void:
 		_info.text = "An empty pad. Tap Build to put something here."
 		return
 	var lines: Array = [BUILDING_INFO.get(b.type, {}).get("about", "")]
+	var level := int(b.get("level", 1))
+	var max_level := int(Net.catalog.get("maxLevel", 5))
+	if _work_left(b) > 0:
+		if level == 0:
+			lines.append("Under construction: ready in %s" % _clock_text(_work_left(b)))
+		else:
+			lines.append("Upgrading to level %d: ready in %s" % [level + 1, _clock_text(_work_left(b))])
+	if level >= 1:
+		lines.append("Level %d of %d. %s" % [level, max_level, LEVEL_EFFECT.get(b.type, "")])
+		if level < max_level:
+			lines.append("Level %d costs %s and takes %s" % [level + 1, _cost_text(_level_cost(b.type, level)), _clock_text(_level_secs(b.type, level))])
 	if _is_facility(b.type):
 		var now := Net.now_ms()
 		var vault := []
@@ -1493,8 +1584,10 @@ func _income_text() -> String:
 	var per_tick := {}
 	var produces: Dictionary = Net.catalog.get("produces", {})
 	for b in Net.my_planet().get("buildings", []):
+		if _work_left(b) > 0:
+			continue # idle while it's built or upgraded
 		for res in produces.get(b.type, {}):
-			per_tick[res] = per_tick.get(res, 0.0) + float(produces[b.type][res])
+			per_tick[res] = per_tick.get(res, 0.0) + float(produces[b.type][res]) * int(b.get("level", 1))
 	var parts := []
 	for res in ["metal", "ice", "credits"]:
 		if per_tick.has(res):

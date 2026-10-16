@@ -7,6 +7,7 @@ const N = require('../navy');
 
 function base() {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 1000;
   g.stock.ice = 50;
   g.stock.alloy = 100;

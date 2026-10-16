@@ -28,6 +28,35 @@ const PRODUCES = {
   habitat: { credits: 1 }, // rent: 12 credits a minute
   hydroponics: { credits: 2 }, // sells food: 24 credits a minute
 };
+// Building takes time, and every building can be upgraded up to MAX_LEVEL. Each level costs and
+// takes twice what the one before did, and produces more (see levelled effects in tick()).
+// A building under construction or being upgraded does nothing until it's done.
+const BUILD_S = { mine: 20, extractor: 30, habitat: 40, spaceport: 60, hydroponics: 60, foundry: 120, refinery: 90, lab: 120, spire: 150 };
+const MAX_LEVEL = 5;
+const LEVEL_GROWTH = 2; // cost and time multiply by this each level
+
+// What it costs to take a building of `type` from `level` to the next one (level 0: building it).
+function levelCost(type, level) {
+  const out = {};
+  for (const [res, n] of Object.entries(BUILDINGS[type].cost)) out[res] = Math.round(n * LEVEL_GROWTH ** level);
+  return out;
+}
+
+function levelMs(g, type, level) {
+  return (BUILD_S[type] * 1000 * LEVEL_GROWTH ** level) / (g.buildSpeed || 1);
+}
+
+// Sets building `b` working towards its next level, done after `ms` (at once when `ms` is 0,
+// as with g.buildSpeed = Infinity in tests that aren't about build times).
+function startWork(b, ms, now) {
+  if (ms > 0) b.readyAt = now + ms;
+  else b.level = (b.level ?? 0) + 1;
+}
+
+function busy(b, now) {
+  return !!b.readyAt && now < b.readyAt;
+}
+
 const AUTO_SHIP_MS = 5 * 60_000; // a facility's freighter takes the vault home on its own this often
 const POPULATION_PER_HABITAT = 50;
 
@@ -138,10 +167,10 @@ function planet(g, planetId) {
 // Whether any planet has this building, or with `planetId`, whether that planet's owner does.
 function hasBuilding(g, type, planetId = null) {
   const owner = planetId && planet(g, planetId)?.owner;
-  return g.system.planets.some((p) => (!planetId || p.owner === owner) && p.buildings.some((b) => b.type === type));
+  return g.system.planets.some((p) => (!planetId || p.owner === owner) && p.buildings.some((b) => b.type === type && (b.level ?? 1) >= 1));
 }
 
-function build(g, planetId, slot, type) {
+function build(g, planetId, slot, type, now = Date.now()) {
   const p = planet(g, planetId);
   const def = BUILDINGS[type];
   if (!p) return fail('no such planet');
@@ -157,12 +186,13 @@ function build(g, planetId, slot, type) {
     return fail(`you already have a ${def.name}`);
   const err = pay(e, def.cost);
   if (err) return fail(err);
-  const b = { slot, type };
+  const b = { slot, type, level: 0 };
+  startWork(b, levelMs(g, type, 0), now);
   if (def.facility) Object.assign(b, { security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
   if (type === 'foundry') b.queue = [];
+  if (type === 'habitat' && b.level === 1) e.population += POPULATION_PER_HABITAT;
   p.buildings.push(b);
-  if (type === 'habitat') e.population += POPULATION_PER_HABITAT;
-  log(g, `${def.name} built on ${p.name}`);
+  log(g, `${def.name} under construction on ${p.name}`);
   return { ok: true };
 }
 
@@ -178,6 +208,23 @@ function pay(e, cost) {
     else e.stock[res] -= amount;
   }
   return null;
+}
+
+// Starts upgrading a building to its next level, or says why not.
+function upgradeBuilding(g, planetId, slot, now = Date.now()) {
+  const p = planet(g, planetId);
+  const b = p && p.buildings.find((x) => x.slot === slot);
+  if (!b) return fail('nothing there');
+  const def = BUILDINGS[b.type];
+  if (busy(b, now)) return fail(`the ${def.name} is still ${b.level ? 'upgrading' : 'being built'}`);
+  if (b.level >= MAX_LEVEL) return fail(`the ${def.name} is at the top level`);
+  if (g.raids.some((r) => r.planet === planetId && r.slot === slot)) return fail('not during a raid');
+  const err = pay(econ(g, planetId), levelCost(b.type, b.level));
+  if (err) return fail(err);
+  startWork(b, levelMs(g, b.type, b.level), now);
+  if (b.type === 'habitat' && !b.readyAt) econ(g, planetId).population += POPULATION_PER_HABITAT;
+  log(g, `${def.name} on ${p.name} upgrading to level ${b.level + 1}`);
+  return { ok: true };
 }
 
 function postJob(g, resource, amount, reward, planetId = g.system.planets[0].id) {
@@ -252,19 +299,30 @@ function tick(g, now = Date.now()) {
   let changed = attackTick(g, now);
   for (const p of g.system.planets)
     for (const b of p.buildings)
-      if (b.type === 'foundry')
+      if (b.readyAt && now >= b.readyAt) {
+        delete b.readyAt;
+        b.level = (b.level ?? 0) + 1;
+        if (b.type === 'habitat') econ(g, p.id).population += POPULATION_PER_HABITAT;
+        log(g, b.level === 1 ? `${BUILDINGS[b.type].name} finished on ${p.name}` : `${BUILDINGS[b.type].name} on ${p.name} reached level ${b.level}`);
+        changed = true;
+      }
+  for (const p of g.system.planets)
+    for (const b of p.buildings)
+      if (b.type === 'foundry' && !busy(b, now))
         for (const name of N.tick(econ(g, p.id), b, now)) {
           log(g, `${name} launched from the Ship Foundry on ${p.name}`);
           changed = true;
         }
   for (const p of g.system.planets) {
     for (const b of p.buildings) {
+      if (busy(b, now)) continue; // nothing works while it's being built or upgraded
+      const level = b.level ?? 1;
       const makes = PRODUCES[b.type];
       if (makes) {
         const e = econ(g, p.id);
         for (const [res, rate] of Object.entries(makes)) {
           // Fractional rates build up in b.carry and pay out whole units.
-          b.carry = (b.carry || 0) + rate;
+          b.carry = (b.carry || 0) + rate * level; // each level adds the base rate again
           const whole = Math.floor(b.carry + 1e-9);
           if (whole < 1) continue;
           b.carry -= whole;
@@ -276,15 +334,16 @@ function tick(g, now = Date.now()) {
       const fac = H.FACILITIES[b.type];
       if (!fac) continue;
       // The automatic freighter: goods sit in the vault (and can be raided) until it comes.
-      b.autoShipAt ||= now + AUTO_SHIP_MS;
+      b.autoShipAt ||= now + autoShipMs(g, p.id);
       if (now >= b.autoShipAt) {
-        b.autoShipAt = now + AUTO_SHIP_MS;
+        b.autoShipAt = now + autoShipMs(g, p.id);
         if (!g.raids.some((r) => r.planet === p.id && r.slot === b.slot) && ship(g, p.id, b.slot, now, true).ok) changed = true;
       }
       b.made += 1;
       for (const m of fac.makes) {
-        if (b.made % m.every === 0 && (b.vault[m.item] || 0) < m.cap) {
-          b.vault[m.item] = (b.vault[m.item] || 0) + 1;
+        // Each level makes one more of every item per batch and holds that much more in the vault.
+        if (b.made % m.every === 0 && (b.vault[m.item] || 0) < m.cap * level) {
+          b.vault[m.item] = Math.min(m.cap * level, (b.vault[m.item] || 0) + level);
           changed = true;
         }
       }
@@ -327,7 +386,9 @@ function foundSite(g, owner, type) {
   if (!r.ok) return r;
   const err = pay(e, def.cost);
   if (err) return fail(err);
-  r.site.buildings.push({ slot: 0, type, security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
+  const b = { slot: 0, type, level: 0, security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} };
+  startWork(b, levelMs(g, type, 0), Date.now());
+  r.site.buildings.push(b);
   S.scatter(r.site);
   g.system.planets.push(r.site);
   log(g, `${owner} founded ${r.site.name}`);
@@ -344,7 +405,7 @@ function placePiece(g, siteId, type, x, y) {
   if (!st) return fail('no such satellite site');
   if (g.raids.some((r) => r.planet === siteId)) return fail('not during a raid');
   const e = econ(g, siteId);
-  const r = S.place(st, type, x, y, (cost) => pay(e, cost));
+  const r = S.place(st, type, x, y, (cost) => pay(e, cost), Date.now(), g.buildSpeed || 1);
   if (r.ok) log(g, `${r.name} built at ${st.name}`);
   return r;
 }
@@ -365,6 +426,16 @@ function removePiece(g, siteId, pieceId) {
   return S.remove(st, pieceId, econ(g, siteId));
 }
 
+// The automatic freighter comes more often the higher the owner's Spaceport level: every
+// AUTO_SHIP_MS at level 1 (or with no Spaceport), divided by the level.
+function autoShipMs(g, planetId) {
+  const owner = planet(g, planetId)?.owner;
+  let level = 1;
+  for (const p of g.system.planets)
+    if (p.owner === owner) for (const b of p.buildings) if (b.type === 'spaceport') level = Math.max(level, b.level ?? 1);
+  return AUTO_SHIP_MS / level;
+}
+
 // The Builder sends a freighter: the vault's goods go to HQ stock. Intel sells on arrival.
 function ship(g, planetId, slot, now, auto = false) {
   const b = facility(g, planetId, slot);
@@ -381,7 +452,7 @@ function ship(g, planetId, slot, now, auto = false) {
     b.vault[item] = 0;
   }
   b.shipReadyAt = now + H.SHIP_COOLDOWN_MS;
-  b.autoShipAt = now + AUTO_SHIP_MS;
+  b.autoShipAt = now + autoShipMs(g, planetId);
   log(g, `${auto ? 'Scheduled freighter' : 'Freighter'} from ${facilityName(g, planetId, b)} delivered ${parts.join(', ')}`);
   return { ok: true };
 }
@@ -476,7 +547,8 @@ function recoverRaids(g) {
     for (const type of ['extractor', 'refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
   }
   for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
-  for (const p of g.system.planets) if (p.kind === 'satellite' && !p.obstacles) S.scatter(p); // sites from before obstacles
+  for (const p of g.system.planets) if (p.kind === 'satellite' && !p.obstacles) S.scatter(p);
+  for (const p of g.system.planets) for (const b of p.buildings) b.level ??= 1; // built before levels // sites from before obstacles
   for (const p of g.system.planets)
     for (const b of p.buildings) {
       if (!b.escrow) continue;
@@ -490,6 +562,7 @@ function queueShip(g, planetId, slot, shipId, now) {
   const p = planet(g, planetId);
   const b = p && p.buildings.find((x) => x.slot === slot && x.type === 'foundry');
   if (!b) return fail('no Ship Foundry there');
+  if ((b.level ?? 1) < 1) return fail('the Ship Foundry is still being built');
   const e = econ(g, planetId);
   const r = N.queueShip(e, b, shipId, now, (cost) => pay(e, cost));
   if (r.ok) log(g, `${r.name} queued at the Ship Foundry`);
@@ -509,11 +582,11 @@ function cancelShip(g, planetId, slot) {
 
 // A site's whole defence: its placed defences, the turrets its security tier adds, and the core
 // (guards add attack, the tier adds hull).
-function siteDefence(g, siteId) {
+function siteDefence(g, siteId, now = Date.now()) {
   const st = site(g, siteId);
   const b = st.buildings[0];
   const tier = H.SECURITY[b.security];
-  const d = S.defence(st);
+  const d = S.defence(st, now);
   return { attack: d.attack + tier.turrets * S.PIECES.turret.attack + tier.guards, hull: d.hull + tier.turrets * S.PIECES.turret.hull + 40 * b.security };
 }
 
@@ -556,7 +629,7 @@ function attackTick(g, now) {
         Object.assign(a, { status: 'returning', returnAt: now + a.leg, survivors: a.ships, lost: {}, loot: {}, won: false });
         continue;
       }
-      const fight = N.battle(a.ships, siteDefence(g, a.target));
+      const fight = N.battle(a.ships, siteDefence(g, a.target, now));
       const loot = {};
       if (fight.won && Object.keys(fight.survivors).length) {
         for (const [item, qty] of Object.entries(b.vault)) {
@@ -608,6 +681,11 @@ function sell(g, name) {
 
 module.exports = {
   BUILDINGS,
+  BUILD_S,
+  MAX_LEVEL,
+  LEVEL_GROWTH,
+  levelCost,
+  upgradeBuilding,
   PRODUCES,
   demoTopUp,
   AUTO_SHIP_MS,

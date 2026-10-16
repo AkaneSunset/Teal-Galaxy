@@ -54,23 +54,26 @@ func _process(delta: float) -> void:
 
 
 ## Draws `site` (a satellite planet from the server). `turrets` is how many its security tier adds.
-func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int) -> void:
+## `constructing` draws scaffolding in place of the facility while it's first being built.
+func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int, constructing := false) -> void:
 	grid = int(site.get("grid", 12))
 	var c: Dictionary = Net.catalog.get("sites", {}).get("core", {"w": 4, "h": 4})
 	core = Rect2i((grid - int(c.w)) / 2, (grid - int(c.h)) / 2, int(c.w), int(c.h))
 	_pieces = site.get("pieces", [])
 	_obstacles = site.get("obstacles", [])
 	var b: Dictionary = site.buildings[0] if site.buildings else {}
-	var key := JSON.stringify([site.id, b.get("type", ""), tier_turrets, _pieces, _obstacles])
+	var now := Net.now_ms()
+	var ready := _pieces.map(func(p): return float(p.get("readyAt", 0)) <= now)
+	var key := JSON.stringify([site.id, b.get("type", ""), tier_turrets, _pieces.map(func(p): return [p.id, p.type, p.x, p.y]), ready, _obstacles, constructing])
 	if key != _key:
 		_key = key
-		_rebuild(b.get("type", ""), tier_turrets)
+		_rebuild(b.get("type", ""), tier_turrets, constructing, ready)
 	_label.text = ("RAID!  " + label) if raid else label
 	_label.modulate = Color(1, 0.55, 0.45) if raid else Color(1, 1, 1, 0.9)
 	_raid_light.visible = raid
 
 
-func _rebuild(type: String, tier_turrets: int) -> void:
+func _rebuild(type: String, tier_turrets: int, constructing: bool, ready: Array) -> void:
 	if _content:
 		_content.queue_free()
 	_content = Node3D.new()
@@ -105,7 +108,9 @@ func _rebuild(type: String, tier_turrets: int) -> void:
 	var pad := BaseModels.pad()
 	pad.scale = Vector3.ONE * (core.size.x * TILE / 19.0)
 	core_node.add_child(pad)
-	if type != "":
+	if constructing:
+		core_node.add_child(BaseModels.construction(core.size.x * TILE - 3.0))
+	elif type != "":
 		var model := BaseModels.building(type)
 		model.position.y = 1.0
 		model.scale = Vector3.ONE * 0.8
@@ -116,8 +121,15 @@ func _rebuild(type: String, tier_turrets: int) -> void:
 		tur.position = Vector3(cos(ang), 0.8, sin(ang)) * Vector3(6.6, 1, 6.6)
 		core_node.add_child(tur)
 
-	for p in _pieces:
-		_content.add_child(_piece_model(p))
+	for i in _pieces.size():
+		var p: Dictionary = _pieces[i]
+		if ready[i]:
+			_content.add_child(_piece_model(p))
+		else: # still being built
+			var def: Dictionary = Net.catalog.sites.pieces[p.type]
+			var scaffold := BaseModels.construction(def.w * TILE - 0.6)
+			scaffold.position = rect_centre(Rect2i(int(p.x), int(p.y), int(def.w), int(def.h)))
+			_content.add_child(scaffold)
 	for o in _obstacles:
 		_content.add_child(_obstacle_model(o))
 

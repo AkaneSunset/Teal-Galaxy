@@ -7,6 +7,7 @@ const N = require('../navy');
 
 function twoBuilders() {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   G.claimBase(g, 'Rin');
   g.bases.Rin.stock.metal = 500;

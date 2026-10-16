@@ -6,6 +6,7 @@ const G = require('../galaxy');
 
 test('mines, extractors, habitats and hydroponics produce every tick', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   e.stock.metal = 100;
@@ -27,6 +28,7 @@ test('mines, extractors, habitats and hydroponics produce every tick', () => {
 
 test('a facility sends its vault home on its own every few minutes', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   const { site } = G.foundSite(g, 'Akane', 'refinery');
@@ -45,6 +47,7 @@ test('a facility sends its vault home on its own every few minutes', () => {
 
 test('demo mode gives each base enough to build everything, once', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   assert.ok(G.demoTopUp(e));

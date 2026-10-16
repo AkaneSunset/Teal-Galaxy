@@ -3,7 +3,7 @@ extends Node
 ## a Builder founds a facility's satellite site, the pilot flies to it, boards, search containers until the keycard turns up,
 ## open the vault, take something from it, extract at the Shuttle Pad, and fly on with the loot.
 ## (Selling it is covered by the server tests.)
-##   cd server && npm start
+##   cd server && BUILD_SPEED=0 npm start
 ##   godot --headless --path game res://tests/raid.tscn
 ## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way.
 ## Prints PASS or FAIL and quits.

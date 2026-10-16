@@ -162,6 +162,30 @@ static func ice_extractor() -> Node3D:
 	return n
 
 
+## A building site: scaffold posts and beams around a half-built core, with striped barriers.
+## `size` is the footprint's width in metres.
+static func construction(size: float) -> Node3D:
+	var n := Node3D.new()
+	var h := clampf(size * 0.5, 2.0, 7.0)
+	var r := size * 0.5 - 0.3
+	_b(n, Vector3(size * 0.55, h * 0.45, size * 0.55), "teal", Vector3(0, h * 0.225, 0), 0.2) # foundations
+	for x in [-r, r]:
+		for z in [-r, r]:
+			_b(n, Vector3(0.3, h, 0.3), "steel", Vector3(x, h * 0.5, z), 0.05)
+	for y in [h * 0.5, h]:
+		for z in [-r, r]:
+			_b(n, Vector3(size - 0.4, 0.25, 0.25), "navy", Vector3(0, y, z), 0.05)
+		for x in [-r, r]:
+			_b(n, Vector3(0.25, 0.25, size - 0.4), "navy", Vector3(x, y, 0), 0.05)
+	for i in 4: # amber barriers on each side
+		var a := i * PI / 2.0
+		_b(n, Vector3(size * 0.4, 0.5, 0.2), "amber", Vector3(cos(a), 0, sin(a)) * (r + 0.4) + Vector3(0, 0.4, 0), 0.05, Vector3(0, -a + PI / 2.0, 0))
+	if size > 8.0: # a little crane on the big sites
+		_b(n, Vector3(0.4, h + 3.0, 0.4), "amber", Vector3(r - 0.6, (h + 3.0) * 0.5, -r + 0.6), 0.05)
+		_b(n, Vector3(size * 0.7, 0.3, 0.3), "amber", Vector3(r - 0.6 - size * 0.3, h + 3.0, -r + 0.6), 0.05)
+	return n
+
+
 ## Mining Refinery: a smelter block with two chimneys and an ore conveyor.
 static func refinery() -> Node3D:
 	var n := Node3D.new()

@@ -8,9 +8,9 @@ const CORE = { w: 4, h: 4 }; // the facility itself, in the middle of the grid
 const MAX_SITES = 3; // satellite sites per Builder
 
 const PIECES = {
-  turret: { name: 'Turret', w: 2, h: 2, cost: { metal: 20, alloy: 5 }, attack: 4, hull: 20 },
-  wall: { name: 'Wall', w: 1, h: 1, cost: { metal: 5 }, attack: 0, hull: 10 },
-  guardpost: { name: 'Guard post', w: 2, h: 2, cost: { metal: 15 }, attack: 1, hull: 15 },
+  turret: { name: 'Turret', w: 2, h: 2, cost: { metal: 20, alloy: 5 }, attack: 4, hull: 20, seconds: 30 },
+  wall: { name: 'Wall', w: 1, h: 1, cost: { metal: 5 }, attack: 0, hull: 10, seconds: 5 },
+  guardpost: { name: 'Guard post', w: 2, h: 2, cost: { metal: 15 }, attack: 1, hull: 15, seconds: 20 },
 };
 
 // Obstacles a new site comes with, cleared for credits like Clash of Clans' rocks and trees.
@@ -93,7 +93,8 @@ function taken(site, r) {
 }
 
 // Places a defence on a site's grid, or says why not. `pay` takes the cost or says what is short.
-function place(site, type, x, y, pay) {
+// It takes the defence's build time (divided by `speed`) to become ready.
+function place(site, type, x, y, pay, now = Date.now(), speed = 1) {
   const def = PIECES[type];
   if (!def) return fail('no such defence');
   if (!Number.isInteger(x) || !Number.isInteger(y)) return fail('bad position');
@@ -104,6 +105,8 @@ function place(site, type, x, y, pay) {
   const err = pay(def.cost);
   if (err) return fail(err);
   const piece = { id: site.nextPiece++, type, x, y };
+  const ms = (def.seconds * 1000) / speed;
+  if (ms > 0) piece.readyAt = now + ms;
   site.pieces.push(piece);
   return { ok: true, piece, name: def.name };
 }
@@ -134,10 +137,11 @@ function clear(site, obstacleId, e) {
 }
 
 // Total attack and hull of a site's defences, for fleet attacks.
-function defence(site) {
+function defence(site, now = Date.now()) {
   let attack = 0;
   let hull = 0;
   for (const p of site.pieces || []) {
+    if (p.readyAt && now < p.readyAt) continue; // still being built
     attack += PIECES[p.type].attack;
     hull += PIECES[p.type].hull;
   }

@@ -25,6 +25,11 @@ function fleetSize(e) {
 }
 
 // Adds a ship to Foundry `b`'s queue, paid from economy `e`. `pay` takes the cost or says what is short.
+// How long a Foundry takes over a ship: each Foundry level above 1 builds 25% faster.
+function shipMs(b, shipId) {
+  return (SHIPS[shipId].seconds * 1000) / (1 + 0.25 * ((b.level ?? 1) - 1));
+}
+
 function queueShip(e, b, shipId, now, pay) {
   ensure(e);
   b.queue ||= [];
@@ -34,7 +39,7 @@ function queueShip(e, b, shipId, now, pay) {
   if (fleetSize(e) + b.queue.length >= HANGAR) return fail('the hangar is full');
   const err = pay(def.cost);
   if (err) return fail(err);
-  b.queue.push({ ship: shipId, doneAt: b.queue.length ? null : now + def.seconds * 1000 });
+  b.queue.push({ ship: shipId, doneAt: b.queue.length ? null : now + shipMs(b, shipId) });
   return { ok: true, name: def.name };
 }
 
@@ -58,7 +63,7 @@ function tick(e, b, now) {
     const done = b.queue.shift();
     e.navy[done.ship] += 1;
     launched.push(SHIPS[done.ship].name);
-    if (b.queue.length) b.queue[0].doneAt = done.doneAt + SHIPS[b.queue[0].ship].seconds * 1000;
+    if (b.queue.length) b.queue[0].doneAt = done.doneAt + shipMs(b, b.queue[0].ship);
   }
   return launched;
 }

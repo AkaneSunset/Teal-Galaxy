@@ -35,7 +35,7 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 
 **Demo mode:** start the server with `DEMO=1 npm start` and every Builder base gets 2000 metal, 200 ice,
 200 alloy, 40 isotope cells, a few plans and 5000 credits, enough to try every building, defence, warship and
-security tier. Each base is topped up once, the first time its Builder connects with demo mode on.
+security tier, and everything builds 10 times faster. Each base is topped up once, the first time its Builder connects with demo mode on.
 
 ## The Builder screen
 
@@ -48,6 +48,14 @@ pick a building, then tap a free pad (or select an empty pad first and it builds
 Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as short messages.
 During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
+
+**Build times and levels.** Every building takes time to build (Mine 20 s up to Data Spire 2.5 min) and
+does nothing until it's finished: its pad shows scaffolding and a countdown. Once built, select it and press
+*Level N* to upgrade it, up to level 5. Each level costs twice the one before and takes twice as long, and
+the building stops working while it upgrades. Higher levels produce more: Mines, Extractors, Habitats and
+Hydroponics add their base rate again per level, facilities make more per batch and hold more, the Ship
+Foundry builds warships 25% faster per level, and the Spaceport makes facility freighters come sooner.
+Defences placed on a site take a few seconds to build and don't fight until they're done.
 
 **Passive income.** Buildings produce on their own, so a Builder grows even with no pilots online:
 Mines dig 12 metal a minute, Ice Extractors (15 metal) melt 2 ice a minute, Habitats pay 12 credits a
@@ -181,5 +189,5 @@ open the vault, extract (instructions at the top of `game/tests/raid_test.gd`).
 `game/tests/flight_test.gd` checks the flight model on its own:
 `godot --headless --path game --script res://tests/flight_test.gd`
 
-`game/tests/smoke.tscn` is a headless check of both modes against a running server
+`game/tests/smoke.tscn` is a headless check of both modes against a server started with `BUILD_SPEED=0` (instant buildings)
 (instructions at the top of `game/tests/smoke.gd`).

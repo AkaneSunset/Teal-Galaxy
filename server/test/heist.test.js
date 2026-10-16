@@ -57,6 +57,7 @@ test('inventory grid places, rotates and refuses overlaps', () => {
 // A facility with a known vault, and a run on it at a fixed time.
 function setup(vault = { alloy: 10, drive: 2 }) {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 999;
   G.claimBase(g, 'Akane');
   const { site } = G.foundSite(g, 'Akane', 'refinery');
@@ -162,6 +163,7 @@ test('blueprint cases are too big to protect', () => {
 
 test('facilities fill their vaults, ship to HQ and buy security', () => {
   const g = G.newGalaxy();
+  g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 999;
   g.credits = 5000;
   G.claimBase(g, 'Akane');
@@ -209,7 +211,7 @@ function connect(port) {
 test('a raid over the wire: board, search, steal from the vault, alarm, extract', async () => {
   const port = 18090;
   let clock = 1_000_000;
-  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
   try {
     const phone = await connect(port);
     const pc = await connect(port);
@@ -285,7 +287,7 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
 test('the run clock ends a raid as missing in action', async () => {
   const port = 18091;
   let clock = 0;
-  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
   try {
     const pc = await connect(port);
     pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
