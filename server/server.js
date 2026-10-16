@@ -70,7 +70,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 
   function sendHeat(run) {
     const t = now();
-    toRaider(run, { ev: 'heat', heat: run.heat, level: H.heatLevel(run.heat), remaining: run.endsAt - t, extracts: H.extractStates(run, t), vaultOpen: run.vaultOpen });
+    toRaider(run, { ev: 'heat', heat: run.heat, level: H.heatLevel(run.heat), remaining: run.endsAt - t, extracts: H.extractStates(run, t), vaultOpen: run.vaultOpen, ...H.stage(run, t) });
   }
 
   function endRun(run, outcome) {
@@ -83,6 +83,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   function raidTick() {
     const t = now();
     for (const run of runs.values()) {
+      if (run.selfDestructAt && t >= run.selfDestructAt) {
+        endRun(run, 'destroyed');
+        continue;
+      }
+      const wave = H.waveTick(run, t);
+      if (wave) toRaider(run, { ev: 'wave', ...wave });
       if (t >= run.endsAt) {
         endRun(run, 'mia');
         continue;
@@ -150,7 +156,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         }
         return { ...r, quiet: true };
       case 'raid_keycard':
-        r = H.useKeycard(run);
+        r = H.useKeycard(run, t);
         break;
       case 'raid_drill_start':
         r = H.drillStart(run, t);
@@ -160,6 +166,25 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         return { ...H.drillStop(run), quiet: true };
       case 'raid_drill_finish':
         r = H.drillFinish(run, t);
+        break;
+      case 'raid_destroy':
+        r = H.destroy(run, String(msg.piece), t);
+        if (r.ok && r.changed) changed();
+        break;
+      case 'raid_enter':
+        r = H.enterDoor(run, t);
+        break;
+      case 'raid_vent_start':
+        r = H.ventStart(run, String(msg.vent), t);
+        if (r.ok) send(ws, { type: 'raid', ev: 'vent', vent: msg.vent, seconds: r.seconds });
+        break;
+      case 'raid_vent_stop':
+        return { ...H.ventStop(run), quiet: true };
+      case 'raid_vent_finish':
+        r = H.ventFinish(run, t);
+        break;
+      case 'raid_floor':
+        r = H.reachFloor(run, Number(msg.floor));
         break;
       case 'raid_extract_start':
         r = H.extractStart(run, String(msg.extract), t);

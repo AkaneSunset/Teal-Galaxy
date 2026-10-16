@@ -226,11 +226,12 @@ function startRaid(g, name, planetId, slot, now, seed, lootSeed) {
   if (g.raids.some((r) => r.planet === planetId && r.slot === slot)) return fail('someone is already inside');
   if (now < b.cooldownUntil) return fail(`security is on alert for another ${Math.ceil((b.cooldownUntil - now) / 1000)} s`);
   const fname = facilityName(g, planetId, b);
-  const run = H.startRun({ facility: b, facilityName: fname, pilot: name, seed, lootSeed, now });
+  const site = g.system.planets.find((p) => p.id === planetId);
+  const run = H.startRun({ facility: b, facilityName: fname, pilot: name, seed, lootSeed, now, site });
   run.planet = planetId;
   run.slot = slot;
   pilot(g, name).raids.runs += 1;
-  g.raids.push({ id: run.id, pilot: name, planet: planetId, slot, facility: fname, heat: 0, level: 0, endsAt: run.endsAt, vaultOpen: false });
+  g.raids.push({ id: run.id, pilot: name, planet: planetId, slot, facility: fname, heat: 0, level: 0, endsAt: run.endsAt, vaultOpen: false, floors: run.floors, stage: 'breach', floor: 0, selfDestructAt: null });
   log(g, `Intruder alert: ${name} has boarded ${fname}`);
   return { ok: true, run };
 }
@@ -238,7 +239,7 @@ function startRaid(g, name, planetId, slot, now, seed, lootSeed) {
 // Keeps the public summary in step with the run.
 function raidChanged(g, run) {
   const r = g.raids.find((x) => x.id === run.id);
-  if (r) Object.assign(r, { heat: run.heat, level: H.heatLevel(run.heat), vaultOpen: run.vaultOpen });
+  if (r) Object.assign(r, { heat: run.heat, level: H.heatLevel(run.heat), vaultOpen: run.vaultOpen, stage: H.stage(run, 0).stage, floor: run.floor ?? 0, selfDestructAt: run.selfDestructAt });
 }
 
 // The Builder sounds the alarm from the phone: Heat jumps for the raider inside.
@@ -272,7 +273,7 @@ function endRaid(g, run, outcome, now) {
   for (const k of result.kept) p.stash.push(k);
   if (outcome === 'extracted') p.raids.extracted += 1;
   g.raids = g.raids.filter((r) => r.id !== run.id);
-  const words = { extracted: 'escaped from', killed: 'was killed in', mia: 'was caught when the clock ran out in', bailed: 'bailed out of' };
+  const words = { extracted: 'escaped from', killed: 'was killed in', destroyed: 'went down with the self-destruct of', mia: 'was caught when the clock ran out in', bailed: 'bailed out of' };
   const haul = result.kept.length ? ` with ${result.value} credits of loot` : '';
   log(g, `${run.pilot} ${words[outcome]} ${run.facilityName}${haul}`);
   g.raidLog.push({ at: now, pilot: run.pilot, facility: run.facilityName, outcome, value: result.value, stolen: result.stolen });

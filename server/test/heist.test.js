@@ -1,4 +1,5 @@
-// Raid rules: layouts, loot, inventory, Heat and extraction, plus a full raid over WebSockets.
+// Raid rules: the site and its levels, the breach, loot, inventory, Heat, reinforcements, the
+// self-destruct and extraction, plus full raids over WebSockets.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -7,22 +8,55 @@ const H = require('../heist');
 const G = require('../galaxy');
 const { startServer } = require('../server');
 
-test('every layout keeps the vault behind its lock and everything else reachable', () => {
-  for (const tier of [1, 2, 3]) {
-    for (let seed = 1; seed <= 1000; seed++) {
-      const L = H.generateLayout(seed, tier, 'refinery');
-      const adj = (n) => L.doors.filter((d) => !d.locked && (d.a === n || d.b === n)).map((d) => (d.a === n ? d.b : d.a));
-      const seen = new Set([L.entrance]);
-      const queue = [L.entrance];
-      while (queue.length) for (const n of adj(queue.shift())) if (!seen.has(n)) seen.add(n) && queue.push(n);
-      assert.strictEqual(seen.size, L.rooms.length - 1, `tier ${tier} seed ${seed}: all but the vault reachable`);
-      assert.ok(!seen.has(L.vault), 'vault is locked');
-      assert.ok(L.doors.some((d) => d.locked), 'vault has a door');
-      assert.strictEqual(L.guards.length, H.SECURITY[tier].guards);
-      assert.ok(L.extracts.some((e) => e.kind === 'shuttle') && L.extracts.some((e) => e.kind === 'lift'));
-      assert.ok(!L.containers.some((c) => c.type === 'vault' && c.room !== L.vault));
-    }
-  }
+test('every level connects, the lifts line up, and the safe room is locked on the deepest', () => {
+  for (const tier of [1, 2, 3])
+    for (let floors = 1; floors <= H.MAX_FLOORS; floors++)
+      for (let seed = 1; seed <= 300; seed++) {
+        const L = H.generateLayout(seed, tier, 'refinery', { floors });
+        const at = (id) => L.rooms.find((r) => r.id === id);
+        assert.strictEqual(L.floors.length, floors);
+        assert.deepStrictEqual(at(L.floors[0].entrance).pos, [0, 0], 'level 1 lift is under the core');
+        for (const fl of L.floors) {
+          const own = L.rooms.filter((r) => r.floor === fl.n);
+          const adj = (n) => L.doors.filter((d) => !d.locked && (d.a === n || d.b === n)).map((d) => (d.a === n ? d.b : d.a));
+          const seen = new Set([fl.entrance]);
+          const queue = [fl.entrance];
+          while (queue.length) for (const n of adj(queue.shift())) if (!seen.has(n)) seen.add(n) && queue.push(n);
+          const last = fl.n === floors;
+          assert.strictEqual(seen.size, own.length - (last ? 1 : 0), `tier ${tier} floors ${floors} seed ${seed} level ${fl.n}`);
+          assert.ok([...seen].every((id) => at(id).floor === fl.n), 'doors stay on their level');
+          if (last) assert.ok(fl.safe === L.vault && !seen.has(L.vault), 'safe room locked');
+          else assert.deepStrictEqual(at(L.floors[fl.n].entrance).pos, at(fl.down).pos, 'lift down lands under itself');
+        }
+        assert.ok(!L.containers.some((c) => c.type === 'vault' && c.room !== L.vault));
+        assert.ok(L.guards.every((g) => g.route.every((id) => at(id).floor === g.floor)));
+        assert.deepStrictEqual(L.extracts.map((e) => e.kind), ['ship']);
+      }
+});
+
+test('the raid map mirrors the Builder\'s site', () => {
+  const site = {
+    kind: 'satellite',
+    grid: 12,
+    pieces: [
+      { id: 1, type: 'turret', x: 0, y: 0 },
+      { id: 2, type: 'power', x: 10, y: 10 },
+      { id: 3, type: 'wall', x: 5, y: 2 },
+      { id: 4, type: 'guardpost', x: 0, y: 10, readyAt: 5000 }, // still being built
+    ],
+    obstacles: [{ id: 5, type: 'boulder', x: 2, y: 4 }],
+  };
+  const L = H.generateLayout(7, 1, 'lab', { site, now: 1000 });
+  assert.deepStrictEqual(L.pieces.map((p) => p.id), ['p1', 'p2', 'p3', 'o5']);
+  const turret = L.pieces[0];
+  assert.deepStrictEqual(turret.pos, [-20, -20], 'top-left 2x2 tile, in metres round the core');
+  assert.deepStrictEqual(turret.size, [8, 8]);
+  assert.strictEqual(L.powered, 'plant');
+  assert.strictEqual(H.generateLayout(7, 1, 'lab', { site: { ...site, pieces: [] }, now: 1000 }).powered, 'core');
+  // A facility without a site gets a power plant and defences from its tier.
+  const d = H.generateLayout(7, 3, 'lab');
+  assert.strictEqual(d.pieces.filter((p) => p.type === 'power').length, 1);
+  assert.strictEqual(d.pieces.filter((p) => p.type === 'turret').length, 3);
 });
 
 test('the same seed builds the same facility', () => {
@@ -55,14 +89,19 @@ test('inventory grid places, rotates and refuses overlaps', () => {
 });
 
 // A facility with a known vault, and a run on it at a fixed time.
-function setup(vault = { alloy: 10, drive: 2 }) {
+function setup(vault = { alloy: 10, drive: 2 }, { security = 1, inside = true } = {}) {
   const g = G.newGalaxy();
   g.stock.metal = 999;
   assert.ok(G.build(g, 'aster', 0, 'refinery').ok);
   const fac = G.facility(g, 'aster', 0);
   fac.vault = { ...vault };
+  fac.security = security;
   const r = G.startRaid(g, 'Pilot A', 'aster', 0, 0, 1234, 99);
   assert.ok(r.ok, r.reason);
+  if (inside) {
+    H.ventStart(r.run, 'v0', 0);
+    assert.ok(H.ventFinish(r.run, 6000).ok);
+  }
   return { g, fac, run: r.run };
 }
 
@@ -86,12 +125,58 @@ test('the vault is locked until a keycard or the drill opens it', () => {
   const { run } = setup();
   const vaultBox = run.layout.containers.find((c) => c.type === 'vault').id;
   assert.match(H.openContainer(run, vaultBox, 0).reason, /locked/);
-  assert.match(H.useKeycard(run).reason, /keycard/);
+  assert.match(H.useKeycard(run, 0).reason, /keycard/);
   H.drillStart(run, 1000);
   assert.match(H.drillFinish(run, 20_000).reason, /not through/);
   assert.ok(H.drillFinish(run, 31_000).ok);
   assert.ok(run.heat >= 10, `drilling is loud: Heat ${run.heat}`);
   assert.ok(H.openContainer(run, vaultBox, 31_000).ok);
+  assert.strictEqual(run.selfDestructAt, 31_000 + H.selfDestructSeconds(1) * 1000, 'opening the vault starts the self-destruct');
+});
+
+test('breach: the blast door opens only when the power plant is down; vents take time', () => {
+  const { run } = setup({}, { inside: false });
+  const cid = run.layout.containers[0].id;
+  assert.match(H.openContainer(run, cid, 0).reason, /inside/);
+  assert.match(H.enterDoor(run, 0).reason, /power plant/);
+  const turret = run.layout.pieces.find((p) => p.type === 'turret' || p.type === 'guardpost');
+  assert.ok(H.destroy(run, turret.id, 0).changed);
+  assert.ok(!H.destroy(run, turret.id, 0).changed, 'only counts once');
+  assert.strictEqual(run.heat, 5, 'explosions are loud');
+  const wall = run.layout.pieces.find((p) => p.type === 'wall');
+  assert.match(H.destroy(run, wall.id, 0).reason, /can't/);
+  const power = run.layout.pieces.find((p) => p.type === 'power');
+  assert.ok(H.destroy(run, power.id, 0).doorOpened);
+  assert.ok(H.enterDoor(run, 1000).ok);
+  assert.strictEqual(H.stage(run, 1000).stage, 'loot');
+
+  const quiet = setup({}, { inside: false }).run;
+  H.ventStart(quiet, 'v1', 0);
+  assert.match(H.ventFinish(quiet, 3000).reason, /not cut/);
+  assert.ok(H.ventFinish(quiet, 6000).ok);
+  assert.strictEqual(quiet.breached, 'vent');
+  assert.strictEqual(quiet.heat, 0, 'a vent is silent');
+});
+
+test('every minute inside brings a bigger wave', () => {
+  const { run } = setup(); // inside at 6 s
+  assert.strictEqual(H.waveTick(run, 60_000), null);
+  assert.deepStrictEqual(H.waveTick(run, 66_000), { wave: 1, count: 1 });
+  assert.strictEqual(H.waveTick(run, 70_000), null, 'once per minute');
+  assert.deepStrictEqual(H.waveTick(run, 126_000), { wave: 2, count: 2 });
+  run.selfDestructAt = 999_999;
+  assert.deepStrictEqual(H.waveTick(run, 10 * 60_000), { wave: 9, count: 7 }, 'capped, plus two in the self-destruct');
+});
+
+test('each level of the facility adds a level of better loot below', () => {
+  const { run } = setup({}, { security: 3 });
+  assert.strictEqual(run.floors, 3);
+  assert.strictEqual(run.layout.rooms.filter((r) => r.floor === 3).length, 16);
+  const key = run.layout.containers.find((c) => run.boxes[c.id].items.some((it) => it.item === 'keycard'));
+  assert.strictEqual(key.floor, 3, 'the keycard is on the deepest level');
+  assert.ok(H.reachFloor(run, 2).ok);
+  assert.match(H.reachFloor(run, 4).reason, /level/);
+  assert.strictEqual(H.selfDestructSeconds(3), 150);
 });
 
 test('Heat rises with time and reported noise, rate-limited per kind', () => {
@@ -104,17 +189,15 @@ test('Heat rises with time and reported noise, rate-limited per kind', () => {
   assert.strictEqual(run.heat, 15);
   H.addHeat(run, 50);
   assert.strictEqual(H.HEAT_LEVELS[H.heatLevel(run.heat)].name, 'Lockdown');
-  assert.strictEqual(H.extractStates(run, 4 * 60_000).pod.open, false, 'Lockdown seals the Escape Pod');
-  H.addHeat(run, 20);
-  assert.strictEqual(H.extractStates(run, 4 * 60_000).shuttle.countdown, 40, 'Purge doubles extract timers');
 });
 
-test('extraction needs the full countdown, and the lift eats a keycard', () => {
+test('boarding the ship needs the full countdown, before the self-destruct ends', () => {
   const { run } = setup();
-  assert.match(H.extractStart(run, 'lift', 0).reason, /keycard/);
-  assert.ok(H.extractStart(run, 'shuttle', 0).ok);
-  assert.match(H.extractFinish(run, 10_000).reason, /countdown/);
-  assert.ok(H.extractFinish(run, 20_000).ok);
+  assert.ok(H.extractStart(run, 'ship', 0).ok);
+  assert.match(H.extractFinish(run, 1000).reason, /countdown/);
+  assert.ok(H.extractFinish(run, 3000).ok);
+  run.selfDestructAt = 2000;
+  assert.match(H.extractFinish(run, 3000).reason, /too late/);
 });
 
 test('the Builder loses only what a raider carries out; the rest goes back in the vault', () => {
@@ -126,7 +209,7 @@ test('the Builder loses only what a raider carries out; the rest goes back in th
   H.openContainer(run, box, 0);
   const drive = run.boxes[box].items.find((it) => it.item === 'drive');
   assert.ok(H.take(run, drive.uid, 'backpack', 60_000).ok);
-  H.extractStart(run, 'shuttle', 300_000);
+  H.extractStart(run, 'ship', 300_000);
   assert.ok(H.extractFinish(run, 320_000).ok);
   const result = G.endRaid(g, run, 'extracted', 320_000);
   assert.deepStrictEqual(result.stolen, { drive: 1 });
@@ -147,6 +230,7 @@ test('dying keeps only the Secure Case', () => {
   const result = G.endRaid(g, run, 'killed', 70_000);
   assert.deepStrictEqual(result.kept.map((k) => k.item), ['drive']);
   assert.strictEqual(result.kept[0].fih, false);
+  assert.deepStrictEqual(H.finish(run, 'destroyed', 70_000).kept.map((k) => k.item), ['drive'], 'same when the self-destruct gets you');
 });
 
 test('blueprint cases are too big to protect', () => {
@@ -224,7 +308,20 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     const begin = await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     assert.ok(begin.run.layout.rooms.length >= 9);
     assert.ok(!JSON.stringify(begin).includes('"isotope"'), 'no container contents in the briefing');
+    assert.strictEqual(begin.run.stage, 'breach');
     await phone.next((m) => m.type === 'state' && m.state.raids.length === 1);
+
+    // Stage 1: knock out the power plant and walk in through the blast door.
+    pc.send({ type: 'raid_enter' });
+    await pc.next((m) => m.type === 'error' && /sealed/.test(m.reason));
+    const power = begin.run.layout.pieces.find((p) => p.type === 'power');
+    pc.send({ type: 'raid_destroy', piece: power.id });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.doorOpen);
+    pc.send({ type: 'raid_enter' });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.stage === 'loot');
+    clock += 61_000;
+    const wave = await pc.next((m) => m.type === 'raid' && m.ev === 'wave');
+    assert.strictEqual(wave.count, 1);
 
     // Find the keycard the way a player would: open containers until one shows it.
     const run = server.runs.get('Pilot A');
@@ -238,7 +335,9 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await pc.next((m) => m.type === 'raid' && m.ev === 'inventory' && m.items.length === 1);
 
     pc.send({ type: 'raid_keycard' });
-    await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.vaultOpen);
+    const opened = await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.vaultOpen);
+    assert.strictEqual(opened.stage, 'escape');
+    assert.ok(opened.selfDestruct > 60_000, 'the self-destruct is counting down');
     const vault = run.layout.containers.find((c) => c.type === 'vault' && run.boxes[c.id].items.some((it) => it.item === 'isotope')).id;
     pc.send({ type: 'raid_open', container: vault });
     await pc.next((m) => m.type === 'raid' && m.ev === 'container' && m.container === vault);
@@ -252,8 +351,8 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.heat >= 25);
     await phone.next((m) => m.type === 'state' && m.state.raids[0]?.heat >= 25);
 
-    clock += 4 * 60_000;
-    pc.send({ type: 'raid_extract_start', extract: 'shuttle' });
+    clock += 10_000;
+    pc.send({ type: 'raid_extract_start', extract: 'ship' });
     const ex = await pc.next((m) => m.type === 'raid' && m.ev === 'extracting');
     clock += ex.countdown * 1000;
     pc.send({ type: 'raid_extract_finish' });
@@ -291,9 +390,42 @@ test('the run clock ends a raid as missing in action', async () => {
     G.build(server.galaxy, 'aster', 0, 'spire');
     pc.send({ type: 'raid_start', planet: 'aster', slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
-    clock += 13 * 60_000;
+    clock += 17 * 60_000;
     const end = await pc.next((m) => m.type === 'raid' && m.ev === 'end');
     assert.strictEqual(end.result.outcome, 'mia');
+    pc.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test('the self-destruct kills a raider still inside when it ends', async () => {
+  const port = 18092;
+  let clock = 0;
+  const server = startServer({ port, tickMs: 60000, now: () => clock });
+  try {
+    const pc = await connect(port);
+    pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
+    await pc.next((m) => m.type === 'welcome');
+    server.galaxy.stock.metal = 999;
+    server.galaxy.stock.ice = 99;
+    assert.ok(G.build(server.galaxy, 'aster', 0, 'lab').ok);
+    pc.send({ type: 'raid_start', planet: 'aster', slot: 0 });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
+    pc.send({ type: 'raid_vent_start', vent: 'v2' });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'vent');
+    clock += 6000;
+    pc.send({ type: 'raid_vent_finish' });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.breached === 'vent');
+    pc.send({ type: 'raid_drill_start' });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'drill');
+    clock += 30_000;
+    pc.send({ type: 'raid_drill_finish' });
+    const open = await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.vaultOpen);
+    clock += open.selfDestruct;
+    const end = await pc.next((m) => m.type === 'raid' && m.ev === 'end');
+    assert.strictEqual(end.result.outcome, 'destroyed');
+    assert.match(server.galaxy.feed.at(-1).text, /self-destruct/);
     pc.close();
   } finally {
     await server.close();
