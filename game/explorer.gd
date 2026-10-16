@@ -19,6 +19,7 @@ const SettingsMenu := preload("res://settings_menu.gd")
 const ChatBox := preload("res://chat_box.gd")
 const Models := preload("res://models.gd")
 const Raid := preload("res://raid.gd")
+const Station := preload("res://station.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
@@ -61,6 +62,7 @@ var _others := {} # id -> {"node": Node3D, "pos": Array, "shown": Array}
 var _waypoints := [] # {"id", "name", "pos"}
 var _raid: Node3D # the on-foot raid while one is running
 var _raid_from := "" # the High Port (planet id) the raid left from, to return to
+var _station: Node3D # the High Port's interior while walking it on foot
 var _world_env: WorldEnvironment
 var _sky_layer: CanvasLayer
 var _hud_layer: CanvasLayer
@@ -368,7 +370,7 @@ func _build_hud() -> void:
 # --- Input -------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _raid:
+	if _raid or _station:
 		return
 	if _settings.visible:
 		if event.is_action_pressed("menu") and not _settings.is_rebinding():
@@ -434,7 +436,7 @@ func _refresh_focus() -> void:
 # --- Flying ------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if _raid:
+	if _raid or _station:
 		return
 	if controls.drift_hold and controls.enabled:
 		flight.drift = Input.is_action_pressed("drift")
@@ -713,6 +715,7 @@ func _refresh_dock() -> void:
 			_refresh_dock())
 	else:
 		_dock_title.text = "Docked at %s, orbiting %s" % [_stations[_docked].name, p.get("name", _docked)]
+		_dock_button("Walk into %s on foot" % _stations[_docked].name, _enter_station)
 		if Net.has_building("spaceport", _docked):
 			_dock_button("Shuttle down to %s's Spaceport" % owner, func():
 				_at_spaceport = true
@@ -1018,11 +1021,35 @@ func _draw_hud() -> void:
 
 func _on_state(_state: Dictionary) -> void:
 	_sync_stations()
-	if _docked != "" and _raid == null:
+	if _docked != "" and _raid == null and _station == null:
 		_refresh_dock()
 
 
 # --- Raids -------------------------------------------------------------------------------
+
+# --- Walking the High Port --------------------------------------------------------------
+
+func _enter_station() -> void:
+	_dock_panel.visible = false
+	controls.enabled = false
+	_set_space_visible(false)
+	_station = Station.new(_docked)
+	_station.controls = controls
+	_station.left.connect(_leave_station)
+	_station.service.connect(func(kind):
+		if kind == "repair":
+			flight.repair())
+	add_child(_station)
+
+
+## Back to the ship from the station: "ship" returns to the docked menu, "terminal" too, ready to pick a trip.
+func _leave_station(_where: String) -> void:
+	_station.queue_free()
+	_station = null
+	_set_space_visible(true)
+	_camera.make_current()
+	dock(_docked)
+
 
 func _on_raid_event(msg: Dictionary) -> void:
 	if msg.ev == "begin" and _raid == null:

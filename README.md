@@ -123,7 +123,16 @@ rest is in deep storage, and anything the raider doesn't carry out goes back in 
 nav map. Fly within 1.5 km, slow down and press **F** to dock. Docking opens the transit menu: shuttle
 down to the planet's Spaceport (deliver jobs, sell loot to the Fence) or pick one of the planet's
 facilities to be taken straight down to it and raid it. After a raid you're shuttled back up to the
-High Port, docked. Esc goes back a step or undocks. Inside a facility, on foot and in first person:
+High Port, docked. Esc goes back a step or undocks.
+
+**Inside the High Port.** From the docked menu, *Walk into ... on foot* takes you inside the station
+(`game/station.gd`), built from Akane's concept art. You arrive in the Hangar beside your ship on pad 06.
+A Concourse Ring lined with windows circles the Planetary Terminal Hall, where a hologram of the planet
+marks every base and site (red while under raid) and the Surface Transit consoles plan trips down.
+Off the ring: Ship Services (repairs your ship), the Supply Shop, the Commodity Exchange, the Job Board
+(deliver cargo), the Cantina (live chat on its screen), Fence's Noodles (the Fence is in the back room),
+the Security Office (the raid log as a wanted board), the Crew Cabins and the Observation Lounge.
+F uses things, Esc goes back to the ship. `game/tests/station_interior_shots.tscn` saves a picture of every room. Inside a facility, on foot and in first person:
 
 - The facility is a grid of rooms. The **vault** is the room furthest from the airlock, behind a
   red door: swipe an **access keycard** (one is hidden in some container) or drill it (loud, 30 s).
