@@ -35,8 +35,9 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 
 ## The Builder screen
 
-The Builder is a base-builder view of planet Aster, like Clash of Clans, played with the phone held sideways.
-Drag to pan, pinch (or scroll the mouse wheel) to zoom. Six build pads ring the command centre:
+The Builder is a base-builder view of your home planet, like Clash of Clans, played with the phone held sideways.
+Every Builder gets their own planet and economy: the first one to connect takes Aster, later ones found
+Brisa, Corvo and so on. Drag to pan, pinch (or scroll the mouse wheel) to zoom. Six build pads ring the command centre:
 tap a pad to select it, and its actions appear at the bottom (Info, Post job on the Spaceport,
 Ship cargo, security tier upgrades and the Alarm on facilities). **Build** (bottom right) opens the shop:
 pick a building, then tap a free pad (or select an empty pad first and it builds there).
@@ -44,11 +45,24 @@ Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as 
 During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
 
+**Satellite sites.** Facilities (below) don't go on pads: buying one founds its own satellite site off your
+planet (up to 3), opened from **Sites**. A site is a free 12x12 grid with the facility in the middle;
+Build opens the defence shop there: Turrets (2x2, 20 metal, 5 alloy), Walls (1x1, 5 metal) and
+Guard posts (2x2, 15 metal), placed on any free tiles. Tap a piece to remove it for half its cost back.
+
 **Ship Foundry** (60 metal, 10 ice, needs a Spaceport, one per base) builds warships for your navy.
 Tap it and open the **Shipyard** to queue Corvettes (25 metal, 1 min), Frigates (50 metal, 10 alloy, 3 min)
 or Destroyers (100 metal, 25 alloy, 3 isotope cells, 8 min). Ships build one at a time, up to 5 in the
 queue and 10 in the hangar; cancelling the last one refunds it. Finished ships wait in the hangar
-(the navy count is in the top bar) for attacks on other Builders, which come next.
+(the navy count is in the top bar).
+
+**Fleet attacks.** Tap the navy count (or *Fleet and attacks* in the Shipyard) to open the Fleet page. It
+lists other Builders' satellite sites with their defence (placed pieces plus the security tier's turrets
+and guards); tap one to send every ship in the hangar. The fleet flies 2 minutes divided by its slowest
+ship's speed, and the defender sees a red *Incoming* banner meanwhile. The battle runs up to 6 rounds,
+lightest ships sinking first. If the fleet breaks the defences it takes 40% of each vault stack and the
+site gets a 10-minute shield; survivors fly home with the loot (intel sells for credits). Home planets
+can't be attacked.
 
 ## The prototype loop
 
@@ -62,7 +76,7 @@ queue and 10 in the hangar; cancelling the last one refunds it. Finished ships w
 
 ## Raids: facilities and the pilots who rob them
 
-Based on the Facility Heist design doc. Builders build **facilities** on Aster (from the Build shop, on a free pad):
+Based on the Facility Heist design doc. Builders buy **facilities** in the Build shop, and each one founds its own satellite site:
 
 | Facility | Cost | Fills its vault with |
 | --- | --- | --- |

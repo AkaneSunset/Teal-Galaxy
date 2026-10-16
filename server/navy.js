@@ -63,4 +63,41 @@ function tick(e, b, now) {
   return launched;
 }
 
-module.exports = { SHIPS, HANGAR, QUEUE_MAX, ensure, fleetSize, queueShip, cancelShip, tick };
+// --- Attacks on satellite sites ------------------------------------------------------
+
+const TRAVEL_S = 120; // seconds to reach a site at speed 1; a fleet flies at its slowest ship's speed
+const ROUNDS = 6; // a battle the fleet can't win in this many rounds ends in retreat
+const DAMAGE = 3; // damage per point of attack per round
+const LOOT_SHARE = 0.4; // share of each vault stack a winning fleet carries off
+const SHIELD_MS = 10 * 60_000; // a site that was looted can't be attacked again for this long
+
+function travelMs(ships) {
+  const speeds = Object.entries(ships).filter(([, n]) => n > 0).map(([id]) => SHIPS[id].speed);
+  return (TRAVEL_S / Math.min(...speeds)) * 1000;
+}
+
+// Fights a fleet ({ship id: count}) against a site's defence ({attack, hull}). Each round the
+// fleet hits the defence, then the defence hits the fleet; damage to the fleet sinks its
+// lightest ships first. Pure: the same fight always ends the same way.
+function battle(ships, defence) {
+  const fleet = [];
+  for (const id of Object.keys(SHIPS).sort((a, b) => SHIPS[a].hull - SHIPS[b].hull))
+    for (let i = 0; i < (ships[id] || 0); i++) fleet.push(id);
+  let defHull = defence.hull;
+  let taken = 0; // damage not yet enough to sink the next ship
+  let rounds = 0;
+  while (fleet.length && rounds < ROUNDS) {
+    rounds += 1;
+    defHull -= fleet.reduce((a, id) => a + SHIPS[id].attack, 0) * DAMAGE;
+    if (defHull <= 0) break;
+    taken += defence.attack * DAMAGE;
+    while (fleet.length && taken >= SHIPS[fleet[0]].hull) taken -= SHIPS[fleet.shift()].hull;
+  }
+  const survivors = {};
+  for (const id of fleet) survivors[id] = (survivors[id] || 0) + 1;
+  const lost = {};
+  for (const [id, n] of Object.entries(ships)) if (n - (survivors[id] || 0) > 0) lost[id] = n - (survivors[id] || 0);
+  return { won: defHull <= 0, rounds, survivors, lost };
+}
+
+module.exports = { SHIPS, HANGAR, QUEUE_MAX, TRAVEL_S, LOOT_SHARE, SHIELD_MS, ensure, fleetSize, queueShip, cancelShip, tick, travelMs, battle };

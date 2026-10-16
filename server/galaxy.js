@@ -36,6 +36,8 @@ function newGalaxy() {
     jobs: [],
     raids: [], // raids in progress, as everyone may see them (no container contents)
     raidLog: [],
+    attacks: [], // fleets on their way to or back from a satellite site
+    attackLog: [],
     pilots: {},
     feed: [],
     navy: { corvette: 0, frigate: 0, destroyer: 0 },
@@ -224,7 +226,7 @@ function completeJob(g, job) {
 }
 
 function tick(g, now = Date.now()) {
-  let changed = false;
+  let changed = attackTick(g, now);
   for (const p of g.system.planets)
     for (const b of p.buildings)
       if (b.type === 'foundry')
@@ -410,6 +412,8 @@ function recoverRaids(g) {
   g.raids = [];
   g.raidLog ||= [];
   g.bases ||= {};
+  g.attacks ||= [];
+  g.attackLog ||= [];
   for (const e of [g, ...Object.values(g.bases)]) {
     N.ensure(e);
     for (const type of ['refinery', 'lab', 'spire', 'foundry']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
@@ -441,6 +445,95 @@ function cancelShip(g, planetId, slot) {
   const r = N.cancelShip(econ(g, planetId), b);
   if (r.ok) log(g, `${r.name} cancelled and refunded`);
   return r;
+}
+
+// --- Fleet attacks on satellite sites ------------------------------------------------------
+
+// A site's whole defence: its placed defences, the turrets its security tier adds, and the core
+// (guards add attack, the tier adds hull).
+function siteDefence(g, siteId) {
+  const st = site(g, siteId);
+  const b = st.buildings[0];
+  const tier = H.SECURITY[b.security];
+  const d = S.defence(st);
+  return { attack: d.attack + tier.turrets * S.PIECES.turret.attack + tier.guards, hull: d.hull + tier.turrets * S.PIECES.turret.hull + 40 * b.security };
+}
+
+// A Builder sends every ship in their navy (or `ships`, {id: count}) at another Builder's site.
+function launchAttack(g, owner, siteId, now, ships = null) {
+  const st = site(g, siteId);
+  if (!st) return fail('no such satellite site');
+  if (st.owner === owner) return fail('that is your own site');
+  if (!st.owner) return fail('nobody owns that site');
+  if ((st.shieldUntil || 0) > now) return fail(`${st.name} is shielded for ${Math.ceil((st.shieldUntil - now) / 60000)} more min`);
+  const home = g.system.planets.find((p) => p.owner === owner && p.kind !== 'satellite');
+  if (!home) return fail('you have no home planet');
+  const e = econ(g, home.id);
+  N.ensure(e);
+  const send = {};
+  for (const id of Object.keys(N.SHIPS)) {
+    const n = ships ? Math.min(Math.max(0, Math.floor(ships[id] || 0)), e.navy[id]) : e.navy[id];
+    if (n > 0) send[id] = n;
+  }
+  if (!Object.keys(send).length) return fail('you have no ships to send');
+  if ((g.attacks ||= []).some((a) => a.attacker === owner && a.target === siteId && a.status === 'flying'))
+    return fail('your fleet is already on its way there');
+  for (const [id, n] of Object.entries(send)) e.navy[id] -= n;
+  const leg = N.travelMs(send);
+  const attack = { id: (g.nextAttackId = (g.nextAttackId || 0) + 1), attacker: owner, defender: st.owner, target: siteId, siteName: st.name, ships: send, status: 'flying', arriveAt: now + leg, leg };
+  g.attacks.push(attack);
+  log(g, `${owner}'s fleet is heading for ${st.name}`);
+  return { ok: true, attack };
+}
+
+// Fleets that reach their target fight; survivors fly home with any loot and rejoin the navy.
+function attackTick(g, now) {
+  let changed = false;
+  for (const a of g.attacks || []) {
+    if (a.status === 'flying' && now >= a.arriveAt) {
+      changed = true;
+      const st = site(g, a.target);
+      const b = st && st.buildings[0];
+      if (!b) {
+        Object.assign(a, { status: 'returning', returnAt: now + a.leg, survivors: a.ships, lost: {}, loot: {}, won: false });
+        continue;
+      }
+      const fight = N.battle(a.ships, siteDefence(g, a.target));
+      const loot = {};
+      if (fight.won && Object.keys(fight.survivors).length) {
+        for (const [item, qty] of Object.entries(b.vault)) {
+          if (!H.ITEMS[item]) continue;
+          const take = qty > 0 ? Math.max(1, Math.floor(qty * N.LOOT_SHARE)) : 0;
+          if (take > 0) {
+            b.vault[item] -= take;
+            loot[item] = take;
+          }
+        }
+        st.shieldUntil = now + N.SHIELD_MS;
+      }
+      Object.assign(a, { status: 'returning', returnAt: now + a.leg, survivors: fight.survivors, lost: fight.lost, loot, won: fight.won });
+      const haul = Object.entries(loot).map(([item, q]) => `${q} ${H.ITEMS[item].name}`).join(', ');
+      log(g, fight.won
+        ? `${a.attacker}'s fleet broke the defences of ${a.siteName}${haul ? ` and took ${haul}` : ''}`
+        : `${a.siteName} drove off ${a.attacker}'s fleet`);
+      (g.attackLog ||= []).push({ at: now, attacker: a.attacker, defender: a.defender, site: a.siteName, won: fight.won, lost: fight.lost, loot });
+      if (g.attackLog.length > 20) g.attackLog.shift();
+    } else if (a.status === 'returning' && now >= a.returnAt) {
+      changed = true;
+      a.status = 'home';
+      const home = g.system.planets.find((p) => p.owner === a.attacker && p.kind !== 'satellite');
+      if (!home) continue;
+      const e = econ(g, home.id);
+      for (const [id, n] of Object.entries(a.survivors)) e.navy[id] += n;
+      for (const [item, qty] of Object.entries(a.loot)) {
+        if (H.ITEMS[item].cat === 'intel') e.credits += H.ITEMS[item].value * qty;
+        else e.stock[item] = (e.stock[item] || 0) + qty;
+      }
+      log(g, `${a.attacker}'s fleet is back from ${a.siteName}`);
+    }
+  }
+  if (changed) g.attacks = (g.attacks || []).filter((a) => a.status !== 'home');
+  return changed;
 }
 
 // The Fence at the Spaceport buys everything in a pilot's stash.
@@ -475,6 +568,8 @@ module.exports = {
   queueShip,
   cancelShip,
   claimBase,
+  launchAttack,
+  siteDefence,
   foundSite,
   placePiece,
   removePiece,

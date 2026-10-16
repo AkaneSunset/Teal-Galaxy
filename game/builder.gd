@@ -50,6 +50,10 @@ var _sites_btn: Button
 var _jobs_btn: Button
 var _home_btn: Button
 var _sites_list: VBoxContainer
+var _fleet_status: Label
+var _fleet_targets: VBoxContainer
+var _fleet_log: Label
+var _fleet_key := ""
 var _sites_key := ""
 var _site_count := -1 # this Builder's sites at the last refresh, to follow a newly founded one
 var _focus := Vector3(0, 0, 4)
@@ -69,6 +73,7 @@ var _stock := {} # resource -> Label
 var _goods: Label
 var _banner: Button
 var _toasts: VBoxContainer
+var _top_mid: VBoxContainer # banner and toasts; moves right while the drawer is open
 var _raids_btn: Button
 var _select_box: VBoxContainer
 var _select_name: Label
@@ -527,12 +532,17 @@ func _build_hud() -> void:
 	res_col.add_child(res_row)
 	for r in [["credits", "credits"], ["metal", "metal"], ["ice", "ice"], ["population", "group"], ["navy", "ship_emblem"]]:
 		_stock[r[0]] = _pill(res_row, r[1])
+	var navy_pill: Control = _stock.navy.get_parent().get_parent()
+	navy_pill.mouse_filter = Control.MOUSE_FILTER_STOP
+	navy_pill.tooltip_text = "Your navy: tap for the fleet"
+	navy_pill.gui_input.connect(func(ev): if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT: _toggle_page("fleet"))
 	_goods = _label(res_col, 14)
 	_goods.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_goods.modulate = Color(0.85, 0.95, 1.0)
 
 	# Top centre: raid banner, then toasts.
 	var top_mid := VBoxContainer.new()
+	_top_mid = top_mid
 	_pin(top_mid, Control.PRESET_CENTER_TOP)
 	top_mid.offset_top = 64
 	top_mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -680,6 +690,11 @@ func _build_drawer(layer: Control) -> void:
 	_yard_cancel.text = "Cancel last in queue (full refund)"
 	_yard_cancel.pressed.connect(func(): Net.send({"type": "cancel_ship", "planet": _pid(), "slot": _foundry_slot()}))
 	yard.add_child(_yard_cancel)
+	var to_fleet := Button.new()
+	to_fleet.text = "Fleet and attacks"
+	to_fleet.icon = load(ICONS + "launch.png")
+	to_fleet.pressed.connect(func(): _show_page("fleet"))
+	yard.add_child(to_fleet)
 	_yard_ships = VBoxContainer.new()
 	_yard_ships.add_theme_constant_override("separation", 8)
 	yard.add_child(_yard_ships)
@@ -690,6 +705,22 @@ func _build_drawer(layer: Control) -> void:
 	_sites_list.add_theme_constant_override("separation", 8)
 	body.add_child(_sites_list)
 	_pages["sites"] = _sites_list
+
+	# Fleet: ships out and coming home, fleets heading for your sites, and targets to attack.
+	var fleet := VBoxContainer.new()
+	fleet.add_theme_constant_override("separation", 10)
+	body.add_child(fleet)
+	_fleet_status = _label(fleet, 15)
+	_fleet_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var targets_title := _label(fleet, 16)
+	targets_title.text = "Targets: other Builders' satellite sites"
+	_fleet_targets = VBoxContainer.new()
+	_fleet_targets.add_theme_constant_override("separation", 8)
+	fleet.add_child(_fleet_targets)
+	_fleet_log = _label(fleet, 14)
+	_fleet_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fleet_log.modulate = Color(0.8, 0.9, 0.95)
+	_pages["fleet"] = fleet
 
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -836,7 +867,9 @@ func _show_page(page: String) -> void:
 	for p in _pages:
 		_pages[p].visible = p == page
 	_drawer.visible = page != ""
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your sites"}.get(page, "")
+	_top_mid.anchor_left = 0.68 if page != "" else 0.5
+	_top_mid.anchor_right = _top_mid.anchor_left
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your sites", "fleet": "Fleet"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
@@ -881,6 +914,9 @@ func _set_placing(type: String) -> void:
 func _on_banner() -> void:
 	var raids := _my_raids()
 	if raids.is_empty():
+		var incoming := _incoming()
+		if not incoming.is_empty():
+			show_view(incoming[0].target)
 		return
 	var r: Dictionary = raids[0]
 	if Net.planet(r.planet).get("kind", "") == "satellite":
@@ -1011,6 +1047,8 @@ func _refresh(state: Dictionary) -> void:
 	_refresh_selection(state)
 	if _page == "sites":
 		_refresh_sites(state)
+	if _page == "fleet":
+		_refresh_fleet(state)
 	_refresh_raids(state)
 	_refresh_jobs(state)
 	if _page == "shipyard":
@@ -1260,11 +1298,14 @@ func _refresh_site(state: Dictionary) -> void:
 
 ## Opens a site the Builder has just founded.
 func _follow_new_site() -> void:
+	if Net.home == "":
+		return # not welcomed yet, so which sites are ours isn't known
 	var sites := _my_sites()
-	if _site_count >= 0 and sites.size() > _site_count:
+	var before := _site_count
+	_site_count = sites.size() # before show_view, which refreshes and lands back here
+	if before >= 0 and sites.size() > before:
 		show_view(sites[-1].id)
 		toast("New satellite site: tap Build to place defences", C_TEAL)
-	_site_count = sites.size()
 
 
 func _refresh_sites(state: Dictionary) -> void:
@@ -1297,6 +1338,95 @@ func _refresh_sites(state: Dictionary) -> void:
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.modulate = Color(0.75, 0.9, 0.95)
 	hint.text = "Found a satellite site by buying a facility in the Build shop (up to %d)." % int(Net.catalog.get("sites", {}).get("max", 3))
+
+
+## Fleets on their way to this Builder's sites.
+func _incoming() -> Array:
+	return Net.state.get("attacks", []).filter(func(a): return a.defender == Net.my_planet().get("owner") and a.status == "flying")
+
+
+## A site's whole defence, worked out the same way as the server's siteDefence().
+func _site_defence(site: Dictionary) -> Dictionary:
+	var pieces: Dictionary = Net.catalog.get("sites", {}).get("pieces", {})
+	var attack := 0
+	var hull := 0
+	for p in site.get("pieces", []):
+		attack += int(pieces[p.type].attack)
+		hull += int(pieces[p.type].hull)
+	var tier := int(site.buildings[0].security) if site.get("buildings", []) else 1
+	var s: Dictionary = Net.catalog.get("security", {}).get(str(tier), {"turrets": 0, "guards": 0})
+	attack += int(s.turrets) * int(pieces.get("turret", {"attack": 0}).attack) + int(s.guards)
+	hull += int(s.turrets) * int(pieces.get("turret", {"hull": 0}).hull) + 40 * tier
+	return {"attack": attack, "hull": hull}
+
+
+func _fleet_power() -> Dictionary:
+	var ships: Dictionary = Net.catalog.get("ships", {})
+	var navy: Dictionary = _econ().get("navy", {})
+	var attack := 0
+	var hull := 0
+	for id in navy:
+		attack += int(navy[id]) * int(ships.get(id, {"attack": 0}).attack)
+		hull += int(navy[id]) * int(ships.get(id, {"hull": 0}).hull)
+	return {"attack": attack, "hull": hull}
+
+
+func _refresh_fleet(state: Dictionary) -> void:
+	var me = Net.my_planet().get("owner")
+	var now := Net.now_ms()
+	var power := _fleet_power()
+	var lines := ["In the hangar: %d ships, attack %d, hull %d" % [_fleet_size(state), power.attack, power.hull]]
+	for a in state.get("attacks", []):
+		var t := 0.0
+		if a.status == "flying":
+			t = (float(a.arriveAt) - now) / 1000.0
+		else:
+			t = (float(a.returnAt) - now) / 1000.0
+		t = maxf(t, 0.0)
+		if a.attacker == me:
+			lines.append(("Your fleet reaches %s in %d:%02d" if a.status == "flying" else "Your fleet is flying home from %s, %d:%02d") % [a.siteName, int(t) / 60, int(t) % 60])
+		elif a.defender == me and a.status == "flying":
+			lines.append("INCOMING: %s's fleet reaches your %s in %d:%02d" % [a.attacker, a.siteName, int(t) / 60, int(t) % 60])
+	_fleet_status.text = "\n".join(lines)
+
+	var targets: Array = state.system.planets.filter(func(p): return p.get("kind", "") == "satellite" and p.get("owner") != null and p.owner != me)
+	var key := JSON.stringify([targets.map(func(p): return [p.id, p.get("shieldUntil", 0) > now, _site_defence(p)]), _fleet_size(state)])
+	if key != _fleet_key:
+		_fleet_key = key
+		for c in _fleet_targets.get_children():
+			c.queue_free()
+		if targets.is_empty():
+			_label(_fleet_targets, 14).text = "No other Builder has a satellite site yet."
+		for p in targets:
+			var d := _site_defence(p)
+			var shielded := float(p.get("shieldUntil", 0)) > now
+			var btn := Button.new()
+			btn.icon = load(ICONS + "launch.png")
+			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			btn.text = "%s (%s)\nDefence: attack %d, hull %d%s" % [p.name, p.owner, d.attack, d.hull, "\nShielded after an attack" if shielded else ("\nTap to send every ship" if _fleet_size(state) > 0 else "\nNo ships in the hangar")]
+			btn.disabled = shielded or _fleet_size(state) == 0
+			var id: String = p.id
+			btn.pressed.connect(func(): Net.send({"type": "launch_attack", "target": id}))
+			_fleet_targets.add_child(btn)
+
+	var log_lines := []
+	var history: Array = state.get("attackLog", [])
+	for i in range(history.size() - 1, maxi(-1, history.size() - 6), -1):
+		var e: Dictionary = history[i]
+		if e.attacker != me and e.defender != me:
+			continue
+		var loot := []
+		for item in e.loot:
+			loot.append("%d %s" % [e.loot[item], Net.item_name(item)])
+		var lost := 0
+		for id in e.lost:
+			lost += int(e.lost[id])
+		if e.attacker == me:
+			log_lines.append("%s at %s: %s, %d ships lost%s" % ["Won" if e.won else "Driven off", e.site, "took " + ", ".join(loot) if loot else "no loot", lost, ""])
+		else:
+			log_lines.append("%s attacked your %s: %s" % [e.attacker, e.site, ("they took " + ", ".join(loot)) if e.won else "your defences held"])
+	_fleet_log.text = ("Recent battles\n" + "\n".join(log_lines)) if log_lines else ""
 
 
 func _refresh_info(state: Dictionary) -> void:
@@ -1426,13 +1556,17 @@ func _refresh_raids(state: Dictionary) -> void:
 		lines.append("%s at %s: %s%s" % [e.pilot, e.facility, e.outcome, (", took " + ", ".join(stolen)) if stolen else ""])
 	_raids.text = "\n\n".join(lines) if lines else "No raids yet. Facilities you build can be raided by pilots."
 
-	_banner.visible = not live.is_empty()
+	var incoming := _incoming()
+	_banner.visible = not live.is_empty() or not incoming.is_empty()
 	_raids_btn.modulate = Color(1, 0.6, 0.55) if not live.is_empty() else Color.WHITE
 	if not live.is_empty():
 		var r: Dictionary = live[0]
 		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
-		_banner.text = "Raid at %s  %d:%02d  Heat %d" % [BUILDING_INFO.get(_building_at(int(r.slot)).get("type", ""), {"name": r.facility}).name,
-			int(left) / 60, int(left) % 60, r.heat]
+		_banner.text = "Raid at %s  %d:%02d  Heat %d" % [r.facility, int(left) / 60, int(left) % 60, r.heat]
+	elif not incoming.is_empty():
+		var a: Dictionary = incoming[0]
+		var left := maxf(0.0, (float(a.arriveAt) - Net.now_ms()) / 1000.0)
+		_banner.text = "Incoming: %s's fleet reaches %s in %d:%02d" % [a.attacker, a.siteName, int(left) / 60, int(left) % 60]
 
 
 ## New activity-feed entries pop up as toasts. The backlog at connect time is skipped.
