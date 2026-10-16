@@ -76,7 +76,7 @@ func _process(delta: float) -> void:
 			_wait = 0.3
 			_step = "board"
 		"board":
-			var raid_button: Array = _explorer._dock_list.get_children().filter(func(c): return c is Button and c.text.contains(_facility().name))
+			var raid_button: Array = _explorer._dock_list.get_children().filter(func(c): return c is Button and c.text.contains(Net.planet(_facility().planet).name))
 			if raid_button.is_empty():
 				_finish(false, "no raid option in the transit menu")
 			raid_button[0].pressed.emit()

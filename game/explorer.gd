@@ -729,11 +729,13 @@ func _refresh_dock() -> void:
 			for id in b.vault:
 				vault += int(b.vault[id])
 			var cool := (float(b.get("cooldownUntil", 0)) - Net.now_ms()) / 1000.0
-			var label := "Raid %s (%s's): security tier %d, %d items in the vault" % [f.name, owner, int(b.security), vault]
+			var site := Net.planet(f.planet)
+			var fac_name: String = site.name if site.get("kind", "") == "satellite" else f.name
+			var label := "Raid %s (%s's): security tier %d, %d items in the vault" % [fac_name, owner, int(b.security), vault]
 			if not Net.raid_on(f.planet, f.slot).is_empty():
-				_dock_note("%s: someone is already inside" % f.name)
+				_dock_note("%s: someone is already inside" % fac_name)
 			elif cool > 0:
-				_dock_note("%s: security on alert after a raid (%d s)" % [f.name, ceili(cool)])
+				_dock_note("%s: security on alert after a raid (%d s)" % [fac_name, ceili(cool)])
 			else:
 				_dock_button(label, board.bind(f.planet, f.slot))
 		_dock_button("Undock", undock)

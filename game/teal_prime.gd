@@ -59,7 +59,12 @@ static func station_pos(planet_id: String) -> Array:
 	if planet_id == "aster":
 		return PORT_POS
 	var p := builder_planet(planet_id)
-	return offset(p.pos, STATION_OFFSET) if not p.is_empty() else PORT_POS
+	if p.is_empty():
+		return PORT_POS
+	# On the sunward side, like Aster's, so the station is lit with the planet's day side behind it.
+	var sunward := -Vector3(p.pos[0], p.pos[1], p.pos[2]).normalized()
+	var side := sunward.cross(Vector3.UP).normalized()
+	return offset(p.pos, sunward * STATION_OFFSET.z + Vector3.UP * STATION_OFFSET.y + side * STATION_OFFSET.x)
 
 
 static func station_name(planet_name: String) -> String:
