@@ -48,6 +48,10 @@ pick a building, then tap a free pad (or select an empty pad first and it builds
 Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as short messages.
 During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
+The ground around every base and satellite site is an icy, faceted landscape generated from its id
+(`game/terrain.gd`): a flat clearing for the base, then snow, frost-covered slopes, bare rock cliffs, mesas
+and jagged peaks further out, with mist drifting in the valleys. No two bases look the same, and a base
+always looks the same each time you open it.
 
 **Build times and levels.** Every building takes time to build (Mine 20 s up to Data Spire 2.5 min) and
 does nothing until it's finished: its pad shows scaffolding and a countdown. Once built, select it and press

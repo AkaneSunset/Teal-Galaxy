@@ -9,6 +9,7 @@ extends Control
 
 const BaseModels := preload("res://base_models.gd")
 const SiteView := preload("res://site_view.gd")
+const Terrain := preload("res://terrain.gd")
 const ICONS := "res://ui/icons/"
 
 const BUILDING_INFO := {
@@ -86,6 +87,7 @@ var _subtitle: Label
 var _stock := {} # resource -> Label
 var _goods: Label
 var _banner: Button
+var _terrain: Node3D
 var _toasts: VBoxContainer
 var _top_mid: VBoxContainer # banner and toasts; moves right while the drawer is open
 var _raids_btn: Button
@@ -157,11 +159,12 @@ func _build_world() -> void:
 	add_child(world)
 
 	var env := Environment.new()
+	# A cold, overcast world: slate sky, pale blue-grey horizon, and haze that swallows the far peaks.
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.02, 0.03, 0.09)
-	sky_mat.sky_horizon_color = Color(0.12, 0.32, 0.38)
-	sky_mat.ground_horizon_color = Color(0.12, 0.32, 0.38)
-	sky_mat.ground_bottom_color = Color(0.05, 0.06, 0.1)
+	sky_mat.sky_top_color = Color(0.1, 0.11, 0.16)
+	sky_mat.sky_horizon_color = Color(0.55, 0.6, 0.7)
+	sky_mat.ground_horizon_color = Color(0.55, 0.6, 0.7)
+	sky_mat.ground_bottom_color = Color(0.2, 0.22, 0.28)
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
@@ -170,6 +173,10 @@ func _build_world() -> void:
 	env.ambient_light_color = Color(0.55, 0.65, 0.85)
 	env.ambient_light_energy = 0.4
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.62, 0.67, 0.78)
+	env.fog_density = 0.0005
+	env.fog_sky_affect = 0.6
 	var we := WorldEnvironment.new()
 	we.environment = env
 	world.add_child(we)
@@ -188,17 +195,10 @@ func _build_world() -> void:
 	_cam.current = true
 	_place_camera()
 
-	# Ground: dusty regolith, with the base plate and paths on top.
-	var ground := MeshInstance3D.new()
-	var disc := CylinderMesh.new()
-	disc.top_radius = 700.0
-	disc.bottom_radius = 700.0
-	disc.height = 1.0
-	disc.radial_segments = 48
-	ground.mesh = disc
-	ground.position.y = -0.5
-	ground.material_override = _flat(Color(0.25, 0.23, 0.32))
-	world.add_child(ground)
+	# Ground: the planet's icy terrain, generated for each base (see _refresh_terrain), with the
+	# base plate and paths on top.
+	_terrain = Terrain.new()
+	world.add_child(_terrain)
 	var plate := MeshInstance3D.new()
 	var plate_mesh := CylinderMesh.new()
 	plate_mesh.top_radius = PAD_RING + 16.0
@@ -236,28 +236,13 @@ func _build_world() -> void:
 	_site.visible = false
 	world.add_child(_site)
 
-	# Scenery past the plate: boulders, ice crystals and beacons.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	for i in 26:
-		var ang := rng.randf() * TAU
-		var dist := rng.randf_range(PAD_RING + 22.0, PAD_RING + 90.0)
-		var p := Vector3(cos(ang), 0, sin(ang)) * dist
-		var prop: Node3D
-		if i % 4 == 0:
-			prop = BaseModels.Models.ice_asteroid(rng.randf_range(2.0, 3.5), i)
-			prop.position = p + Vector3(0, 0.5, 0)
-		else:
-			prop = BaseModels.boulder(rng.randf_range(2.0, 6.0), i)
-			prop.position = p
-		prop.rotation.y = rng.randf() * TAU
-		world.add_child(prop)
+	# Beacons at the edge of the base plate. (Boulders and ice out on the terrain come with it.)
 	for a in 4:
 		var beacon := BaseModels.Models.nav_beacon()
 		var ang := deg_to_rad(a * 90.0)
 		beacon.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RING + 18.0)
 		beacon.scale = Vector3.ONE * 0.7
-		world.add_child(beacon)
+		_home.add_child(beacon)
 
 
 func _make_pad(world: Node3D, pos: Vector3) -> Dictionary:
@@ -558,6 +543,8 @@ func _build_hud() -> void:
 	_goods = _label(res_col, 14)
 	_goods.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_goods.modulate = Color(0.85, 0.95, 1.0)
+	_goods.add_theme_constant_override("outline_size", 6) # readable over bright snow
+	_goods.add_theme_color_override("font_outline_color", Color(0.04, 0.06, 0.12))
 
 	# Top centre: raid banner, then toasts.
 	var top_mid := VBoxContainer.new()
@@ -1100,6 +1087,7 @@ func _refresh(state: Dictionary) -> void:
 	_goods.visible = _goods.text != ""
 
 	_follow_new_site()
+	_refresh_terrain()
 	if _view != "" and Net.planet(_view).is_empty():
 		show_view("") # the site is gone
 		return
@@ -1394,6 +1382,15 @@ func _refresh_site(state: Dictionary) -> void:
 		_site.highlight(Rect2i(int(p.x), int(p.y), int(def.w), int(def.h)))
 	else:
 		_site.highlight(Rect2i())
+
+
+## The terrain around whatever is on screen: the home planet's, or the open site's. Each is seeded
+## by its id, so every base and site has its own landscape.
+func _refresh_terrain() -> void:
+	if _view != "":
+		_terrain.generate(_view, 44.0)
+	elif Net.home != "":
+		_terrain.generate(Net.home, PAD_RING + 22.0)
 
 
 ## Opens a site the Builder has just founded.
