@@ -25,6 +25,9 @@ var _ridge := FastNoiseLite.new() # jagged peaks
 var _mesa := FastNoiseLite.new() # where flat-topped rock tables stand
 var _detail := FastNoiseLite.new() # small bumps and cracks
 var _flat := 60.0
+var _bias := FastNoiseLite.new() # which sides of the base get the high ground
+var _cliff := {} # dir, edge, height: a sheer rise (or drop) off one side of the base
+var _canyon := {} # normal, along, offset, width, depth: a winding gorge past another side
 
 
 func _ready() -> void:
@@ -67,6 +70,9 @@ func generate(id: String, flat: float) -> void:
 	_ridge.frequency = 0.006 + (hash(id + "f") % 100) / 100.0 * 0.006 # some planets have tighter ranges
 	_mesa.frequency = 0.008
 	_detail.frequency = 0.05
+	_bias.seed = hash(id + "bias")
+	_bias.frequency = 0.9
+	_pick_landforms(hash(id + "landforms"))
 	_build_mesh()
 	_scatter(hash(id + "props"))
 
@@ -76,15 +82,64 @@ func height_at(x: float, z: float) -> float:
 	var d := Vector2(x, z).length()
 	var out := smoothstep(_flat, _flat + 60.0, d) # 0 in the clearing, 1 well past it
 	var far := smoothstep(_flat + 40.0, _flat + 260.0, d) # peaks grow taller further out
+	# The big peaks crowd some sides of the base and leave others open, so it isn't a crater.
+	var ang := atan2(z, x)
+	var side := _bias.get_noise_2d(cos(ang), sin(ang)) * 0.5 + 0.5
+	far *= smoothstep(0.25, 0.75, side)
 	var h := _base.get_noise_2d(x, z) * 8.0 + _detail.get_noise_2d(x, z) * 1.5
 	# Ridged noise gives sharp crests; cubing it keeps the peaks narrow and the valleys wide.
 	var r := maxf(0.0, _ridge.get_noise_2d(x, z) * 0.5 + 0.5)
-	h += pow(r, 2.2) * (14.0 + 80.0 * far)
+	h += pow(r, 2.2) * (14.0 * lerpf(0.3, 1.0, side) + 80.0 * far)
 	# Mesas: where the mesa noise is high the ground lifts into a flat-topped table with sheer sides.
 	var m := _mesa.get_noise_2d(x, z)
 	if m > 0.35:
 		h = maxf(h, (16.0 + 10.0 * far) * smoothstep(0.35, 0.42, m) + _detail.get_noise_2d(z, x) * 0.8)
-	return h * out
+	h *= out
+	var p := Vector2(x, z)
+	if not _cliff.is_empty():
+		# A wall of rock (or a ledge dropping away) along a wobbly line off one side.
+		var s: float = p.dot(_cliff.dir) - _cliff.edge - _base.get_noise_2d(z * 2.0, x * 2.0) * 14.0
+		h += smoothstep(0.0, 5.0, s) * _cliff.height
+	if not _canyon.is_empty():
+		# A winding gorge with steep walls and a stepped floor, well clear of the base.
+		var along: float = p.dot(_canyon.along)
+		var off: float = p.dot(_canyon.normal) - _canyon.offset - _base.get_noise_2d(along, 7.0) * 40.0
+		var w: float = _canyon.width
+		var cut := 1.0 - smoothstep(w * 0.55, w, absf(off))
+		var floor_step := smoothstep(0.3, 0.5, _mesa.get_noise_2d(along * 0.5, off))
+		h = lerpf(h, -_canyon.depth * (0.55 + 0.45 * floor_step), cut)
+	return h
+
+
+## Picks the big landforms for this base: usually a cliff on one side, often a canyon on another.
+func _pick_landforms(seed: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for i in 4:
+		rng.randi() # the first draws from nearby seeds come out alike
+	_cliff = {}
+	_canyon = {}
+	var roll := rng.randf()
+	var cliff_ang := rng.randf() * TAU
+	if roll < 0.75:
+		var height := rng.randf_range(28.0, 55.0)
+		if rng.randf() < 0.35:
+			height *= -0.8 # a ledge: the ground drops away instead of rising
+		_cliff = {
+			dir = Vector2(cos(cliff_ang), sin(cliff_ang)),
+			edge = _flat + rng.randf_range(12.0, 45.0),
+			height = height,
+		}
+	if roll > 0.35:
+		var a := cliff_ang + rng.randf_range(PI * 0.6, PI * 1.4) # away from the cliff
+		var width := rng.randf_range(18.0, 34.0)
+		_canyon = {
+			normal = Vector2(cos(a), sin(a)),
+			along = Vector2(-sin(a), cos(a)),
+			offset = _flat + width + rng.randf_range(8.0, 50.0),
+			width = width,
+			depth = rng.randf_range(30.0, 60.0),
+		}
 
 
 func _build_mesh() -> void:

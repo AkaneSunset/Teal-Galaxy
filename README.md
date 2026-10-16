@@ -50,7 +50,8 @@ During a raid the facility glows red and a banner shows the raid clock; tap it t
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
 The ground around every base and satellite site is an icy, faceted landscape generated from its id
 (`game/terrain.gd`): a flat clearing for the base, then snow, frost-covered slopes, bare rock cliffs, mesas
-and jagged peaks further out, with mist drifting in the valleys. No two bases look the same, and a base
+and jagged peaks further out, with mist drifting in the valleys. Most bases also get a cliff (or a ledge dropping away) off one side,
+and many a winding canyon off another, so the high ground doesn't ring the base like a crater. No two bases look the same, and a base
 always looks the same each time you open it.
 
 **Build times and levels.** Every building takes time to build (Mine 20 s up to Data Spire 2.5 min) and
