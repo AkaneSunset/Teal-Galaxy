@@ -35,7 +35,7 @@ const isState = (pred) => (m) => m.type === 'state' && pred(m.state);
 
 test('builder and two pilots complete the ice job', async () => {
   const port = 18080;
-  const server = startServer({ port, tickMs: 60000 });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000 });
   try {
     const phone = await connect(port);
     const pc1 = await connect(port);
@@ -90,7 +90,7 @@ test('builder and two pilots complete the ice job', async () => {
 
 test('chat reaches every app, trimmed and rate-limited', async () => {
   const port = 18081;
-  const server = startServer({ port, tickMs: 60000 });
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000 });
   try {
     const phone = await connect(port);
     const pc = await connect(port);
