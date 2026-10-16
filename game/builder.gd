@@ -238,15 +238,21 @@ func _refresh_raids(state: Dictionary) -> void:
 	var levels: Array = Net.catalog.get("heatLevels", [])
 	for r in state.get("raids", []):
 		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
-		lines.append("INTRUDER: %s inside %s\nHeat %d (%s)%s, %d:%02d left" % [r.pilot, r.facility, r.heat,
-			levels[int(r.level)].name if levels else "", ", vault open" if r.vaultOpen else "", int(left) / 60, int(left) % 60])
+		var where := "breaching the perimeter"
+		if r.get("stage", "") == "loot":
+			where = "inside, on level %d of %d" % [maxi(1, int(r.get("floor", 1))), int(r.get("floors", 1))]
+		elif r.get("stage", "") == "escape":
+			var boom := maxf(0.0, (float(r.selfDestructAt) - Net.now_ms()) / 1000.0)
+			where = "in the safe room: self-destruct in %d:%02d" % [int(boom) / 60, int(boom) % 60]
+		lines.append("INTRUDER: %s at %s, %s\nHeat %d (%s), %d:%02d left" % [r.pilot, r.facility, where, r.heat,
+			levels[int(r.level)].name if levels else "", int(left) / 60, int(left) % 60])
 	var history: Array = state.get("raidLog", [])
 	for i in range(history.size() - 1, maxi(-1, history.size() - 4), -1):
 		var e: Dictionary = history[i]
 		var stolen := []
 		for id in e.stolen:
 			stolen.append("%d %s" % [e.stolen[id], Net.item_name(id)])
-		lines.append("%s at %s: %s%s" % [e.pilot, e.facility, e.outcome, (", took " + ", ".join(stolen)) if stolen else ""])
+		lines.append("%s at %s: %s%s" % [e.pilot, e.facility, {"destroyed": "caught in the self-destruct"}.get(e.outcome, e.outcome), (", took " + ", ".join(stolen)) if stolen else ""])
 	_raids.text = "\n".join(lines) if lines else "No raids yet. Facilities you build can be raided by pilots."
 
 

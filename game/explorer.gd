@@ -994,13 +994,18 @@ func _enter_raid(briefing: Dictionary) -> void:
 	add_child(_raid)
 
 
-func _leave_raid(_result: Dictionary) -> void:
+func _leave_raid(result: Dictionary) -> void:
 	_raid.queue_free()
 	_raid = null
 	_set_space_visible(true)
 	_camera.make_current()
 	controls.enabled = true
 	controls.capture_mouse()
+	if result.get("outcome", "") == "destroyed":
+		# The ship went up with the facility: a replacement waits at the spaceport.
+		teleport(System.offset(System.PORT_POS, Vector3(0, 0, 6_000)))
+		_say("Your ship went down with the facility. A replacement is waiting at %s." % System.PORT_NAME)
+		return
 	if not _raid_at.is_empty():
 		teleport(System.offset(System.facility_pos(int(_raid_at.slot)), Vector3(0, 0, 1_200)))
 	_say("Back aboard. Sell your loot to the Fence at %s." % System.PORT_NAME)

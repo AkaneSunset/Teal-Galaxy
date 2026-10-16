@@ -1,7 +1,9 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
-## build a facility, fly to it, board, search containers until the keycard turns up,
-## open the vault, take something from it, extract at the Shuttle Pad, and fly on with the loot.
+## build a facility, fly to it, board, blow up the power plant, walk in through the blast door,
+## ride the lifts down to the deepest level, search containers until the keycard turns up,
+## open the safe room's vault, take something from it, ride back up before the self-destruct,
+## board the ship, and fly on with the loot.
 ## (Selling it is covered by the server tests.)
 ##   cd server && npm start
 ##   godot --headless --path game res://tests/raid.tscn
@@ -65,10 +67,45 @@ func _process(delta: float) -> void:
 				return
 			_raid.god_mode = true
 			for c in _raid.layout.containers:
-				if c.type != "vault":
+				if c.type != "vault" and int(c.floor) == _raid.floors:
 					_queue.append(c.id)
 			_wait = 1.0
-			_step = "search"
+			_step = "breach"
+		"breach":
+			_shot("1b-landed")
+			var power := ""
+			for id in _raid._pieces:
+				if _raid._pieces[id].data.type == "power":
+					power = id
+			if power == "":
+				_finish(false, "no power plant on a default site")
+			_raid.destroy_piece(power)
+			_wait = 0.6
+			_step = "door"
+		"door":
+			if not _raid.door_open:
+				return
+			_raid.teleport_to(Vector3(0, 0, float(_raid.layout.core) / 2.0 + 2.0))
+			_shot("1c-blast-door-open")
+			_raid.teleport_to(Vector3(0, 0, 4))
+			_step = "inside-core"
+		"inside-core":
+			if not _raid.breached:
+				return
+			_step = "down"
+		"down":
+			if _raid._floor == _raid.floors:
+				_shot("2-deepest-level")
+				_step = "search"
+				return
+			for l in _raid._lifts:
+				if _raid._floor_of(l.pos) == _raid._floor and int(l.to_floor) == _raid._floor + 1:
+					_raid.teleport_to(l.pos)
+					_raid._interact()
+					_shot("2-level-%d" % (_raid._floor))
+					_wait = 0.3
+					return
+			_finish(false, "no lift down from level %d" % _raid._floor)
 		"search":
 			_shot("2-inside")
 			if _raid.vault_open or _raid._holding("keycard"):
@@ -105,6 +142,8 @@ func _process(delta: float) -> void:
 			for c in _raid.layout.containers:
 				if c.type == "vault":
 					box = c.id
+			if _raid.self_destruct < 0.0:
+				_finish(false, "opening the vault didn't start the self-destruct")
 			_go_to_container(box)
 			_raid.open_container(box)
 			_search_time = 0.0
@@ -123,11 +162,19 @@ func _process(delta: float) -> void:
 				_finish(false, "vault search never finished")
 		"extract":
 			_raid._close_inventory()
-			_raid.teleport_to(_raid._extract_nodes["shuttle"].pos)
-			_step = "extracting"
+			_shot("5-self-destruct")
+			if _raid._floor == 0:
+				_raid.teleport_to(_raid._extract_nodes["ship"].pos)
+				_step = "extracting"
+				return
+			for l in _raid._lifts:
+				if _raid._floor_of(l.pos) == _raid._floor and int(l.to_floor) == _raid._floor - 1:
+					_raid.teleport_to(l.pos)
+					_raid._interact()
+					_wait = 0.3
+					return
+			_finish(false, "no lift up from level %d" % _raid._floor)
 		"extracting":
-			if _clock > 0 and int(_clock * 10) % 50 == 0:
-				_shot("5-extracting")
 			if not _result.is_empty():
 				if _result.outcome != "extracted":
 					_finish(false, "outcome " + _result.outcome)
@@ -157,7 +204,8 @@ func _go_to_container(id: String) -> void:
 	var node: Node3D = _raid._containers[id].node
 	var c: Dictionary = _raid._containers[id].data
 	var centre: Vector3 = _raid._room_centre(int(c.room))
-	_raid.teleport_to(node.global_position + (centre - node.global_position).normalized() * Vector3(1, 0, 1) * 1.3)
+	var flat := (centre - node.global_position) * Vector3(1, 0, 1)
+	_raid.teleport_to(node.global_position + flat.normalized() * 1.3)
 
 
 func _shot(name: String) -> void:
