@@ -121,25 +121,24 @@ which level, or racing the self-destruct), their Heat and time left.
 rest is in deep storage, and anything the raider doesn't carry out goes back in the vault.
 
 **Explorer (PC):** facilities orbit 25 km from the Spaceport and show on the map in red. Fly
-within 1.5 km, slow down and press **F** to set down on the facility's landing pad. A raid then
-runs in three stages, on foot and in first person:
+within 1.5 km, slow down and press **F** to set down on the facility's landing pad. On foot and in first
+person:
 
-1. **Breach.** The map is the facility's site exactly as the Builder laid it out on its grid
-   (a satellite site's turrets, guard posts, walls, power plant and leftover obstacles; a facility
-   without a site gets defences set out from its security tier). Shoot turrets, guard posts and the
-   **power plant** to destroy them. With the power plant down the core's **blast door** opens; with
-   no power plant the core runs on its own power and the door never opens. Either way you can cut
-   through one of the core's **vents** instead (6 s, silent).
-2. **Loot.** From the lobby a lift takes you down. The facility has one level below ground for each
-   level of its core building (its security tier until buildings have levels), up to five. Deeper
-   levels are bigger, with more guards and turrets and rarer loot. Each level's lift down is in the
-   room furthest from where you arrived. Every minute inside brings in a bigger wave of guards.
-3. **Extraction.** The **safe room** on the deepest level holds the vault, behind red doors: swipe
-   the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A Vault
-   Warden boss may be waiting there. Opening the vault starts the **self-destruct** (60 s plus 30 s
-   per level): ride the lifts back up and board your ship before it ends, or you die with the
-   facility, lose your ship and keep only your Secure Case.
-
+- **Getting in.** The map outside is the site exactly as the Builder laid it out, drawn with the
+  Builder's own models on the same terrain: their turrets, guard posts, walls, power plant and
+  leftover obstacles, plus the turrets the security tier mounts on the core. Shoot defences to
+  destroy them. With the power plant down the core's **blast door** opens; with no power plant the
+  core runs on its own power and the door never opens. Either way you can cut through one of the
+  core's **vent** grates instead (6 s, silent).
+- **Going down.** The facility has one level below ground for each level of its core building, up
+  to five. Deeper levels are bigger, with more guards and turrets and rarer loot. Each level's lift
+  down is in the room furthest from where you arrived. Every minute inside brings a bigger wave of
+  guards.
+- **Getting out.** The **safe room** on the deepest level holds the vault, behind amber doors: swipe
+  the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A Vault
+  Warden may be waiting there. Opening the vault starts the **self-destruct** (60 s plus 30 s per
+  level): ride the lifts back up and board your ship before it ends, or you die with the facility,
+  lose your ship and keep only your Secure Case.
 - **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
   Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
 - **Heat** rises with time, gunfire, explosions, being spotted and bodies found. At Alerted guards
@@ -203,8 +202,9 @@ set the server to `ws://<your computer's Wi-Fi address>:8080`. Both devices must
 cd server && npm test     # the ice job, raid rules, and a full raid over real WebSockets
 ```
 
-`game/tests/raid.tscn` plays a whole raid against a running server: land, blow up the power
-plant, ride the lifts to the deepest level, find the keycard, open the vault, get back up and
+`game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
+Builder lays out a site and upgrades it to level 3, then the pilot lands, checks the site matches,
+blows up the power plant, rides the lifts to the deepest level, find the keycard, open the vault, get back up and
 board the ship (instructions at the top of `game/tests/raid_test.gd`).
 
 `game/tests/flight_test.gd` checks the flight model on its own:

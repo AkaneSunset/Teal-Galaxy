@@ -14,6 +14,10 @@ extends Node3D
 signal finished(result: Dictionary)
 
 const InventoryView := preload("res://raid_inventory.gd")
+const Models := preload("res://models.gd")
+const BaseModels := preload("res://base_models.gd")
+const SiteView := preload("res://site_view.gd")
+const Terrain := preload("res://terrain.gd")
 
 # Movement, from the spec's starting values.
 const WALK := 4.5
@@ -115,11 +119,16 @@ var _into: Node3D # where _box and _label put what they build
 var _pieces := {} # site piece id -> {"data", "node", "health", "dead"}
 var _blast_door: Node3D
 var _lifts: Array = [] # {"pos", "to", "to_floor", "name"}
-var _vents := {} # id -> {"out", "in", "node", "cut"}
+var _vents := {} # id -> {"out", "node", "cut"}
 var _venting := ""
 var _vent_left := -1.0
-var _enter_sent := false
+var _entering := false # waiting for the server to let you in through the door
 var _boom_light: OmniLight3D
+var _site_view: Node3D # the Builder's own view of the site, drawing the outside
+var _world_env: WorldEnvironment
+var _env_outside: Environment
+var _env_inside: Environment
+var _exit_vent := "" # the vent you came in by, if not the door
 var _containers := {} # id -> {"node", "data"}
 var _vault_doors: Array[Node3D] = []
 var _vault_room_centre := Vector3.ZERO
@@ -180,10 +189,6 @@ func _ready() -> void:
 	Net.raid_event.connect(_on_raid_event)
 	Net.server_error.connect(_on_server_error)
 	controls.capture_mouse()
-	if layout.powered == "core":
-		_say("%s runs on its own power: the blast door won't open. Find a vent into the core." % brief.facility, 7.0)
-	else:
-		_say("%s. Knock out the power plant to open the blast door, or cut in through a vent." % brief.facility, 7.0)
 
 
 func _exit_tree() -> void:
@@ -213,33 +218,60 @@ func _parent() -> Node:
 
 
 func _build_environment() -> void:
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.01, 0.015, 0.03)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.35, 0.4, 0.48)
-	env.ambient_light_energy = 0.6
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.07, 0.1)
-	env.fog_density = 0.012
-	var world := WorldEnvironment.new()
-	world.environment = env
-	add_child(world)
+	# Outside: the Builder's cold, overcast sky and haze. Inside: dark corridors.
+	_env_outside = Environment.new()
+	var sky_mat := ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.1, 0.11, 0.16)
+	sky_mat.sky_horizon_color = Color(0.55, 0.6, 0.7)
+	sky_mat.ground_horizon_color = Color(0.55, 0.6, 0.7)
+	sky_mat.ground_bottom_color = Color(0.2, 0.22, 0.28)
+	var sky := Sky.new()
+	sky.sky_material = sky_mat
+	_env_outside.background_mode = Environment.BG_SKY
+	_env_outside.sky = sky
+	_env_outside.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_env_outside.ambient_light_color = Color(0.55, 0.65, 0.85)
+	_env_outside.ambient_light_energy = 0.4
+	_env_outside.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_env_outside.fog_enabled = true
+	_env_outside.fog_light_color = Color(0.62, 0.67, 0.78)
+	_env_outside.fog_density = 0.0005
+	_env_outside.fog_sky_affect = 0.6
+	_env_inside = Environment.new()
+	_env_inside.background_mode = Environment.BG_COLOR
+	_env_inside.background_color = Color(0.01, 0.015, 0.03)
+	_env_inside.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_env_inside.ambient_light_color = Color(0.4, 0.48, 0.65)
+	_env_inside.ambient_light_energy = 0.5
+	_env_inside.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_env_inside.fog_enabled = true
+	_env_inside.fog_light_color = Color(0.05, 0.07, 0.12)
+	_env_inside.fog_density = 0.012
+	_world_env = WorldEnvironment.new()
+	_world_env.environment = _env_outside
+	add_child(_world_env)
 
 
-func _box(size: Vector3, pos: Vector3, colour: Color, solid := true, glow := false) -> Node3D:
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = colour
-	mat.roughness = 0.85
-	if glow:
-		mat.emission_enabled = true
-		mat.emission = colour
-		mat.emission_energy_multiplier = 1.5
-	mesh.material = mat
+## A box: `look` is a material kind from models.gd (bevelled, in the Builder's style) or a plain
+## colour. `hidden` builds only the collision.
+func _box(size: Vector3, pos: Vector3, look: Variant, solid := true, glow := false, hidden := false) -> Node3D:
 	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
+	if look is String:
+		mi.mesh = Models.bevel_box(size, minf(0.12, minf(size.x, minf(size.y, size.z)) * 0.3))
+		mi.material_override = Models.material(look)
+	else:
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = look
+		mat.roughness = 0.85
+		if glow:
+			mat.emission_enabled = true
+			mat.emission = look
+			mat.emission_energy_multiplier = 1.5
+		mesh.material = mat
+		mi.mesh = mesh
+	mi.visible = not hidden
 	if not solid:
 		mi.position = pos
 		_parent().add_child(mi)
@@ -282,7 +314,7 @@ func _build_rooms() -> void:
 	var t := 0.3
 	var half := room / 2.0
 	var door := 2.4
-	var wall := Color(0.32, 0.35, 0.4)
+	var wall := "navy"
 	for id in rooms:
 		var r: Dictionary = rooms[id]
 		var lv := _level(int(r.floor))
@@ -291,16 +323,20 @@ func _build_rooms() -> void:
 		var ring: String = r.ring
 		# Deeper levels run warmer and darker: you're further from the way out.
 		var depth_tint := float(int(r.floor) - 1) / maxf(1.0, float(floors))
-		var floor_col: Color = {"perimeter": Color(0.22, 0.24, 0.27), "interior": Color(0.18, 0.21, 0.27), "core": Color(0.25, 0.14, 0.14)}[ring]
-		_box(Vector3(room, 0.2, room), c + Vector3(0, -0.1, 0), floor_col.lerp(Color(0.2, 0.14, 0.12), depth_tint * 0.5))
-		_box(Vector3(room, 0.2, room), c + Vector3(0, h + 0.1, 0), Color(0.1, 0.11, 0.13), false)
+		# The Builder's deck colours underfoot, with its grid lines; the safe room's floor runs red.
+		var floor_col: Color = {"perimeter": Color(0.2, 0.25, 0.35), "interior": Color(0.18, 0.22, 0.32), "core": Color(0.3, 0.16, 0.18)}[ring]
+		_box(Vector3(room, 0.2, room), c + Vector3(0, -0.1, 0), floor_col.lerp(Color(0.16, 0.14, 0.2), depth_tint * 0.5))
+		for i in [-1, 1]:
+			_box(Vector3(room, 0.02, 0.12), c + Vector3(0, 0.01, i * room / 4.0), Color(0.32, 0.42, 0.56), false)
+			_box(Vector3(0.12, 0.02, room), c + Vector3(i * room / 4.0, 0.01, 0), Color(0.32, 0.42, 0.56), false)
+		_box(Vector3(room, 0.2, room), c + Vector3(0, h + 0.1, 0), Color(0.08, 0.1, 0.16), false)
 		var light := OmniLight3D.new()
 		light.position = c + Vector3(0, h - 0.4, 0)
 		light.omni_range = room * 0.95
 		light.light_energy = 1.6
 		light.light_color = {"perimeter": Color(0.95, 0.95, 1.0), "interior": Color(0.7, 0.85, 1.0), "core": Color(1.0, 0.55, 0.45)}[ring].lerp(Color(1.0, 0.7, 0.5), depth_tint * 0.6)
 		_into.add_child(light)
-		_box(Vector3(2.5, 0.06, 0.4), c + Vector3(0, h - 0.05, 0), light.light_color, false, true)
+		_box(Vector3(2.5, 0.1, 0.4), c + Vector3(0, h - 0.05, 0), "amber" if ring == "core" else "teal_light", false)
 
 		# Each room builds its east and south walls; the edge of the level gets the west and north.
 		var x: int = int(r.x)
@@ -326,7 +362,7 @@ func _build_rooms() -> void:
 				_box(Vector3(t, h, seg) if along_z else Vector3(seg, h, t), base + (Vector3(0, 0, shift) if along_z else Vector3(shift, 0, 0)), wall)
 			_box(Vector3(t, h - 2.6, door) if along_z else Vector3(door, h - 2.6, t), base + Vector3(0, 1.3, 0), wall)
 			if d.locked:
-				var slab := _box(Vector3(t * 0.6, 2.6, door) if along_z else Vector3(door, 2.6, t * 0.6), c + offset + Vector3(0, 1.3, 0), Color(0.75, 0.2, 0.15), true, true)
+				var slab := _box(Vector3(t * 0.6, 2.6, door) if along_z else Vector3(door, 2.6, t * 0.6), c + offset + Vector3(0, 1.3, 0), "amber")
 				_vault_doors.append(slab)
 				slab.visible = not vault_open
 				slab.get_child(0).disabled = vault_open
@@ -336,100 +372,117 @@ func _build_rooms() -> void:
 	for lv in layout.floors:
 		var n := int(lv.n)
 		_into = _floor_nodes[n]
-		var up_to: Vector3 = Vector3.ZERO if n == 1 else _room_centre(int(_level(n - 1).down))
+		var up_to: Vector3 = _door_outside() if n == 1 else _room_centre(int(_level(n - 1).down))
 		_lift(_room_centre(int(lv.entrance)), up_to, n - 1, "Lift up to %s" % ("the surface" if n == 1 else "level %d" % (n - 1)))
 		if int(lv.down) >= 0:
 			_lift(_room_centre(int(lv.down)), _room_centre(int(_level(n + 1).entrance)), n + 1, "Lift down to level %d" % (n + 1))
-	_into = _floor_nodes[0]
-	_lift(Vector3.ZERO, _room_centre(int(_level(1).entrance)), 1, "Lift down to level 1")
 	_vault_room_centre = _room_centre(int(layout.vault))
 
 
 func _lift(pos: Vector3, to: Vector3, to_floor: int, text: String) -> void:
-	var colour := Color(0.4, 0.75, 1.0)
-	var pad := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 1.3
-	mesh.bottom_radius = 1.3
-	mesh.height = 0.06
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(colour, 0.5)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = colour
-	mesh.material = mat
-	pad.mesh = mesh
-	pad.position = pos + Vector3(0, 0.03, 0)
+	# A small build pad from the Builder's set, its lights marking the lift.
+	var pad := BaseModels.pad()
+	pad.scale = Vector3(0.15, 0.15, 0.15)
+	pad.position = pos
 	_into.add_child(pad)
-	_label(text, pos + Vector3(0, 2.4, 0), 32, colour)
 	_lifts.append({"pos": pos, "to": to, "to_floor": to_floor, "name": text})
 
 
-# The surface: the site's grid as the Builder laid it out, the core with its lobby, blast door
-# and vents, and the landing pad where your ship waits.
+# The surface: the Builder's site, drawn by the same view the Builder uses, on the same terrain,
+# with collision and health added for what's on it. Your ship waits on a pad off the south edge.
 func _build_site() -> void:
 	_into = _floor_nodes[0]
 	var half := float(layout.half)
 	var core := float(layout.core)
 	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, 30, 0)
-	sun.light_energy = 0.9
-	sun.light_color = Color(0.8, 0.88, 1.0)
+	sun.rotation_degrees = Vector3(-55, -30, 0)
+	sun.light_energy = 1.1
+	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 200.0
 	_into.add_child(sun)
-	# Ice all round, the site's deck on it, and its grid.
-	_box(Vector3(260, 0.2, 260), Vector3(0, -0.25, 0), Color(0.55, 0.62, 0.7))
-	_box(Vector3(half * 2.0, 0.2, half * 2.0), Vector3(0, -0.1, 0), Color(0.24, 0.27, 0.31))
-	var tile := float(layout.tile)
-	for i in range(int(layout.grid) + 1):
-		var at := -half + i * tile
-		_box(Vector3(0.06, 0.02, half * 2.0), Vector3(at, 0.01, 0), Color(0.18, 0.4, 0.4), false)
-		_box(Vector3(half * 2.0, 0.02, 0.06), Vector3(0, 0.01, at), Color(0.18, 0.4, 0.4), false)
 
-	# The core: a lobby with the lift down, a blast door in the south wall and vents in the others.
-	var h := 6.0
-	var t := 0.5
-	var c := core / 2.0
-	var shell := Color(0.4, 0.42, 0.48)
-	var door_w := 3.0
-	var seg := (core - door_w) / 2.0
-	for sgn in [-1, 1]:
-		_box(Vector3(seg, h, t), Vector3(sgn * (door_w / 2.0 + seg / 2.0), h / 2.0, c), shell)
-	_box(Vector3(door_w, h - 3.2, t), Vector3(0, 3.2 + (h - 3.2) / 2.0, c), shell)
-	_box(Vector3(core, h, t), Vector3(0, h / 2.0, -c), shell)
-	_box(Vector3(t, h, core), Vector3(-c, h / 2.0, 0), shell)
-	_box(Vector3(t, h, core), Vector3(c, h / 2.0, 0), shell)
-	_box(Vector3(core + t, 0.4, core + t), Vector3(0, h + 0.2, 0), shell.darkened(0.3))
-	_box(Vector3(core, 0.1, core), Vector3(0, 0.05, 0), Color(0.2, 0.22, 0.26))
-	var lobby_light := OmniLight3D.new()
-	lobby_light.position = Vector3(0, h - 1.0, 0)
-	lobby_light.omni_range = core
-	lobby_light.light_energy = 1.4
-	_into.add_child(lobby_light)
-	_label(brief.facility, Vector3(0, h + 1.6, c), 64, Color(0.35, 0.95, 0.88))
-	_blast_door = _box(Vector3(door_w, 3.2, t * 0.6), Vector3(0, 1.6, c), Color(0.85, 0.55, 0.15), true, true)
+	var terrain := Terrain.new()
+	terrain.position.y = -SiteView.DECK_TOP # the site's deck stands this far above the ground
+	_into.add_child(terrain)
+	terrain.generate(str(layout.view.id), 44.0)
+	_site_view = SiteView.new()
+	_into.add_child(_site_view)
+	var view: Dictionary = layout.view.duplicate()
+	view["buildings"] = [{"type": layout.type, "level": 1}]
+	_site_view.show_site(view, brief.facility, false, int(layout.ringTurrets))
+	_site_view._label.visible = false # the Builder's floating name tag isn't part of the place
+
+	# Where you can walk: the deck, and a causeway to your ship's pad. Invisible walls round both.
+	var pad := _pad()
+	var deck := half * 2.0 + 2.0
+	_box(Vector3(deck, 1.2, deck), Vector3(0, -0.6, 0), "navy", true, false, true)
+	_box(Vector3(19.0, 1.2, pad.z - half + 9.4), Vector3(0, -0.6, (half + pad.z + 9.4) / 2.0), "navy", true, false, true)
+	var edge := half + 1.0
+	for side in [-1, 1]:
+		_box(Vector3(0.5, 6, deck), Vector3(side * edge, 3, 0), "navy", true, false, true)
+		_box(Vector3(0.5, 6, pad.z + 9.4 - edge), Vector3(side * 9.5, 3, (edge + pad.z + 9.4) / 2.0), "navy", true, false, true)
+		_box(Vector3(edge - 9.5, 6, 0.5), Vector3(side * (edge + 9.5) / 2.0, 3, edge), "navy", true, false, true)
+	_box(Vector3(deck, 6, 0.5), Vector3(0, 3, -edge), "navy", true, false, true)
+	_box(Vector3(19.0, 6, 0.5), Vector3(0, 3, pad.z + 9.4), "navy", true, false, true)
+
+	# The core's pad can't be walked onto, and its building stops bullets.
+	var core_pad := StaticBody3D.new()
+	core_pad.collision_layer = LAYER_WORLD
+	_into.add_child(core_pad)
+	for c in [[core / 2.0 - 0.1, 1.6, 0.8], [4.6, 12.0, 6.0]]:
+		var shape := CollisionShape3D.new()
+		shape.shape = CylinderShape3D.new()
+		shape.shape.radius = c[0]
+		shape.shape.height = c[1]
+		shape.position.y = c[2]
+		core_pad.add_child(shape)
+
+	# The blast door, in a frame on the south edge of the core's pad, and the vent grates on the others.
+	var door_at := Vector3(0, 0, core / 2.0)
+	_box(Vector3(0.6, 3.6, 0.8), door_at + Vector3(-1.9, 1.8, 0), "navy")
+	_box(Vector3(0.6, 3.6, 0.8), door_at + Vector3(1.9, 1.8, 0), "navy")
+	_box(Vector3(4.4, 0.6, 0.8), door_at + Vector3(0, 3.9, 0), "navy")
+	_box(Vector3(3.2, 3.4, 0.2), door_at + Vector3(0, 1.7, -0.3), Color(0.03, 0.04, 0.06), false) # the dark doorway behind
+	_blast_door = _box(Vector3(3.2, 3.4, 0.3), door_at + Vector3(0, 1.7, 0.1), "amber")
 	_set_blast_door(door_open)
 	for v in layout.vents:
 		var p := Vector3(v.pos[0], 0, v.pos[1])
 		var outward := p.normalized()
-		var grate_size := Vector3(0.2, 0.9, 1.4) if absf(outward.x) > 0.5 else Vector3(1.4, 0.9, 0.2)
-		var grate := _box(grate_size, p + Vector3(0, 0.6, 0) + outward * 0.3, Color(0.3, 0.35, 0.38), false, false)
-		_label("Vent", p + Vector3(0, 1.5, 0) + outward * 0.6, 24, Color(1, 1, 1, 0.6))
-		_vents[v.id] = {"out": p + outward * 1.4, "in": p - outward * 1.4, "node": grate, "cut": breached}
+		var grate := Node3D.new()
+		grate.position = p + outward * 0.9
+		_into.add_child(grate)
+		Models.block(grate, Vector3(1.8, 0.25, 1.8), "steel", Vector3(0, 0.12, 0), 0.06)
+		for i in 4:
+			Models.block(grate, Vector3(1.4, 0.08, 0.12), "navy", Vector3(0, 0.27, -0.6 + i * 0.4), 0.02)
+		_vents[v.id] = {"out": p + outward * 2.4, "node": grate, "cut": false}
 
+	# Health and collision for each piece, over the model the Builder's view drew for it.
+	var models := {} # "x,z" -> model node
+	var core_node: Node3D
+	for child in _site_view._content.get_children():
+		if child is MeshInstance3D:
+			continue
+		if Vector2(child.position.x, child.position.z).length() < 0.01:
+			core_node = child
+		else:
+			models["%d,%d" % [roundi(child.position.x), roundi(child.position.z)]] = child
 	for piece in layout.pieces:
-		_build_piece(piece)
+		var model: Node3D = null
+		if piece.get("ring", false) and core_node:
+			for child in core_node.get_children():
+				if Vector2(child.position.x - float(piece.pos[0]), child.position.z - float(piece.pos[1])).length() < 0.2:
+					model = child
+		else:
+			model = models.get("%d,%d" % [roundi(piece.pos[0]), roundi(piece.pos[1])])
+		_build_piece(piece, model)
 
-	# The landing pad, your ship on it, and the boarding ring.
-	var pad := Vector3(layout.pad[0], 0, layout.pad[1])
-	_box(Vector3(18, 0.3, 18), pad + Vector3(0, -0.05, 0), Color(0.2, 0.22, 0.25))
-	for sgn in [-1, 1]:
-		_box(Vector3(18, 0.05, 0.3), pad + Vector3(0, 0.12, sgn * 9), Color(0.9, 0.6, 0.2), false, true)
-	var ship := Vector3(pad.x + 4.5, 0, pad.z + 2)
-	_box(Vector3(4.0, 2.2, 9.0), ship + Vector3(0, 1.8, 0), Color(0.6, 0.64, 0.7))
-	_box(Vector3(9.5, 0.3, 3.5), ship + Vector3(0, 1.4, 1.5), Color(0.5, 0.54, 0.6))
-	_box(Vector3(2.2, 0.9, 2.0), ship + Vector3(0, 2.9, -2.8), Color(0.35, 0.95, 0.88), false, true)
-	for sgn in [-1, 1]:
-		_box(Vector3(0.9, 0.9, 0.5), ship + Vector3(sgn * 1.2, 1.8, 4.6), Color(1.0, 0.55, 0.25), false, true)
+	# Your ship on a pad from the Builder's set, and the boarding ring.
+	var landing := BaseModels.pad()
+	landing.position = pad + Vector3(0, -0.9, 0)
+	_into.add_child(landing)
+	var ship := Models.starter_ship()
+	ship.position = pad + Vector3(0, 2.2, 1.5) # nose to the site, as it came in
+	_into.add_child(ship)
 	_boom_light = OmniLight3D.new()
 	_boom_light.light_color = Color(1.0, 0.15, 0.05)
 	_boom_light.light_energy = 0.0
@@ -437,40 +490,29 @@ func _build_site() -> void:
 	add_child(_boom_light)
 
 
-func _build_piece(piece: Dictionary) -> void:
-	var size := Vector3(piece.size[0], 0, piece.size[1])
+# Collision box (size, height) for each kind of piece, matching the Builder's models.
+const PIECE_BOXES := {"turret": [6.0, 3.6], "wall": [3.8, 3.4], "guardpost": [5.0, 7.2], "power": [6.0, 5.0],
+	"boulder": [5.0, 3.2], "crystals": [2.4, 2.6], "wreck": [5.5, 2.2]}
+
+
+func _build_piece(piece: Dictionary, model: Node3D) -> void:
 	var pos := Vector3(piece.pos[0], 0, piece.pos[1])
 	var dead: bool = piece.id in destroyed
-	var node: Node3D
-	var extras: Array = [] # the parts that go when it's destroyed
-	match piece.type:
-		"turret":
-			node = _box(Vector3(size.x * 0.4, 1.6, size.z * 0.4), pos + Vector3(0, 0.8, 0), Color(0.3, 0.3, 0.32))
-			var head := _box(Vector3(0.9, 0.6, 1.6), pos + Vector3(0, 1.9, 0), Color(0.6, 0.15, 0.12), false, true)
-			extras.append(head)
-			_turrets.append({"base": node, "head": head, "pos": pos + Vector3(0, 1.9, 0), "health": float(piece.hp), "tell": 0.0, "cd": 0.0,
-				"dead": dead, "laser": _laser(), "floor": 0, "piece": piece.id, "range": 34.0})
-			head.visible = not dead
-		"guardpost":
-			node = _box(Vector3(size.x * 0.75, 3.0, size.z * 0.75), pos + Vector3(0, 1.5, 0), Color(0.42, 0.4, 0.3))
-			extras.append(_box(Vector3(size.x * 0.85, 0.3, size.z * 0.85), pos + Vector3(0, 3.15, 0), Color(0.3, 0.28, 0.22), false))
-			extras.append(_box(Vector3(0.8, 0.3, 0.3), pos + Vector3(0, 2.4, size.z * 0.38), Color(1.0, 0.75, 0.3), false, true))
-		"power":
-			node = _box(Vector3(size.x * 0.8, 3.4, size.z * 0.8), pos + Vector3(0, 1.7, 0), Color(0.3, 0.33, 0.38))
-			for sgn in [-1, 1]:
-				extras.append(_box(Vector3(0.5, 2.6, 0.5), pos + Vector3(sgn * size.x * 0.25, 4.6, 0), Color(0.35, 0.8, 1.0), false, true))
-			extras.append(_label("Power plant", pos + Vector3(0, 6.6, 0), 40, Color(0.5, 0.85, 1.0)))
-		"wall":
-			node = _box(Vector3(size.x, 2.6, size.z), pos + Vector3(0, 1.3, 0), Color(0.45, 0.47, 0.5))
-		"boulder":
-			node = _box(Vector3(size.x * 0.8, 2.2, size.z * 0.7), pos + Vector3(0, 1.1, 0), Color(0.42, 0.4, 0.42))
-		"crystals":
-			node = _box(Vector3(size.x * 0.5, 1.8, size.z * 0.5), pos + Vector3(0, 0.9, 0), Color(0.55, 0.85, 1.0), true, true)
-		"wreck":
-			node = _box(Vector3(size.x * 0.9, 1.0, size.z * 0.6), pos + Vector3(0, 0.5, 0), Color(0.25, 0.24, 0.23))
-		_:
-			node = _box(Vector3(size.x * 0.8, 2.0, size.z * 0.8), pos + Vector3(0, 1.0, 0), Color(0.4, 0.4, 0.44))
-	_pieces[piece.id] = {"data": piece, "node": node, "health": float(piece.hp), "dead": dead, "respawn": POST_RESPAWN, "extras": extras}
+	var ring: bool = piece.get("ring", false)
+	var dims: Array = PIECE_BOXES.get(piece.type, [float(piece.size[0]) * 0.8, 2.0])
+	var w: float = 1.8 if ring else dims[0]
+	var h: float = 3.0 if ring else dims[1]
+	var footprint := Vector3(minf(w, float(piece.size[0])), h, minf(w, float(piece.size[1])))
+	var base := 0.8 if ring else 0.0 # ring turrets stand on the core's pad
+	var body := _box(footprint, pos + Vector3(0, base + h / 2.0, 0), Color.BLACK, true, false, true)
+	if piece.type == "turret":
+		var head: Node3D = null
+		if model:
+			head = model if ring else (model.get_child(model.get_child_count() - 1) as Node3D)
+		var muzzle := pos + Vector3(0, base + (1.9 if ring else 3.5), 0)
+		_turrets.append({"base": body, "head": head, "pos": muzzle, "health": float(piece.hp), "tell": 0.0, "cd": 0.0,
+			"dead": dead, "laser": _laser(), "floor": 0, "piece": piece.id, "range": 34.0})
+	_pieces[piece.id] = {"data": piece, "node": body, "model": model, "health": float(piece.hp), "dead": dead, "respawn": POST_RESPAWN}
 	if dead:
 		_wreck(_pieces[piece.id])
 
@@ -481,35 +523,39 @@ func _set_blast_door(open: bool) -> void:
 	_blast_door.get_child(0).disabled = open
 
 
-# What's left of a destroyed piece: a scorched stump, no longer in the way.
+# What's left of a destroyed piece: a scorched heap where its model stood.
 func _wreck(p: Dictionary) -> void:
-	for e in p.extras:
-		e.visible = false
-	var node: Node3D = p.node
-	node.scale = Vector3(1.0, 0.25, 1.0)
-	node.position.y *= 0.25
-	var mi: MeshInstance3D = node.get_child(1)
-	var mat: StandardMaterial3D = mi.mesh.material.duplicate()
-	mat.albedo_color = Color(0.12, 0.1, 0.09)
-	mat.emission_enabled = false
-	mi.material_override = mat
+	if p.model:
+		p.model.visible = false
+	var body: StaticBody3D = p.node
+	var shape: BoxShape3D = body.get_child(0).shape
+	var size := Vector3(shape.size.x, 0.7, shape.size.z)
+	shape.size = size
+	body.position.y = (0.8 if p.data.get("ring", false) else 0.0) + 0.35
+	var heap := MeshInstance3D.new()
+	heap.mesh = Models.bevel_box(size * Vector3(0.8, 1, 0.8), 0.25)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.07, 0.07, 0.08)
+	mat.roughness = 1.0
+	heap.material_override = mat
+	body.add_child(heap)
 
 
 func _build_props() -> void:
-	var sizes := {"locker": Vector3(1.0, 2.0, 0.6), "crate": Vector3(1.4, 0.9, 1.0), "desk": Vector3(1.6, 0.8, 0.8), "rack": Vector3(0.8, 2.1, 1.0), "vault": Vector3(1.2, 1.2, 1.2)}
-	var colours := {"locker": Color(0.4, 0.45, 0.5), "crate": Color(0.5, 0.42, 0.28), "desk": Color(0.35, 0.33, 0.3), "rack": Color(0.15, 0.17, 0.2), "vault": Color(0.75, 0.62, 0.2)}
+	var sizes := {"locker": Vector3(1.0, 2.0, 0.6), "crate": Vector3(1.2, 0.8, 0.8), "desk": Vector3(1.6, 0.8, 0.8), "rack": Vector3(0.8, 2.1, 1.0), "vault": Vector3(1.2, 1.2, 1.2)}
 	var names := {"locker": "Locker", "crate": "Crate", "desk": "Desk", "rack": "Server rack", "vault": "Vault box"}
 	for c in layout.containers:
 		_into = _floor_nodes[int(c.floor)]
 		var size: Vector3 = sizes[c.type]
 		var pos := _room_centre(int(c.room)) + Vector3(c.pos[0], size.y / 2.0, c.pos[1])
-		var node := _box(size, pos, colours[c.type], true, c.type == "vault")
+		var node := _box(size, pos, Color.BLACK, true, false, true)
+		var look := _container_model(c.type, size)
+		look.position = Vector3(0, -size.y / 2.0, 0)
+		node.add_child(look)
 		var tag := _label(names[c.type], pos + Vector3(0, size.y / 2.0 + 0.3, 0), 28, Color(1, 1, 1, 0.7))
 		_containers[c.id] = {"node": node, "data": c, "name": names[c.type], "tag": tag}
 
 	_into = _floor_nodes[0]
-	var ex_colours := {"ship": Color(0.3, 1.0, 0.6)}
-	var ex_names := {"ship": "Your ship"}
 	for ex in layout.extracts:
 		var pos := Vector3(ex.pos[0], 0, ex.pos[1])
 		var ring := MeshInstance3D.new()
@@ -518,25 +564,57 @@ func _build_props() -> void:
 		mesh.bottom_radius = 2.2
 		mesh.height = 0.05
 		var mat := StandardMaterial3D.new()
-		mat.albedo_color = Color(ex_colours[ex.kind], 0.35)
+		mat.albedo_color = Color(Models.AMBER, 0.35)
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.emission_enabled = true
-		mat.emission = ex_colours[ex.kind]
+		mat.emission = Models.AMBER
 		mesh.material = mat
 		ring.mesh = mesh
-		ring.position = pos + Vector3(0, 0.03, 0)
-		add_child(ring)
-		var label := _label(ex_names[ex.kind], pos + Vector3(0, 2.6, 0), 40, ex_colours[ex.kind])
-		_extract_nodes[ex.id] = {"node": ring, "label": label, "data": ex, "pos": pos, "name": ex_names[ex.kind]}
+		ring.position = pos + Vector3(0, 0.04, 0)
+		_into.add_child(ring)
+		var label := _label("Your ship", pos + Vector3(0, 2.6, 0), 40, Models.TEAL_LIGHT)
+		_extract_nodes[ex.id] = {"node": ring, "label": label, "data": ex, "pos": pos, "name": "Your ship"}
 	_refresh_extract_labels()
 
 	for t in layout.turrets:
 		_into = _floor_nodes[int(t.floor)]
 		var pos := _room_centre(int(t.room)) + Vector3(t.pos[0], 0, t.pos[1])
-		var base := _box(Vector3(0.6, 1.2, 0.6), pos + Vector3(0, 0.6, 0), Color(0.3, 0.3, 0.32))
-		var head := _box(Vector3(0.5, 0.35, 0.9), pos + Vector3(0, 1.4, 0), Color(0.6, 0.15, 0.12), false, true)
-		_turrets.append({"base": base, "head": head, "pos": pos + Vector3(0, 1.4, 0), "health": 300.0, "tell": 0.0, "cd": 0.0, "dead": false,
+		var base := _box(Vector3(1.2, 1.6, 1.2), pos + Vector3(0, 0.8, 0), Color.BLACK, true, false, true)
+		var head := BaseModels.turret()
+		head.scale = Vector3.ONE * 0.6
+		head.position = pos
+		_into.add_child(head)
+		_turrets.append({"base": base, "head": head, "pos": pos + Vector3(0, 1.2, 0), "health": 300.0, "tell": 0.0, "cd": 0.0, "dead": false,
 			"laser": _laser(), "floor": int(t.floor), "piece": "", "range": 20.0, "room": int(t.room)})
+
+
+## A container in the same bevelled teal-and-navy style as the Builder's models. Origin at the base.
+func _container_model(type: String, size: Vector3) -> Node3D:
+	if type == "crate":
+		return Models.loot_crate()
+	var n := Node3D.new()
+	match type:
+		"locker":
+			Models.block(n, size, "teal", Vector3(0, size.y / 2.0, 0), 0.08)
+			Models.block(n, Vector3(0.06, size.y * 0.8, 0.05), "navy", Vector3(0, size.y / 2.0, -size.z / 2.0), 0.02)
+			Models.block(n, Vector3(0.1, 0.1, 0.04), "amber", Vector3(0.25, size.y * 0.55, -size.z / 2.0 - 0.02), 0.01)
+		"desk":
+			Models.block(n, Vector3(size.x, 0.12, size.z), "steel", Vector3(0, size.y - 0.06, 0), 0.04)
+			for sx in [-1, 1]:
+				Models.block(n, Vector3(0.12, size.y - 0.12, size.z * 0.9), "navy", Vector3(sx * (size.x / 2.0 - 0.08), (size.y - 0.12) / 2.0, 0), 0.03)
+		"rack":
+			Models.block(n, size, "navy", Vector3(0, size.y / 2.0, 0), 0.06)
+			for i in 6:
+				Models.block(n, Vector3(size.x * 0.7, 0.05, 0.03), "amber" if i % 2 == 0 else "teal_light", Vector3(0, 0.3 + i * 0.3, -size.z / 2.0 - 0.01), 0.01)
+		"vault":
+			Models.block(n, size, "steel", Vector3(0, size.y / 2.0, 0), 0.12)
+			Models.drum(n, 0.3, 0.1, "amber", Vector3(0, size.y / 2.0, -size.z / 2.0 - 0.04), Vector3(90, 0, 0), 12)
+	return n
+
+
+## Where you stand outside the blast door.
+func _door_outside() -> Vector3:
+	return Vector3(0, 0, float(layout.core) / 2.0 + 1.6)
 
 
 func _pad() -> Vector3:
@@ -553,7 +631,7 @@ func _build_player() -> void:
 	shape.shape.height = 1.8
 	shape.position.y = 0.9
 	_player.add_child(shape)
-	_player.position = _pad() + Vector3(-2, 0.05, -2)
+	_player.position = _pad() + Vector3(0, 0.05, -9.5)
 	add_child(_player)
 	_camera = Camera3D.new()
 	_camera.position.y = EYE
@@ -597,7 +675,7 @@ func _guard_body(elite := false) -> CharacterBody3D:
 	shape.shape.height = 1.85
 	shape.position.y = 0.925
 	body.add_child(shape)
-	var colour := Color(0.75, 0.2, 0.2) if elite else Color(0.62, 0.55, 0.3)
+	var colour := Models.AMBER.darkened(0.25) if elite else Models.NAVY.lightened(0.15)
 	var torso := MeshInstance3D.new()
 	var cap := CapsuleMesh.new()
 	cap.radius = 0.36
@@ -881,7 +959,6 @@ func _physics_process(delta: float) -> void:
 	_update_turrets(delta)
 	_update_drill(delta)
 	_update_vent(delta)
-	_check_door()
 	_update_extract(delta)
 	_reinforce(delta)
 	_update_self_destruct(delta)
@@ -996,14 +1073,13 @@ func destroy_piece(id: String) -> void:
 	for t in _turrets:
 		if t.piece == id:
 			t.dead = true
-			t.head.visible = false
 			t.laser.visible = false
 	var at: Vector3 = p.node.global_position
 	_blast(at)
 	_noise(at, NOISE_BLAST, false)
 	Net.send({"type": "raid_destroy", "piece": id})
 	var names := {"turret": "Turret", "guardpost": "Guard post", "power": "Power plant"}
-	_say("%s destroyed.%s" % [names.get(p.data.type, "Defence"), " The core is on backup power: the blast door is opening." if p.data.type == "power" else ""], 3.0)
+	_say("%s destroyed." % names.get(p.data.type, "Defence"), 2.0)
 
 
 # A flash and a fireball where something blew up.
@@ -1340,7 +1416,10 @@ func _update_turrets(delta: float) -> void:
 			t.laser.visible = false
 			t.tell = 0.0
 			continue
-		t.head.look_at(eye, Vector3.UP)
+		if t.head:
+			var flat := Vector3(eye.x, t.head.global_position.y, eye.z)
+			if flat.distance_to(t.head.global_position) > 0.1:
+				t.head.look_at(flat, Vector3.UP) # turn to face you; the models' guns point along -Z
 		_aim_laser(t.laser, t.pos, eye)
 		t.tell += delta
 		t.cd -= delta
@@ -1403,8 +1482,12 @@ func _spawn_away(count: int, elite: bool) -> void:
 			# Outside: from the far edge of the site.
 			var half := float(layout.half)
 			for tries in 12:
-				var a := randf() * TAU
-				var p := Vector3(cos(a), 0, sin(a)) * half * 1.1
+				var e := half - 2.0
+				var p := Vector3(randf_range(-e, e), 0, randf_range(-e, e))
+				if randf() < 0.5:
+					p.x = e * signf(p.x)
+				else:
+					p.z = -e
 				if p.distance_to(_player.position) > 25.0:
 					at = p
 					break
@@ -1440,6 +1523,8 @@ func teleport_to(pos: Vector3) -> void:
 ## Shows only the level you're on (and wakes only its guards).
 func _set_floor(n: int) -> void:
 	_floor = n
+	_world_env.environment = _env_outside if n == 0 else _env_inside
+	_camera.far = 1500.0 if n == 0 else 400.0
 	for k in _floor_nodes:
 		_floor_nodes[k].visible = k == n
 	for g in _guards:
@@ -1471,27 +1556,32 @@ func _near_lift() -> Dictionary:
 
 
 func _ride(l: Dictionary) -> void:
-	teleport_to(l.to)
-	_say("Back on the surface." if int(l.to_floor) == 0 else "Level %d of %d." % [int(l.to_floor), floors], 2.0)
-	if int(l.to_floor) == floors and not vault_open:
-		_say("The deepest level. The safe room is here: find the keycard, or drill the door.", 4.0)
+	var to: Vector3 = l.to
+	if int(l.to_floor) == 0 and not door_open and _exit_vent != "":
+		to = _vents[_exit_vent].out # back out the way you came
+	teleport_to(to)
+	if int(l.to_floor) > 0:
+		_say("Level %d" % int(l.to_floor), 2.0)
 
 
 func _near_vent() -> String:
 	if _floor != 0:
 		return ""
 	for id in _vents:
-		var v: Dictionary = _vents[id]
-		for side in ["out", "in"]:
-			var p: Vector3 = v[side]
-			if Vector2(p.x - _player.position.x, p.z - _player.position.z).length() < VENT_REACH:
-				return id
+		var p: Vector3 = _vents[id].out
+		if Vector2(p.x - _player.position.x, p.z - _player.position.z).length() < VENT_REACH:
+			return id
 	return ""
 
 
-func _in_lobby() -> bool:
-	var c := float(layout.core) / 2.0
-	return _floor == 0 and absf(_player.position.x) < c and absf(_player.position.z) < c
+func _near_door() -> bool:
+	return _floor == 0 and _player.position.distance_to(_door_outside()) < 2.6
+
+
+## Down the shaft under the core, to level 1.
+func _go_in() -> void:
+	teleport_to(_room_centre(int(_level(1).entrance)))
+	_say("Level 1", 2.0)
 
 
 func _near_container() -> String:
@@ -1545,13 +1635,18 @@ func _interact() -> void:
 	if not lift.is_empty():
 		_ride(lift)
 		return
+	if _near_door() and door_open:
+		if breached:
+			_go_in()
+		elif not _entering:
+			_entering = true
+			Net.send({"type": "raid_enter"})
+		return
 	var vent := _near_vent()
 	if vent != "":
-		if _vents[vent].cut:
-			# Through a vent that's already open, either way.
-			var inside := _in_lobby()
-			teleport_to(_vents[vent]["out" if inside else "in"])
-			_say("Through the vent.", 1.5)
+		if _vents[vent].cut and breached:
+			_exit_vent = vent
+			_go_in()
 		elif _vent_left < 0.0:
 			_venting = vent
 			Net.send({"type": "raid_vent_start", "vent": vent})
@@ -1625,13 +1720,6 @@ func _update_vent(delta: float) -> void:
 		Net.send({"type": "raid_vent_finish"})
 
 
-# Walking in through the open blast door counts as getting inside.
-func _check_door() -> void:
-	if not breached and door_open and not _enter_sent and _in_lobby():
-		_enter_sent = true
-		Net.send({"type": "raid_enter"})
-
-
 func _update_extract(delta: float) -> void:
 	var inside := ""
 	for id in _extract_nodes if _floor == 0 else []:
@@ -1674,15 +1762,15 @@ func _update_prompt() -> void:
 		text = "%s: silent takedown" % key
 	elif not lift.is_empty():
 		text = "%s: %s" % [key, lift.name.to_lower()]
+	elif _near_door():
+		text = "%s: go in" % key if door_open else "Blast door: sealed"
 	elif vent != "":
 		if _vents[vent].cut:
-			text = "%s: crawl through the vent" % key
+			text = "%s: drop through the vent" % key
 		elif _vent_left >= 0.0:
-			text = "Cutting the vent grate: %d s" % ceili(_vent_left)
+			text = "Cutting the grate: %d s" % ceili(_vent_left)
 		else:
-			text = "%s: cut through the vent grate (quiet, %d s)" % [key, 6]
-	elif _floor == 0 and not door_open and not breached and _player.position.distance_to(Vector3(0, 0, float(layout.core) / 2.0)) < 4.0:
-		text = "The blast door is sealed. %s" % ("Knock out the power plant to open it." if layout.powered == "plant" else "The core has its own power: find a vent.")
+			text = "%s: cut the vent grate" % key
 	elif _near_vault_door():
 		if _holding("keycard"):
 			text = "%s: swipe the access keycard (silent)" % key
@@ -1711,30 +1799,12 @@ func _update_hud() -> void:
 	var carried := 0
 	for it in inventory:
 		carried += int(it.value) * int(it.qty)
-	_status.text = "%s\n%s\nTime left %d:%02d\nHeat %d  %s\nHealth %d   Ammo %d / %d\nCarrying %d credits of loot" % [
-		brief.facility, _objective(), int(remaining) / 60, int(remaining) % 60, heat, levels[mini(level, levels.size() - 1)].name.to_upper(),
+	_status.text = "%s%s\nTime left %d:%02d\nHeat %d  %s\nHealth %d   Ammo %d / %d\nCarrying %d credits of loot" % [
+		brief.facility, ("  Level %d" % _floor) if _floor > 0 else "", int(remaining) / 60, int(remaining) % 60, heat, levels[mini(level, levels.size() - 1)].name.to_upper(),
 		ceili(health), ammo, reserve, carried]
 	if _message_time <= 0.0:
 		_message.text = ""
 	_hud.queue_redraw()
-
-
-## What to do next, for the HUD.
-func _objective() -> String:
-	if self_destruct >= 0.0:
-		return "ESCAPE: get back aboard your ship"
-	if not breached:
-		var left := 0
-		for id in _pieces:
-			if not _pieces[id].dead and _pieces[id].data.type in ["turret", "guardpost"]:
-				left += 1
-		var way := "cut in through a vent" if layout.powered == "core" else ("walk in through the blast door" if door_open else "knock out the power plant, or cut in through a vent")
-		return "BREACH: %s (%d defences standing)" % [way, left]
-	if _floor == 0:
-		return "Take the lift in the lobby down to level 1"
-	if _floor < floors:
-		return "LEVEL %d of %d: loot it, then find the lift down" % [_floor, floors]
-	return "LEVEL %d of %d: the safe room is here. Keycard or drill." % [_floor, floors] if not vault_open else "The vault is open"
 
 
 func _draw_hud() -> void:
@@ -1854,7 +1924,7 @@ func _on_raid_event(msg: Dictionary) -> void:
 				_say("Cutting the grate. Stay close.", 2.0)
 		"wave":
 			_spawn_away(int(msg.count), false)
-			_say("Reinforcements: %d more guard%s inbound." % [int(msg.count), "" if int(msg.count) == 1 else "s"], 3.0)
+			_say("More guards incoming.", 2.0)
 		"extracting":
 			if msg.extract == _extracting:
 				_extract_left = float(msg.countdown)
@@ -1871,10 +1941,13 @@ func _on_breached(via: String) -> void:
 	if via == "vent" and _venting != "":
 		_vents[_venting].cut = true
 		_vents[_venting].node.visible = false
-		teleport_to(_vents[_venting]["in"])
+		_exit_vent = _venting
 		_venting = ""
 		_vent_left = -1.0
-	_say("You're in. Take the lift down. Every minute inside brings more guards.", 4.0)
+		_go_in()
+	elif via == "door" and _entering:
+		_entering = false
+		_go_in()
 
 
 func _open_vault() -> void:
