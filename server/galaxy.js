@@ -4,6 +4,7 @@
 
 const H = require('./heist');
 const N = require('./navy');
+const S = require('./sites');
 
 const BUILDINGS = {
   mine: { name: 'Mine', cost: { metal: 10 }, needs: null },
@@ -122,6 +123,8 @@ function build(g, planetId, slot, type) {
   if (!def) return fail('no such building');
   const e = econ(g, planetId);
   if (!e.unlocked.includes(type)) return fail(`${def.name} is locked`);
+  if (p.kind === 'satellite') return fail('satellite sites hold one facility; place defences instead');
+  if (def.facility) return fail(`${def.name} goes on a satellite site: found one from the Build menu`);
   if (!Number.isInteger(slot) || slot < 0 || slot >= p.slots) return fail('bad slot');
   if (p.buildings.some((b) => b.slot === slot)) return fail('slot taken');
   if (def.needsBuilding && !hasBuilding(g, def.needsBuilding, planetId)) return fail(`build a ${BUILDINGS[def.needsBuilding].name} first`);
@@ -258,7 +261,50 @@ function facility(g, planetId, slot) {
 }
 
 function facilityName(g, planetId, b) {
-  return `${planet(g, planetId).name} ${H.FACILITIES[b.type].name} ${b.slot + 1}`;
+  const p = planet(g, planetId);
+  return p.kind === 'satellite' ? p.name : `${p.name} ${H.FACILITIES[b.type].name} ${b.slot + 1}`;
+}
+
+// --- Satellite sites (sites.js) ------------------------------------------------------------
+
+// A Builder founds a satellite site off their home planet for a new facility.
+function foundSite(g, owner, type) {
+  const def = BUILDINGS[type];
+  if (!def || !def.facility) return fail('only facilities go on satellite sites');
+  const home = g.system.planets.find((p) => p.owner === owner && p.kind !== 'satellite');
+  if (!home) return fail('you have no home planet');
+  const e = econ(g, home.id);
+  if (!e.unlocked.includes(type)) return fail(`${def.name} is locked`);
+  const r = S.newSite(g, owner, home, H.FACILITIES[type].name);
+  if (!r.ok) return r;
+  const err = pay(e, def.cost);
+  if (err) return fail(err);
+  r.site.buildings.push({ slot: 0, type, security: 1, vault: {}, made: 0, shipReadyAt: 0, cooldownUntil: 0, alarmReadyAt: 0, escrow: {} });
+  g.system.planets.push(r.site);
+  log(g, `${owner} founded ${r.site.name}`);
+  return { ok: true, site: r.site };
+}
+
+function site(g, siteId) {
+  const p = planet(g, siteId);
+  return p && p.kind === 'satellite' ? p : null;
+}
+
+function placePiece(g, siteId, type, x, y) {
+  const st = site(g, siteId);
+  if (!st) return fail('no such satellite site');
+  if (g.raids.some((r) => r.planet === siteId)) return fail('not during a raid');
+  const e = econ(g, siteId);
+  const r = S.place(st, type, x, y, (cost) => pay(e, cost));
+  if (r.ok) log(g, `${r.name} built at ${st.name}`);
+  return r;
+}
+
+function removePiece(g, siteId, pieceId) {
+  const st = site(g, siteId);
+  if (!st) return fail('no such satellite site');
+  if (g.raids.some((r) => r.planet === siteId)) return fail('not during a raid');
+  return S.remove(st, pieceId, econ(g, siteId));
 }
 
 // The Builder sends a freighter: the vault's goods go to HQ stock. Intel sells on arrival.
@@ -429,6 +475,9 @@ module.exports = {
   queueShip,
   cancelShip,
   claimBase,
+  foundSite,
+  placePiece,
+  removePiece,
   econ,
   owns,
 };

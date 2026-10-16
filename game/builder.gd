@@ -8,6 +8,7 @@ extends Control
 ## watches the raid live and can sound the alarm.
 
 const BaseModels := preload("res://base_models.gd")
+const SiteView := preload("res://site_view.gd")
 const ICONS := "res://ui/icons/"
 
 const BUILDING_INFO := {
@@ -31,6 +32,7 @@ const PITCH := deg_to_rad(52.0)
 const ZOOM_MIN := 45.0
 const ZOOM_MAX := 170.0
 const PAN_LIMIT := 60.0
+const SITE_PAN_LIMIT := 26.0
 const TAP_SLOP := 14.0 # pixels a finger can move and still count as a tap
 
 const C_PANEL := Color(0.06, 0.1, 0.2, 0.86)
@@ -40,6 +42,16 @@ const C_RED := Color(0.9, 0.25, 0.22)
 
 # --- 3D base ---
 var _cam: Camera3D
+var _home: Node3D # the home base's pads and buildings
+var _site: Node3D # the satellite site being shown (site_view.gd)
+var _view := "" # "" for the home base, or the id of the satellite site on screen
+var _sel_piece := -1 # id of the defence selected on a site, or -1
+var _sites_btn: Button
+var _jobs_btn: Button
+var _home_btn: Button
+var _sites_list: VBoxContainer
+var _sites_key := ""
+var _site_count := -1 # this Builder's sites at the last refresh, to follow a newly founded one
 var _focus := Vector3(0, 0, 4)
 var _zoom := 120.0
 var _pads := [] # per slot: {"root", "pos", "key", "model", "label", "ring", "plus", "light"}
@@ -178,11 +190,13 @@ func _build_world() -> void:
 	plate.position.y = 0.2
 	plate.rotation_degrees.y = 30
 	plate.material_override = _flat(Color(0.2, 0.25, 0.35))
-	world.add_child(plate)
+	_home = Node3D.new()
+	world.add_child(_home)
+	_home.add_child(plate)
 
 	var hq := BaseModels.command_center()
 	hq.rotation_degrees.y = 45
-	world.add_child(hq)
+	_home.add_child(hq)
 
 	var slots := 6
 	for i in slots:
@@ -193,10 +207,14 @@ func _build_world() -> void:
 		box.size = Vector3(3.0, 0.2, PAD_RING - 16.0)
 		path.mesh = box
 		path.material_override = _flat(Color(0.15, 0.19, 0.28))
-		world.add_child(path)
+		_home.add_child(path)
 		path.position = pos * 0.5 + Vector3(0, 0.45, 0)
 		path.look_at(Vector3(0, 0.45, 0), Vector3.UP)
-		_pads.append(_make_pad(world, pos))
+		_pads.append(_make_pad(_home, pos))
+
+	_site = SiteView.new()
+	_site.visible = false
+	world.add_child(_site)
 
 	# Scenery past the plate: boulders, ice crystals and beacons.
 	var rng := RandomNumberGenerator.new()
@@ -308,7 +326,7 @@ func _pan(from: Vector2, to: Vector2) -> void:
 	if a == null or b == null:
 		return
 	_focus += a - b
-	var flat := Vector2(_focus.x, _focus.z).limit_length(PAN_LIMIT)
+	var flat := Vector2(_focus.x, _focus.z).limit_length(PAN_LIMIT if _view == "" else SITE_PAN_LIMIT)
 	_focus = Vector3(flat.x, 0, flat.y)
 	_place_camera()
 
@@ -375,6 +393,9 @@ func _touch_spread() -> float:
 
 func _tap(screen: Vector2) -> void:
 	var hit = _ground_at(screen)
+	if _view != "":
+		_tap_site(hit)
+		return
 	var pad := -1
 	if hit != null:
 		for i in _pads.size():
@@ -386,6 +407,44 @@ func _tap(screen: Vector2) -> void:
 			_set_placing("")
 		return
 	select_pad(pad if pad != _selected else -1)
+
+
+## A tap on a satellite site: place the defence being placed, or select what's on the tile.
+func _tap_site(hit) -> void:
+	var tile: Vector2i = _site.tile_at(hit) if hit != null else Vector2i(-1, -1)
+	if _placing != "":
+		if tile.x >= 0:
+			Net.send({"type": "place_piece", "planet": _view, "piece": _placing, "x": tile.x, "y": tile.y})
+		return
+	var what: Dictionary = _site.what_at(tile) if tile.x >= 0 else {}
+	_sel_piece = -1
+	_selected = -1
+	if what.get("kind", "") == "core":
+		_selected = 0
+	elif what.get("kind", "") == "piece":
+		_sel_piece = int(what.piece.id)
+	select_pad(_selected)
+
+
+## Switches between the home base ("") and one of this Builder's satellite sites.
+func show_view(id: String) -> void:
+	_view = id
+	_home.visible = id == ""
+	_site.visible = id != ""
+	_selected = -1
+	_sel_piece = -1
+	_placing = ""
+	_place_bar.visible = false
+	_shop.visible = false
+	_focus = Vector3(0, 0, 4) if id == "" else Vector3.ZERO
+	_zoom = 120.0 if id == "" else 95.0
+	_place_camera()
+	_home_btn.visible = id != ""
+	_jobs_btn.visible = id == "" # jobs are posted from the home Spaceport
+	if _page == "info":
+		_show_page("")
+	if not Net.state.is_empty():
+		_refresh(Net.state)
 
 
 func _process(delta: float) -> void:
@@ -497,9 +556,12 @@ func _build_hud() -> void:
 	_pin(left, Control.PRESET_BOTTOM_LEFT)
 	left.add_theme_constant_override("separation", 8)
 	layer.add_child(left)
-	_round_button(left, "Jobs", "mission_complete", func(): _toggle_page("jobs"))
+	_jobs_btn = _round_button(left, "Jobs", "mission_complete", func(): _toggle_page("jobs"))
 	_raids_btn = _round_button(left, "Raids", "alarm", func(): _toggle_page("raids"))
 	_round_button(left, "Chat", "chat", func(): _toggle_page("chat"))
+	_sites_btn = _round_button(left, "Sites", "nav_map", func(): _toggle_page("sites"))
+	_home_btn = _round_button(left, "Home", "waypoint", func(): show_view(""))
+	_home_btn.visible = false
 
 	# Bottom right: the shop.
 	var build := Button.new()
@@ -523,6 +585,8 @@ func _build_hud() -> void:
 	# Bottom centre: the selected pad's name and actions.
 	_select_box = VBoxContainer.new()
 	_pin(_select_box, Control.PRESET_CENTER_BOTTOM)
+	_select_box.offset_left = 80 # clear of the buttons bottom left
+	_select_box.offset_right = 80
 	_select_box.alignment = BoxContainer.ALIGNMENT_END
 	_select_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_select_box.visible = false
@@ -547,7 +611,7 @@ func _build_hud() -> void:
 	_place_label = _label(place_row, 17)
 	_place_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var cancel := Button.new()
-	cancel.text = "Cancel"
+	cancel.text = "Done"
 	cancel.pressed.connect(func(): _set_placing(""))
 	place_row.add_child(cancel)
 
@@ -620,6 +684,12 @@ func _build_drawer(layer: Control) -> void:
 	_yard_ships.add_theme_constant_override("separation", 8)
 	yard.add_child(_yard_ships)
 	_pages["shipyard"] = yard
+
+	# Sites: home and each satellite site, plus how to found more.
+	_sites_list = VBoxContainer.new()
+	_sites_list.add_theme_constant_override("separation", 8)
+	body.add_child(_sites_list)
+	_pages["sites"] = _sites_list
 
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -766,7 +836,7 @@ func _show_page(page: String) -> void:
 	for p in _pages:
 		_pages[p].visible = p == page
 	_drawer.visible = page != ""
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard"}.get(page, "")
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your sites"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
@@ -798,8 +868,12 @@ func _set_placing(type: String) -> void:
 	_placing = type
 	_place_bar.visible = type != ""
 	if type != "":
-		_place_label.text = "Tap a free pad to place the %s" % BUILDING_INFO[type].name
+		if _view == "":
+			_place_label.text = "Tap a free pad to place the %s" % BUILDING_INFO[type].name
+		else:
+			_place_label.text = "Tap the grid to place a %s. Tap Done when finished." % Net.catalog.sites.pieces[type].name
 		_selected = -1
+		_sel_piece = -1
 	if not Net.state.is_empty():
 		_refresh(Net.state)
 
@@ -808,9 +882,13 @@ func _on_banner() -> void:
 	var raids := _my_raids()
 	if raids.is_empty():
 		return
-	var slot := int(raids[0].slot)
-	focus_pad(slot)
-	select_pad(slot)
+	var r: Dictionary = raids[0]
+	if Net.planet(r.planet).get("kind", "") == "satellite":
+		show_view(r.planet)
+	else:
+		show_view("")
+		focus_pad(int(r.slot))
+	select_pad(int(r.slot))
 	_show_page("info")
 
 
@@ -824,6 +902,12 @@ func _build(slot: int, type: String) -> void:
 
 func _shop_pick(type: String) -> void:
 	_shop.visible = false
+	if _view != "":
+		_set_placing(type) # a defence for this site
+		return
+	if _is_facility(type):
+		Net.send({"type": "found_site", "facility": type})
+		return
 	if _selected >= 0 and _building_at(_selected).is_empty():
 		_build(_selected, type)
 	else:
@@ -832,11 +916,12 @@ func _shop_pick(type: String) -> void:
 
 # --- State -------------------------------------------------------------------------------
 
+## The planet on screen: the home planet, or the satellite site being shown.
 func _planet() -> Dictionary:
-	return Net.my_planet()
+	return Net.planet(_view) if _view != "" else Net.my_planet()
 
 
-## The id of this Builder's home planet.
+## The id of the planet on screen.
 func _pid() -> String:
 	return str(_planet().get("id", "aster"))
 
@@ -846,9 +931,18 @@ func _econ() -> Dictionary:
 	return Net.my_economy()
 
 
-## Live raids on this Builder's planet.
+## Live raids on this Builder's planets and sites.
 func _my_raids() -> Array:
-	return Net.state.get("raids", []).filter(func(r): return r.planet == _pid())
+	var owner = Net.my_planet().get("owner")
+	return Net.state.get("raids", []).filter(func(r): return Net.planet(r.planet).get("owner") == owner)
+
+
+## This Builder's satellite sites.
+func _my_sites() -> Array:
+	if Net.state.is_empty():
+		return []
+	var owner = Net.my_planet().get("owner")
+	return Net.state.system.planets.filter(func(p): return p.get("kind", "") == "satellite" and owner != null and p.owner == owner)
 
 
 func _building_at(slot: int) -> Dictionary:
@@ -905,8 +999,18 @@ func _refresh(state: Dictionary) -> void:
 	_goods.text = "   ".join(goods)
 	_goods.visible = not goods.is_empty()
 
-	_refresh_pads(state)
+	_follow_new_site()
+	if _view != "" and Net.planet(_view).is_empty():
+		show_view("") # the site is gone
+		return
+	_subtitle.text = ("Satellite site off %s" % Net.my_planet().get("name", "")) if _view != "" else _subtitle.text
+	if _view == "":
+		_refresh_pads(state)
+	else:
+		_refresh_site(state)
 	_refresh_selection(state)
+	if _page == "sites":
+		_refresh_sites(state)
 	_refresh_raids(state)
 	_refresh_jobs(state)
 	if _page == "shipyard":
@@ -979,8 +1083,17 @@ func _refresh_pads(state: Dictionary) -> void:
 
 ## Name and action buttons for the selected pad.
 func _refresh_selection(state: Dictionary) -> void:
-	_select_box.visible = _selected >= 0 and _placing == "" and not _shop.visible
+	_select_box.visible = (_selected >= 0 or _sel_piece >= 0) and _placing == "" and not _shop.visible
 	if not _select_box.visible:
+		return
+	if _sel_piece >= 0:
+		var piece := _piece(_sel_piece)
+		if piece.is_empty():
+			_sel_piece = -1
+			_select_box.visible = false
+			return
+		_select_name.text = Net.catalog.sites.pieces[piece.type].name
+		_set_actions([{"id": "remove", "text": "Remove", "icon": "economy"}])
 		return
 	_select_name.text = _pad_name(_selected)
 	var b := _building_at(_selected)
@@ -1051,6 +1164,9 @@ func _on_action(id: String) -> void:
 			_send_job()
 		"shipyard":
 			_toggle_page("shipyard")
+		"remove":
+			Net.send({"type": "remove_piece", "planet": _view, "piece": _sel_piece})
+			_sel_piece = -1
 		"ship":
 			Net.send({"type": "ship_cargo", "planet": _pid(), "slot": _selected})
 		"upgrade":
@@ -1060,10 +1176,14 @@ func _on_action(id: String) -> void:
 
 
 func _refresh_shop(state: Dictionary) -> void:
-	var target := _selected >= 0 and _building_at(_selected).is_empty()
-	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad"
 	for c in _shop_cards.get_children():
 		c.queue_free()
+	if _view != "":
+		_refresh_defence_shop()
+		return
+	var target := _selected >= 0 and _building_at(_selected).is_empty()
+	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad. Facilities get their own satellite site."
+	var sites_full := _my_sites().size() >= int(Net.catalog.get("sites", {}).get("max", 3))
 	for type in BUILDING_INFO:
 		var info: Dictionary = BUILDING_INFO[type]
 		var card := Button.new()
@@ -1081,14 +1201,102 @@ func _refresh_shop(state: Dictionary) -> void:
 			why = "Needs a %s" % BUILDING_INFO[info.needs].name
 		if not locked and info.has("limit") and _count(type) >= int(info.limit):
 			why = "Already built"
+		if not locked and _is_facility(type) and sites_full:
+			why = "All satellite sites used"
 		locked = locked or why != ""
 		var afford := _can_afford(info.cost)
-		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost)]
+		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost) + ("\nNew satellite site" if _is_facility(type) else "")]
 		card.disabled = locked or not afford
 		if not locked and not afford:
 			card.add_theme_color_override("font_disabled_color", Color(1, 0.6, 0.55))
 		card.pressed.connect(_shop_pick.bind(type))
 		_shop_cards.add_child(card)
+
+
+## The site view's shop: defences to place on the grid.
+func _refresh_defence_shop() -> void:
+	_shop_hint.text = "  Defences for this site. Pick one, then tap the grid."
+	var pieces: Dictionary = Net.catalog.get("sites", {}).get("pieces", {})
+	var icons := {"turret": "rank", "wall": "vault", "guardpost": "pilot_arrow"}
+	for type in pieces:
+		var def: Dictionary = pieces[type]
+		var card := Button.new()
+		card.custom_minimum_size = Vector2(150, 166)
+		card.icon = load(ICONS + icons.get(type, "vault") + ".png")
+		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_theme_constant_override("icon_max_width", 64)
+		card.add_theme_font_size_override("font_size", 14)
+		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		card.text = "%s  (%dx%d)\n%s\nAttack %d  Hull %d" % [def.name, def.w, def.h, _cost_text(def.cost), def.attack, def.hull]
+		card.disabled = not _can_afford(def.cost)
+		card.pressed.connect(_shop_pick.bind(type))
+		_shop_cards.add_child(card)
+
+
+func _piece(id: int) -> Dictionary:
+	for p in _planet().get("pieces", []):
+		if int(p.id) == id:
+			return p
+	return {}
+
+
+func _refresh_site(state: Dictionary) -> void:
+	var site := _planet()
+	var b: Dictionary = site.buildings[0] if site.get("buildings", []) else {}
+	var tier := int(b.get("security", 1))
+	var turrets := int(Net.catalog.get("security", {}).get(str(tier), {}).get("turrets", 0))
+	var raid := not Net.raid_on(_view, 0).is_empty()
+	_site.show_site(site, "%s  T%d" % [site.name, tier], raid, turrets)
+	if _selected == 0:
+		_site.highlight(_site.core)
+	elif _sel_piece >= 0 and not _piece(_sel_piece).is_empty():
+		var p := _piece(_sel_piece)
+		var def: Dictionary = Net.catalog.sites.pieces[p.type]
+		_site.highlight(Rect2i(int(p.x), int(p.y), int(def.w), int(def.h)))
+	else:
+		_site.highlight(Rect2i())
+
+
+## Opens a site the Builder has just founded.
+func _follow_new_site() -> void:
+	var sites := _my_sites()
+	if _site_count >= 0 and sites.size() > _site_count:
+		show_view(sites[-1].id)
+		toast("New satellite site: tap Build to place defences", C_TEAL)
+	_site_count = sites.size()
+
+
+func _refresh_sites(state: Dictionary) -> void:
+	var sites := _my_sites()
+	var key := JSON.stringify([_view, sites.map(func(s): return [s.id, s.buildings[0].security if s.buildings else 0, s.get("pieces", []).size()]), _my_raids().size()])
+	if key == _sites_key:
+		return
+	_sites_key = key
+	for c in _sites_list.get_children():
+		c.queue_free()
+	var home := Button.new()
+	home.text = "Home: Planet %s" % Net.my_planet().get("name", "")
+	home.icon = load(ICONS + "waypoint.png")
+	home.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	home.disabled = _view == ""
+	home.pressed.connect(func(): show_view(""))
+	_sites_list.add_child(home)
+	for st in sites:
+		var b: Dictionary = st.buildings[0] if st.buildings else {}
+		var btn := Button.new()
+		var raid := not Net.raid_on(st.id, 0).is_empty()
+		btn.text = "%s\nTier %d, %d defences%s" % [st.name, int(b.get("security", 1)), st.get("pieces", []).size(), ", RAID!" if raid else ""]
+		btn.icon = load(ICONS + ("alarm" if raid else "nav_map") + ".png")
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.disabled = _view == st.id
+		var id: String = st.id
+		btn.pressed.connect(func(): show_view(id))
+		_sites_list.add_child(btn)
+	var hint := _label(_sites_list, 14)
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.modulate = Color(0.75, 0.9, 0.95)
+	hint.text = "Found a satellite site by buying a facility in the Build shop (up to %d)." % int(Net.catalog.get("sites", {}).get("max", 3))
 
 
 func _refresh_info(state: Dictionary) -> void:

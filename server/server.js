@@ -11,6 +11,7 @@ const { WebSocketServer } = require('ws');
 const G = require('./galaxy');
 const H = require('./heist');
 const N = require('./navy');
+const S = require('./sites');
 
 const TICK_MS = 5000;
 const CHAT_MAX = 200;
@@ -195,7 +196,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (msg.type === 'hello') {
       me.role = msg.role === 'builder' ? 'builder' : 'explorer';
       me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      const catalog = { ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
+      const catalog = { sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE };
       // A Builder gets their own home planet the first time they connect.
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
       send(ws, { type: 'welcome', id: me.id, name: me.name, home, state: galaxy, catalog });
@@ -214,7 +215,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (!me.role) return send(ws, { type: 'error', reason: 'say hello first' });
 
     // Builders can only manage their own planets.
-    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship'];
+    const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship', 'place_piece', 'remove_piece'];
     if (MANAGE.includes(msg.type)) {
       if (msg.type === 'post_job' && !msg.planet) msg.planet = galaxy.system.planets.find((p) => p.owner === me.name)?.id || 'aster';
       if (!G.owns(galaxy, me.name, msg.planet)) return send(ws, { type: 'error', reason: 'that is not your planet' });
@@ -248,6 +249,15 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       }
       case 'sell':
         result = G.sell(galaxy, me.name);
+        break;
+      case 'found_site':
+        result = me.role === 'builder' ? G.foundSite(galaxy, me.name, msg.facility) : { ok: false, reason: 'only Builders found sites' };
+        break;
+      case 'place_piece':
+        result = G.placePiece(galaxy, msg.planet, msg.piece, msg.x, msg.y);
+        break;
+      case 'remove_piece':
+        result = G.removePiece(galaxy, msg.planet, msg.piece);
         break;
       case 'queue_ship':
         result = G.queueShip(galaxy, msg.planet, msg.slot, msg.ship, now());

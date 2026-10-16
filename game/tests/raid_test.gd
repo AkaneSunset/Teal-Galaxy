@@ -1,6 +1,6 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
-## build a facility, fly to it, board, search containers until the keycard turns up,
+## a Builder founds a facility's satellite site, the pilot flies to it, boards, search containers until the keycard turns up,
 ## open the vault, take something from it, extract at the Shuttle Pad, and fly on with the loot.
 ## (Selling it is covered by the server tests.)
 ##   cd server && npm start
@@ -9,7 +9,6 @@ extends Node
 ## Prints PASS or FAIL and quits.
 
 const ExplorerMode := preload("res://explorer.gd")
-const SLOT := 3
 
 var _explorer: Node
 var _raid: Node
@@ -23,6 +22,8 @@ var _result := {}
 var _shots := ""
 var _shot_n := 0
 var _took_from_vault := false
+var _builder := WebSocketPeer.new() # a second connection playing the Builder who owns the site
+var _key := "" # the site's key in the explorer's facility list
 
 
 func _ready() -> void:
@@ -45,19 +46,27 @@ func _process(delta: float) -> void:
 		return
 	match _step:
 		"build":
-			Net.send({"type": "build", "planet": "aster", "slot": SLOT, "building": "refinery"})
+			if _builder.get_ready_state() == WebSocketPeer.STATE_CLOSED:
+				_builder.connect_to_url("ws://127.0.0.1:8080")
+			_builder.poll()
+			if _builder.get_ready_state() != WebSocketPeer.STATE_OPEN:
+				return
+			_builder.send_text(JSON.stringify({"type": "hello", "role": "builder", "name": "Raid Test Builder"}))
+			_builder.send_text(JSON.stringify({"type": "found_site", "facility": "refinery"}))
 			_step = "fly"
 		"fly":
-			if _facility().is_empty():
+			_builder.poll()
+			if _facility().is_empty() or not _explorer._facilities.has(_facility().planet):
 				return
-			_explorer.teleport(_explorer.System.offset(_explorer.System.facility_pos(SLOT), Vector3(0, 0, 900)))
+			_key = _facility().planet
+			_explorer.teleport(_explorer.System.offset(_explorer._facilities[_key].pos, Vector3(0, 0, 900)))
 			_wait = 0.5
 			_step = "board"
 		"board":
 			_shot("1-at-facility")
 			if not _explorer._prompt.text.contains("board"):
 				_finish(false, "no boarding prompt: " + _explorer._prompt.text)
-			_explorer.board(SLOT)
+			_explorer.board(_key)
 			_step = "inside"
 		"inside":
 			_raid = _explorer._raid
@@ -148,7 +157,7 @@ func _process(delta: float) -> void:
 
 func _facility() -> Dictionary:
 	for f in Net.facilities():
-		if f.slot == SLOT:
+		if Net.planet(f.planet).get("owner", "") == "Raid Test Builder":
 			return f
 	return {}
 

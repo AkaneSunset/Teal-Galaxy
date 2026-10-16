@@ -172,3 +172,13 @@ func my_economy() -> Dictionary:
 		return {}
 	var owner = my_planet().get("owner")
 	return state.get("bases", {}).get(owner, state) if owner != null else state
+
+
+## A planet or satellite site by id, or an empty Dictionary.
+func planet(id: String) -> Dictionary:
+	if state.is_empty():
+		return {}
+	for p in state.system.planets:
+		if p.id == id:
+			return p
+	return {}

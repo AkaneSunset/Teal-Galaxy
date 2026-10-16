@@ -53,3 +53,38 @@ test('deliveries land in the stock of the base that posted the job', () => {
   assert.ok(g.bases.Rin.unlocked.includes('hydroponics'));
   assert.ok(!g.bases.Akane.unlocked.includes('hydroponics'));
 });
+
+test('facilities go on satellite sites with a free grid of defences', () => {
+  const S = require('../sites');
+  const g = G.newGalaxy();
+  G.claimBase(g, 'Akane');
+  const e = g.bases.Akane;
+  e.stock.metal = 500;
+  e.stock.alloy = 20;
+  e.stock.ice = 20;
+  assert.match(G.build(g, 'aster', 0, 'refinery').reason, /satellite site/);
+  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  assert.strictEqual(site.parent, 'aster');
+  assert.strictEqual(site.name, 'Aster Mining Refinery');
+  assert.strictEqual(e.stock.metal, 460);
+  assert.ok(G.facility(g, site.id, 0));
+
+  assert.ok(G.placePiece(g, site.id, 'turret', 0, 0).ok);
+  assert.strictEqual(e.stock.alloy, 15);
+  assert.match(G.placePiece(g, site.id, 'wall', 1, 1).reason, /already there/);
+  assert.match(G.placePiece(g, site.id, 'wall', 5, 5).reason, /facility is there/);
+  assert.match(G.placePiece(g, site.id, 'turret', 11, 0).reason, /edge/);
+  assert.ok(G.placePiece(g, site.id, 'wall', 2, 0).ok);
+  assert.deepStrictEqual(S.defence(site), { attack: 4, hull: 30 });
+
+  const metal = e.stock.metal;
+  assert.ok(G.removePiece(g, site.id, site.pieces[0].id).ok);
+  assert.strictEqual(e.stock.metal, metal + 10, 'half the cost back');
+
+  assert.ok(G.foundSite(g, 'Akane', 'lab').ok);
+  assert.ok(G.foundSite(g, 'Akane', 'spire').ok);
+  assert.match(G.foundSite(g, 'Akane', 'refinery').reason, /already have 3/);
+  // Someone else can't touch Akane's site.
+  G.claimBase(g, 'Rin');
+  assert.ok(!G.owns(g, 'Rin', site.id));
+});
