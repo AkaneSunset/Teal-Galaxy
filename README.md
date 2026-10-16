@@ -33,6 +33,10 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
    `-- --mode=builder --name=Akane`, `-- --mode=explorer --name=PilotA`, `-- --mode=explorer --name=PilotB`.
 4. Press Play. Without arguments the game shows a start screen where you pick a mode.
 
+**Demo mode:** start the server with `DEMO=1 npm start` and every Builder base gets 2000 metal, 200 ice,
+200 alloy, 40 isotope cells, a few plans and 5000 credits, enough to try every building, defence, warship and
+security tier. Each base is topped up once, the first time its Builder connects with demo mode on.
+
 ## The Builder screen
 
 The Builder is a base-builder view of your home planet, like Clash of Clans, played with the phone held sideways.

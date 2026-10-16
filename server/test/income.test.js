@@ -42,3 +42,18 @@ test('a facility sends its vault home on its own every few minutes', () => {
   assert.ok(b.vault.alloy <= 1, 'the vault starts filling again');
   assert.ok(g.feed.some((f) => f.text.startsWith('Scheduled freighter')));
 });
+
+test('demo mode gives each base enough to build everything, once', () => {
+  const g = G.newGalaxy();
+  G.claimBase(g, 'Akane');
+  const e = g.bases.Akane;
+  assert.ok(G.demoTopUp(e));
+  assert.ok(!G.demoTopUp(e), 'only once, so spending sticks');
+  let slot = 0;
+  for (const type of ['mine', 'extractor', 'habitat', 'spaceport', 'hydroponics', 'foundry']) assert.ok(G.build(g, 'aster', slot++, type).ok, type);
+  for (const type of ['refinery', 'lab', 'spire']) assert.ok(G.foundSite(g, 'Akane', type).ok, type);
+  const site = g.system.planets.find((p) => p.owner === 'Akane' && p.kind === 'satellite');
+  assert.ok(G.secure(g, site.id, 0).ok, 'security tier 2');
+  assert.ok(G.secure(g, site.id, 0).ok, 'security tier 3');
+  assert.ok(G.queueShip(g, 'aster', 5, 'destroyer', 0).ok);
+});

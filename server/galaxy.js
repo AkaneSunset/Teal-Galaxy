@@ -69,6 +69,20 @@ function newEconomy() {
   };
 }
 
+// Demo mode (DEMO=1 on the server): every base gets enough to try every building, defence,
+// warship and security tier straight away. Tops each economy up to these amounts once.
+const DEMO_STOCK = { metal: 2000, ice: 200, alloy: 200, isotope: 40, drive: 4, blueprint: 2 };
+const DEMO_CREDITS = 5000;
+
+function demoTopUp(e) {
+  if (e.demo) return false;
+  e.demo = true;
+  for (const [res, n] of Object.entries(DEMO_STOCK)) e.stock[res] = Math.max(e.stock[res] || 0, n);
+  e.credits = Math.max(e.credits, DEMO_CREDITS);
+  if (!e.unlocked.includes('hydroponics')) e.unlocked.push('hydroponics');
+  return true;
+}
+
 // The economy that pays for and receives everything on a planet.
 function econ(g, planetId) {
   const p = planet(g, planetId);
@@ -584,6 +598,7 @@ function sell(g, name) {
 module.exports = {
   BUILDINGS,
   PRODUCES,
+  demoTopUp,
   AUTO_SHIP_MS,
   newGalaxy,
   build,

@@ -3,6 +3,7 @@
 //
 //   node server.js            (listens on port 8080, saves to galaxy.json)
 //   PORT=9000 SAVE_FILE=x.json node server.js
+//   DEMO=1 node server.js     (every base starts with enough to build everything)
 
 const fs = require('fs');
 const path = require('path');
@@ -19,7 +20,7 @@ const CHAT_GAP_MS = 500; // at most two chat lines a second per player
 const RAID_TICK_MS = 200; // reveals, Heat and the run clock
 const RAID_MSGS_PER_S = 30; // per raider; more than this is dropped
 
-function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now } = {}) {
+function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false } = {}) {
   let galaxy = G.newGalaxy();
   if (saveFile && fs.existsSync(saveFile)) {
     galaxy = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
@@ -199,6 +200,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       const catalog = { attack: { travel: N.TRAVEL_S, loot: N.LOOT_SHARE, shield: N.SHIELD_MS }, sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS };
       // A Builder gets their own home planet the first time they connect.
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
+      if (demo && home) G.demoTopUp(G.econ(galaxy, home));
       send(ws, { type: 'welcome', id: me.id, name: me.name, home, state: galaxy, catalog });
       if (home) {
         broadcast({ type: 'state', state: galaxy }, ws); // the new Builder already has it
@@ -340,8 +342,9 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 if (require.main === module) {
   const port = Number(process.env.PORT) || 8080;
   const saveFile = process.env.SAVE_FILE || path.join(__dirname, 'galaxy.json');
-  startServer({ port, saveFile });
-  console.log(`Galaxy server listening on ws://0.0.0.0:${port}`);
+  const demo = process.env.DEMO === '1';
+  startServer({ port, saveFile, demo });
+  console.log(`Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich)' : ''}`);
 }
 
 module.exports = { startServer };
