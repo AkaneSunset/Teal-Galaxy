@@ -414,7 +414,43 @@ func _room(slot: int, w: float, d: float, h: float) -> Node3D:
 		_box(room, Vector3(w - 0.4, 0.012, 0.05), Vector3(0, 0.006, z), FLOOR_DARK, false)
 	_light(room, Vector3(0, h - 0.6, d * 0.3), Color(0.85, 0.92, 1.0), 1.0, maxf(w, d) * 0.8)
 	_light(room, Vector3(0, h - 0.6, d * 0.78), Color(0.85, 0.92, 1.0), 1.0, maxf(w, d) * 0.8)
+	_hull(room, w, d, h)
 	return room
+
+
+## The outside of a compartment, as seen through the ring's windows: one-sided hull plates facing
+## out, so from inside the room they're invisible and never block its own windows.
+func _hull(room: Node3D, w: float, d: float, h: float) -> void:
+	var hull := Color(0.33, 0.35, 0.39)
+	var o := 0.45
+	var depth := d + 0.4 + 0.8
+	var mid := Vector3(0, h / 2.0, 0.4 + depth / 2.0)
+	_plate(room, Vector2(depth, h + 2 * o), Vector3(w / 2.0 + o, h / 2.0, mid.z), Vector3.RIGHT, hull)
+	_plate(room, Vector2(depth, h + 2 * o), Vector3(-w / 2.0 - o, h / 2.0, mid.z), Vector3.LEFT, hull)
+	_plate(room, Vector2(w + 2 * o, depth), Vector3(0, h + o, mid.z), Vector3.UP, hull)
+	_plate(room, Vector2(w + 2 * o, depth), Vector3(0, -o, mid.z), Vector3.DOWN, hull)
+	_plate(room, Vector2(w + 2 * o, h + 2 * o), Vector3(0, h / 2.0, 0.4 + depth), Vector3.BACK, hull)
+	# Running lights along the hull's edges.
+	for s in [-1, 1]:
+		_plate(room, Vector2(depth - 1.0, 0.12), Vector3(s * (w / 2.0 + o + 0.01), h - 0.3, mid.z), Vector3(s, 0, 0), CYAN, 2.5)
+
+
+func _plate(parent: Node3D, size: Vector2, pos: Vector3, outward: Vector3, colour: Color, glow := 0.0) -> void:
+	var q := QuadMesh.new()
+	q.size = size
+	var m := StandardMaterial3D.new()
+	m.albedo_color = colour
+	m.roughness = 0.8
+	if glow > 0.0:
+		m.emission_enabled = true
+		m.emission = colour
+		m.emission_energy_multiplier = glow
+	q.material = m
+	var mi := MeshInstance3D.new()
+	mi.mesh = q
+	mi.position = pos
+	mi.basis = _facing_basis(outward)
+	parent.add_child(mi)
 
 
 ## The far wall of a compartment, with a window `ww` wide (centred at `wx`) from `sill` to `top`.
@@ -564,10 +600,10 @@ func _build_supply(room: Node3D, w: float, d: float, h: float) -> void:
 	_crate(room, Vector3(1.6, 1.0, 1.2), Vector3(4.4, 1.1, 8.6))
 	_crate(room, Vector3(1.4, 1.2, 1.2), Vector3(4.6, 0, 6.8), "ORDNANCE\nLOCKER")
 	_crate(room, Vector3(1.2, 0.9, 1.0), Vector3(2.6, 0, 9.4))
-	_sign(room, "ORBITAL STATION · SUPPLY & ORDNANCE", Vector3(-1.4, 3.0, d - 0.05), Vector3.FORWARD, 36)
-	_screen(room, Vector3(-3.6, 2.4, d - 0.05), Vector3.FORWARD, Vector2(1.3, 1.6), "STATION SYS", "Life support  OK\nGravity  stable\nHull integrity  OK", 26, 20)
+	_sign(room, "ORBITAL STATION · SUPPLY & ORDNANCE", Vector3(-0.5, 4.15, d - 0.05), Vector3.FORWARD, 36)
+	_screen(room, Vector3(-3.8, 2.4, d - 0.05), Vector3.FORWARD, Vector2(1.3, 1.6), "STATION SYS", "Life support  OK\nGravity  stable\nHull integrity  OK", 26, 20)
 	_screen(room, Vector3(w / 2.0 - 0.25, 3.2, 5.5), Vector3.LEFT, Vector2(1.2, 0.6), "LOCAL TIME", "", 24, 30)
-	_planter(room, Vector3(-2.6, 1.2, 6.6))
+	_planter(room, Vector3(-3.4, 0, 8.8))
 
 
 func _build_exchange(room: Node3D, w: float, d: float, h: float) -> void:

@@ -11,6 +11,8 @@ const SPOTS := [
 	["01b-hangar-your-ship-ramp", 0, Vector3(8.5, 1.65, 18.0), Vector3(13, 1.4, 27)],
 	["01c-hangar-open-and-locked-ships", 0, Vector3(-1.0, 1.65, 9.0), Vector3(-13, 2.5, 26)],
 	["01d-ring-by-hangar-door", -1, Vector3(25.5, 1.65, 12.0), Vector3(29, 1.5, -4)],
+	["01e-window-toward-hangar", -1, Vector3(22.5, 1.65, 19.5), Vector3(40, 1.0, 12)],
+	["01f-window-toward-services", -1, Vector3(23.5, 1.65, 18.5), Vector3(20, 2.0, 42)],
 	["02-hangar-pad-board", 0, Vector3(4, 1.65, 4), Vector3(-17, 3.5, 12)],
 	["03-concourse-ring", -1, Vector3(25.5, 1.65, -3.5), Vector3(19, 1.6, 16)],
 	["04-terminal-hall", -1, Vector3(-3, 1.65, -15), Vector3(0, 3.6, 0)],
