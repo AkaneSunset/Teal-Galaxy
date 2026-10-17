@@ -138,7 +138,7 @@ only pauses, since the way out of a place is your ship. Inside a facility, on fo
 - **Extract** by standing in a zone: the Shuttle Pad outside the airlock (20 s, loud), the Service
   Lift (8 s, silent, eats a keycard) or the Escape Pod (5 s, one use, after minute 3). With 5 minutes
   left the extracts freeze as they are. If the clock runs out you're missing in action.
-- Extracted loot goes to your stash; sell it to the Fence at any Spaceport for half its value.
+- Extracted loot goes to your stash; sell it to the Fence (the black market terminal in a High Port's Cantina, or any Spaceport) for half its value.
 
 | On foot | Keyboard and mouse | Gamepad |
 | --- | --- | --- |
@@ -156,7 +156,7 @@ locked ship keeps its ramp up. A Concourse Ring lined with windows circles the P
 where a hologram of the planet marks every base and site (red while under raid) and the Surface Transit
 consoles open the same trips as the ship's menu. Off the ring: Ship Services (repairs your ship), the
 Supply Shop, the Commodity Exchange, the Job Board (deliver cargo), the Cantina (live chat on its
-screen), Fence's Noodles (the Fence is in the back room), the Security Office (the raid log as a wanted
+screen, and the black market terminal in its back corner, where the Fence buys raided loot), the Security Office (the raid log as a wanted
 board), the Crew Cabins and the Observation Lounge. The mouse looks around, F uses things, Enter chats
 and Esc pauses. A Builder's base on the surface (`game/surface.gd`) works the same way on foot.
 `game/tests/station_interior_shots.tscn` saves a picture of every room and of a base.

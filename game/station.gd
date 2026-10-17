@@ -6,7 +6,8 @@ extends "res://place.gd"
 ## Planetary Terminal Hall (the hologram of the planet below). Every compartment opens off the
 ## outside of the ring, one per slot:
 ##   0 Hangar and landing pads (you arrive here)   6 Cantina
-##   (windows all round the ring between doors)   7 Fence's Noodles, the Fence in the back room
+##   (windows all round the ring between doors)   6 ... with the black market terminal in a corner
+##                                                 7 a stretch of windows
 ##   2 Ship Services Dock                          8 Security Office
 ##   3 Supply Shop                                 9 Crew Cabins corridor
 ##   4 Commodity Exchange                         10 Observation Lounge
@@ -30,7 +31,6 @@ const ROOMS := {
 	4: ["Commodity Exchange", 14.0, 12.0, 5.5],
 	5: ["Job Board", 12.0, 10.0, 5.0],
 	6: ["Cantina", 16.0, 14.0, 5.0],
-	7: ["Fence's Noodles", 12.0, 15.0, 4.5],
 	8: ["Security Office", 12.0, 10.0, 4.6],
 	9: ["Crew Cabins", 4.4, 30.0, 3.6],
 	10: ["Observation Lounge", 14.0, 12.0, 5.0],
@@ -61,7 +61,6 @@ func _build() -> void:
 	_build_exchange(_rooms[4], 14.0, 12.0, 5.5)
 	_build_jobs(_rooms[5], 12.0, 10.0, 5.0)
 	_build_cantina(_rooms[6], 16.0, 14.0, 5.0)
-	_build_fence(_rooms[7], 12.0, 15.0, 4.5)
 	_build_security(_rooms[8], 12.0, 10.0, 4.6)
 	_build_cabins(_rooms[9], 4.4, 30.0, 3.6)
 	_build_observation(_rooms[10], 14.0, 12.0, 5.0)
@@ -293,7 +292,7 @@ func _build_window_stretch(deg: float, side: float) -> void:
 func _directory(deg: float) -> void:
 	var dir := _screen(_ring_frame(deg), Vector3(0, 3.0, R_IN + 0.08), Vector3.BACK, Vector2(4.6, 1.5), "CONCOURSE RING", "", 44, 26)
 	var lines := []
-	for slot in [2, 3, 4, 5, 6, 7, 8, 9, 10]:
+	for slot in [2, 3, 4, 5, 6, 8, 9, 10]:
 		lines.append(ROOMS[slot][0])
 	dir.text = "   ".join(lines.slice(0, 5)) + "\n" + "   ".join(lines.slice(5))
 
@@ -667,40 +666,18 @@ func _build_cantina(room: Node3D, w: float, d: float, h: float) -> void:
 			var a := k * TAU / 4.0 + 0.4
 			_seat(room, t + Vector3(cos(a) * 1.4, 0, sin(a) * 1.4), 0.5)
 	_screen(room, Vector3(-w / 2.0 + 0.25, 3.6, 3.2), Vector3.RIGHT, Vector2(1.3, 1.0), "TRAFFIC", "", 22, 18)
+	# The black market: a battered terminal in the dim back corner, past the end of the bar, where
+	# the Fence buys raided loot for half its value.
+	var bm := Vector3(-w / 2.0 + 1.8, 0, d - 0.6)
+	_box(room, Vector3(1.4, 2.0, 0.8), bm + Vector3(0, 1.0, 0), Color(0.2, 0.21, 0.23))
+	_box(room, Vector3(1.0, 0.1, 0.4), bm + Vector3(0, 1.25, -0.5), TRIM, false)
+	_box(room, Vector3(1.3, 0.04, 0.04), bm + Vector3(0, 0.15, -0.42), ALERT, false, 2.0)
+	_boards.fence = _screen(room, bm + Vector3(0, 1.75, -0.42), Vector3.FORWARD, Vector2(1.1, 0.7), "BLACK MARKET", "", 22, 18, ALERT)
+	_crate(room, Vector3(1.2, 0.9, 1.0), bm + Vector3(1.8, 0, -0.2))
+	_crate(room, Vector3(1.0, 0.7, 0.9), bm + Vector3(1.9, 0.9, -0.2))
+	_light(room, bm + Vector3(0, 2.6, -1.2), Color(1.0, 0.35, 0.3), 0.8, 4.0)
+	_use(room, bm + Vector3(0, 1.0, -1.1), _fence_prompt, func(): Net.send({"type": "sell"}))
 	_light(room, Vector3(bx, 2.6, 7.5), Color(0.35, 0.9, 1.0), 1.0, 7.0)
-
-
-func _build_fence(room: Node3D, w: float, d: float, h: float) -> void:
-	_far_wall(room, w, d, h)
-	# The noodle stall up front.
-	_box(room, Vector3(4.0, 1.1, 1.4), Vector3(-2.6, 0.55, 3.4), Color(0.6, 0.62, 0.64))
-	_box(room, Vector3(4.2, 0.1, 1.6), Vector3(-2.6, 1.15, 3.4), Color(0.7, 0.72, 0.74), false)
-	_sign(room, "FENCE'S\nNOODLES", Vector3(-2.6, 0.6, 2.68), Vector3.FORWARD, 64, Color(0.2, 0.2, 0.22), Vector2(2.4, 0.9))
-	for i in 3:
-		_cyl(room, 0.09, 0.18, Vector3(-3.6 + i * 0.3, 1.29, 3.6), Color(0.6, 0.55, 0.5), false)
-	_cyl(room, 0.1, 0.35, Vector3(-1.2, 1.37, 3.6), Color(0.55, 0.5, 0.45), false)
-	_box(room, Vector3(0.6, 0.7, 0.5), Vector3(-4.3, 1.55, 3.6), PANEL, false)
-	_sign(room, "MENU\n- Nerf noodles   5\n- Veg noodles   4\n- Broth   2\n- Extra protein   2", Vector3(-w / 2.0 + 0.25, 2.8, 3.6), Vector3.RIGHT, 30, Color(0.88, 0.9, 0.92), Vector2(2.6, 1.8))
-	for x in [-3.6, -1.8]:
-		_seat(room, Vector3(x, 0, 2.3))
-	# The partition, its doorway, and the back room with the Fence's terminal.
-	var pz := 7.5
-	var piece := w / 2.0 - 1.3
-	_box(room, Vector3(piece, h, 0.3), Vector3(-1.3 - piece / 2.0, h / 2.0, pz), WALL)
-	_box(room, Vector3(piece, h, 0.3), Vector3(1.3 + piece / 2.0, h / 2.0, pz), WALL)
-	_box(room, Vector3(2.6, h - 3.0, 0.3), Vector3(0.0, 3.0 + (h - 3.0) / 2.0, pz), WALL)
-	for s in [-1, 1]:
-		_box(room, Vector3(0.3, 3.0, 0.5), Vector3(s * 1.45, 1.5, pz), TRIM, false)
-	_box(room, Vector3(0.5, 0.25, 0.08), Vector3(0, 3.25, pz - 0.2), CYAN, false, 2.5)
-	_crate(room, Vector3(1.6, 1.0, 1.2), Vector3(-3.5, 0, 10.5))
-	_crate(room, Vector3(1.6, 0.9, 1.2), Vector3(-3.5, 1.0, 10.5))
-	_crate(room, Vector3(1.4, 1.0, 1.2), Vector3(-1.8, 0, 12.6))
-	_crate(room, Vector3(1.2, 0.8, 1.0), Vector3(-4.0, 0, 13.4))
-	_box(room, Vector3(1.4, 2.0, 0.8), Vector3(3.5, 1.0, d - 0.5), PANEL)
-	_boards.fence = _screen(room, Vector3(3.5, 2.4, d - 0.95), Vector3.FORWARD, Vector2(1.2, 0.8), "TRANSACTION LOG", "", 22, 18)
-	_box(room, Vector3(1.0, 0.1, 0.4), Vector3(3.5, 1.3, d - 1.0), TRIM, false)
-	_use(room, Vector3(3.5, 1.0, d - 1.6), _fence_prompt, func(): Net.send({"type": "sell"}))
-	_light(room, Vector3(0, h - 0.6, 11.5), Color(0.6, 0.75, 0.85), 0.5, 7.0)
 
 
 func _build_security(room: Node3D, w: float, d: float, h: float) -> void:
@@ -952,5 +929,5 @@ func _deliver() -> void:
 func _fence_prompt() -> String:
 	var stash: Array = _me().get("stash", [])
 	if stash.is_empty():
-		return "The Fence: nothing of yours to buy"
-	return "Press %s to sell %d raided items to the Fence for %d credits" % [_key(), stash.size(), _stash_value() / 2]
+		return "Black market: nothing of yours to buy"
+	return "Black market: press %s to sell %d raided items for %d credits" % [_key(), stash.size(), _stash_value() / 2]

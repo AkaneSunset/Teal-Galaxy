@@ -1124,7 +1124,7 @@ func _leave_raid(_result: Dictionary) -> void:
 	var back := _raid_from if _stations.has(_raid_from) else "aster"
 	teleport(System.offset(_stations[back].pos, Vector3(0, 0, 900)))
 	dock(back)
-	_say("Back in your ship at %s. The Fence is in the back of Fence's Noodles." % _stations[back].name)
+	_say("Back in your ship at %s. The black market terminal is in the Cantina." % _stations[back].name)
 
 
 func _set_space_visible(on: bool) -> void:
