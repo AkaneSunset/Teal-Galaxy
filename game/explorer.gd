@@ -1118,13 +1118,17 @@ func _enter_raid(briefing: Dictionary) -> void:
 	add_child(_raid)
 
 
-func _leave_raid(_result: Dictionary) -> void:
+func _leave_raid(result: Dictionary) -> void:
 	_raid.queue_free()
 	_raid = null
 	var back := _raid_from if _stations.has(_raid_from) else "aster"
 	teleport(System.offset(_stations[back].pos, Vector3(0, 0, 900)))
 	dock(back)
-	_say("Back in your ship at %s. The black market terminal is in the Cantina." % _stations[back].name)
+	if result.get("outcome", "") == "destroyed":
+		# The ship went up with the facility: a replacement waits for you on your pad.
+		_say("Your ship went down with the facility. A replacement is waiting on pad 06 at %s." % _stations[back].name)
+	else:
+		_say("Back in your ship at %s. The black market terminal is in the Cantina." % _stations[back].name)
 
 
 func _set_space_visible(on: bool) -> void:

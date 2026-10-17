@@ -115,7 +115,8 @@ Based on the Facility Heist design doc. Builders buy **facilities** in the Build
 **Builder (phone):** tap a facility and press Info to see its vault. *Ship cargo to HQ* brings the goods home
 (materials and plans go to stock, intel sells for credits; once a minute). Spend them on
 **security tiers**: more guards, vault turrets, rarer loot and a longer raid clock. When a pilot
-boards, the facility turns red and the Raids list shows the intruder's Heat and time left live.
+boards, the facility turns red and the Raids list shows live where the intruder is (breaching,
+which level, or racing the self-destruct), their Heat and time left.
 *Sound the alarm* (50 credits) adds 25 Heat for them. A raid can reach 60% of each vault stack; the
 rest is in deep storage, and anything the raider doesn't carry out goes back in the vault.
 
@@ -126,18 +127,31 @@ and walk down the ramp into the station, fly down to the planet's base (your shi
 Builder's Spaceport, in the base the Builder sees on their phone, where you deliver jobs, sell to the
 Fence or walk around), raid one of the planet's facilities, or launch back into space. After a raid
 you're back in your seat in the hangar. Walking back up your ship's ramp sits you down again; Esc
-only pauses, since the way out of a place is your ship. Inside a facility, on foot and in first person:
+only pauses, since the way out of a place is your ship. Picking a facility in the menu flies your ship down to
+the facility's landing pad. On foot and in first person:
 
-- The facility is a grid of rooms. The **vault** is the room furthest from the airlock, behind a
-  red door: swipe an **access keycard** (one is hidden in some container) or drill it (loud, 30 s).
+
+- **Getting in.** The map outside is the site exactly as the Builder laid it out, drawn with the
+  Builder's own models on the same terrain: their turrets, guard posts, walls, power plant and
+  leftover obstacles, plus the turrets the security tier mounts on the core. Shoot defences to
+  destroy them. With the power plant down the core's **blast door** opens; with no power plant the
+  core runs on its own power and the door never opens. Either way you can cut through one of the
+  core's **vent** grates instead (6 s, silent).
+- **Going down.** The facility has one level below ground for each level of its core building, up
+  to five. Deeper levels are bigger, with more guards and turrets and rarer loot. Each level's lift
+  down is in the room furthest from where you arrived. Every minute inside brings a bigger wave of
+  guards.
+- **Getting out.** The **safe room** on the deepest level holds the vault, behind amber doors: swipe
+  the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A Vault
+  Warden may be waiting there. Opening the vault starts the **self-destruct** (60 s plus 30 s per
+  level): ride the lifts back up and board your ship before it ends, or you die with the facility,
+  lose your ship and keep only your Secure Case.
 - **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
   Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
-- **Heat** rises with time, gunfire, being spotted and bodies found. At Alerted guards hunt you and
-  turrets wake, Lockdown seals the Escape Pod and sends reinforcements, Purge sends an elite team
-  and doubles extract timers.
-- **Extract** by standing in a zone: the Shuttle Pad outside the airlock (20 s, loud), the Service
-  Lift (8 s, silent, eats a keycard) or the Escape Pod (5 s, one use, after minute 3). With 5 minutes
-  left the extracts freeze as they are. If the clock runs out you're missing in action.
+- **Heat** rises with time, gunfire, explosions, being spotted and bodies found. At Alerted guards
+  hunt you and turrets wake; Purge sends an elite team. Standing guard posts send out new guards.
+- **Leave** any time by standing on your ship's pad for 3 s. If the raid clock runs out you're
+  missing in action. You end up back in your ship's pilot seat in the High Port's hangar.
 - Extracted loot goes to your stash; sell it to the Fence (the black market terminal in a High Port's Cantina, or any Spaceport) for half its value.
 
 | On foot | Keyboard and mouse | Gamepad |
@@ -207,8 +221,10 @@ set the server to `ws://<your computer's Wi-Fi address>:8080`. Both devices must
 cd server && npm test     # the ice job, raid rules, and a full raid over real WebSockets
 ```
 
-`game/tests/raid.tscn` plays a whole raid against a running server: board, find the keycard,
-open the vault, extract (instructions at the top of `game/tests/raid_test.gd`).
+`game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
+Builder lays out a site and upgrades it to level 3, then the pilot lands, checks the site matches,
+blows up the power plant, rides the lifts to the deepest level, find the keycard, open the vault, get back up and
+board the ship (instructions at the top of `game/tests/raid_test.gd`).
 
 `game/tests/flight_test.gd` checks the flight model on its own:
 `godot --headless --path game --script res://tests/flight_test.gd`

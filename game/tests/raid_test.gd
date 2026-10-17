@@ -1,9 +1,12 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
-## a Builder founds a facility's satellite site, the pilot docks at the planet's High Port, picks it in the transit menu, search containers until the keycard turns up,
-## open the vault, take something from it, extract at the Shuttle Pad, and fly on with the loot.
+## a Builder founds a facility's satellite site and places defences on it, the pilot docks at the
+## planet's High Port and picks the site in the ship's menu, lands, blows up the power plant, walks in
+## through the blast door, rides the lifts down to the deepest level, searches containers until the
+## keycard turns up, opens the safe room's vault, takes something from it, rides back up before the
+## self-destruct, and boards the ship, ending back in the pilot's seat in the hangar.
 ## (Selling it is covered by the server tests.)
-##   cd server && BUILD_SPEED=0 npm start
+##   cd server && DEMO=1 BUILD_SPEED=0 npm start
 ##   godot --headless --path game res://tests/raid.tscn
 ## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way,
 ## and `-- --server=ws://127.0.0.1:9000` to use a server on another port.
@@ -25,7 +28,10 @@ var _shot_n := 0
 var _took_from_vault := false
 var _builder := WebSocketPeer.new() # a second connection playing the Builder who owns the site
 var _server := "ws://127.0.0.1:8080"
-var _key := "" # the planet whose High Port the pilot docks at
+var _key := "" # the site being raided
+var _port := "" # the planet whose High Port the pilot docks at
+var _laid_out := false
+var _overview: Camera3D
 
 
 func _ready() -> void:
@@ -62,17 +68,34 @@ func _process(delta: float) -> void:
 			_builder.poll()
 			if _facility().is_empty():
 				return
-			_key = Net.planet(_facility().planet).get("parent", _facility().planet)
-			if not _explorer._stations.has(_key):
+			_key = _facility().planet
+			if not _laid_out:
+				# The Builder lays out defences (trying a few spots, as obstacles may be in the way)
+				# and upgrades the facility to level 3, so the raid has three levels below.
+				_laid_out = true
+				for spot in [["power", 0, 0], ["power", 10, 10], ["power", 0, 10], ["power", 10, 0],
+						["turret", 2, 8], ["turret", 8, 2], ["guardpost", 9, 6], ["guardpost", 1, 4],
+						["wall", 5, 1], ["wall", 6, 1], ["wall", 11, 5]]:
+					_send_builder({"type": "place_piece", "planet": _key, "piece": spot[0], "x": spot[1], "y": spot[2]})
+				for i in 2:
+					_send_builder({"type": "upgrade_building", "planet": _key, "slot": 0})
+				_wait = 1.5
 				return
-			_explorer.teleport(_explorer.System.offset(_explorer._stations[_key].pos, Vector3(0, 0, 900)))
+			if int(Net.planet(_key).buildings[0].get("level", 1)) < 3:
+				_send_builder({"type": "upgrade_building", "planet": _key, "slot": 0})
+				_wait = 0.5
+				return
+			_port = Net.planet(_key).get("parent", _key)
+			if not _explorer._stations.has(_port):
+				return
+			_explorer.teleport(_explorer.System.offset(_explorer._stations[_port].pos, Vector3(0, 0, 900)))
 			_wait = 0.5
 			_step = "dock"
 		"dock":
 			_shot("1-at-high-port")
 			if not _explorer._prompt.text.contains("dock"):
 				_finish(false, "no docking prompt: " + _explorer._prompt.text)
-			_explorer.dock(_key)
+			_explorer.dock(_port)
 			_wait = 0.3
 			_step = "board"
 		"board":
@@ -86,11 +109,73 @@ func _process(delta: float) -> void:
 			if _raid == null:
 				return
 			_raid.god_mode = true
+			# The outside is the site exactly as the Builder laid it out, drawn by the Builder's own view.
+			var placed: Array = Net.planet(_key).get("pieces", []).map(func(p): return [int(p.id), p.type, int(p.x), int(p.y)])
+			var mirrored: Array = _raid.layout.view.pieces.map(func(p): return [int(p.id), p.type, int(p.x), int(p.y)])
+			if placed.is_empty() or JSON.stringify(placed) != JSON.stringify(mirrored):
+				_finish(false, "raid site %s is not the Builder's %s" % [mirrored, placed])
+			for id in _raid._pieces:
+				if _raid._pieces[id].model == null:
+					_finish(false, "no Builder model for piece " + id)
+			if _raid.floors != 3:
+				_finish(false, "a level 3 facility should have 3 levels, not %d" % _raid.floors)
 			for c in _raid.layout.containers:
-				if c.type != "vault":
+				if c.type != "vault" and int(c.floor) == _raid.floors:
 					_queue.append(c.id)
 			_wait = 1.0
-			_step = "search"
+			_step = "overview"
+		"overview":
+			# A look from above, to compare with the Builder's view of the same site.
+			_shot("1b-landed")
+			_overview = Camera3D.new()
+			_overview.far = 1500.0
+			_raid.add_child(_overview)
+			_overview.global_position = Vector3(0, 70, 60)
+			_overview.look_at(Vector3(0, 0, 4), Vector3.UP)
+			_overview.make_current()
+			_wait = 0.3
+			_step = "overview-shot"
+		"overview-shot":
+			_shot("0-overview")
+			_raid._camera.make_current()
+			_overview.queue_free()
+			_wait = 0.2
+			_step = "breach"
+		"breach":
+
+			var power := ""
+			for id in _raid._pieces:
+				if _raid._pieces[id].data.type == "power":
+					power = id
+			if power == "":
+				_finish(false, "the Builder's power plant isn't in the raid")
+			_raid.destroy_piece(power)
+			_wait = 0.6
+			_step = "door"
+		"door":
+			if not _raid.door_open:
+				return
+			_raid.teleport_to(_raid._door_outside())
+			_shot("1c-blast-door-open")
+			_raid._interact()
+			_step = "inside-core"
+		"inside-core":
+			if not _raid.breached or _raid._floor != 1:
+				return
+			_step = "down"
+		"down":
+			if _raid._floor == _raid.floors:
+				_shot("2-deepest-level")
+				_step = "search"
+				return
+			for l in _raid._lifts:
+				if _raid._floor_of(l.pos) == _raid._floor and int(l.to_floor) == _raid._floor + 1:
+					_raid.teleport_to(l.pos)
+					_raid._interact()
+					_shot("2-level-%d" % (_raid._floor))
+					_wait = 0.3
+					return
+			_finish(false, "no lift down from level %d" % _raid._floor)
 		"search":
 			_shot("2-inside")
 			if _raid.vault_open or _raid._holding("keycard"):
@@ -127,6 +212,8 @@ func _process(delta: float) -> void:
 			for c in _raid.layout.containers:
 				if c.type == "vault":
 					box = c.id
+			if _raid.self_destruct < 0.0:
+				_finish(false, "opening the vault didn't start the self-destruct")
 			_go_to_container(box)
 			_raid.open_container(box)
 			_search_time = 0.0
@@ -145,11 +232,19 @@ func _process(delta: float) -> void:
 				_finish(false, "vault search never finished")
 		"extract":
 			_raid._close_inventory()
-			_raid.teleport_to(_raid._extract_nodes["shuttle"].pos)
-			_step = "extracting"
+			_shot("5-self-destruct")
+			if _raid._floor == 0:
+				_raid.teleport_to(_raid._extract_nodes["ship"].pos)
+				_step = "extracting"
+				return
+			for l in _raid._lifts:
+				if _raid._floor_of(l.pos) == _raid._floor and int(l.to_floor) == _raid._floor - 1:
+					_raid.teleport_to(l.pos)
+					_raid._interact()
+					_wait = 0.3
+					return
+			_finish(false, "no lift up from level %d" % _raid._floor)
 		"extracting":
-			if _clock > 0 and int(_clock * 10) % 50 == 0:
-				_shot("5-extracting")
 			if not _result.is_empty():
 				if _result.outcome != "extracted":
 					_finish(false, "outcome " + _result.outcome)
@@ -168,6 +263,10 @@ func _process(delta: float) -> void:
 				_finish(_took_from_vault, "raided the vault, extracted with %d stacks worth %d credits, back in your ship in the hangar" % [_result.kept.size(), int(_result.value)])
 
 
+func _send_builder(msg: Dictionary) -> void:
+	_builder.send_text(JSON.stringify(msg))
+
+
 func _facility() -> Dictionary:
 	for f in Net.facilities():
 		if Net.planet(f.planet).get("owner", "") == "Raid Test Builder":
@@ -179,7 +278,8 @@ func _go_to_container(id: String) -> void:
 	var node: Node3D = _raid._containers[id].node
 	var c: Dictionary = _raid._containers[id].data
 	var centre: Vector3 = _raid._room_centre(int(c.room))
-	_raid.teleport_to(node.global_position + (centre - node.global_position).normalized() * Vector3(1, 0, 1) * 1.3)
+	var flat := (centre - node.global_position) * Vector3(1, 0, 1)
+	_raid.teleport_to(node.global_position + flat.normalized() * 1.3)
 
 
 func _shot(name: String) -> void:
