@@ -32,7 +32,7 @@ func _process(delta: float) -> void:
 			func(): return _view("aster", 3_200.0, 0.25, "1-aster-high-port-approach"),
 			func(): return _view("aster", 900.0, 0.1, "2-aster-high-port-dock-prompt"),
 			func(): _explorer.dock("aster"); return "3-aster-transit-menu",
-			func(): _explorer._at_spaceport = true; _explorer._refresh_dock(); return "4-aster-spaceport",
+			func(): _explorer._fly_to_base(); return "4-aster-base",
 			func(): _explorer.undock(); return _view("brisa", 2_600.0, -0.35, "5-brisa-high-port-with-planet"),
 			func(): _explorer.dock("brisa"); return "6-brisa-transit-menu",
 			func(): get_tree().quit(),

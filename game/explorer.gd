@@ -20,6 +20,7 @@ const ChatBox := preload("res://chat_box.gd")
 const Models := preload("res://models.gd")
 const Raid := preload("res://raid.gd")
 const Station := preload("res://station.gd")
+const Surface := preload("res://surface.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
@@ -49,8 +50,8 @@ var _accent: StandardMaterial3D
 var _sun: DirectionalLight3D
 var _sky: SubViewport
 var _stations := {} # planet id -> {"node", "pos", "name", "planet"}: the High Port over each Builder planet
-var _docked := "" # the planet whose High Port we're docked at, or ""
-var _at_spaceport := false # docked and shuttled down to the planet's Spaceport
+var _docked := "" # the planet whose High Port (or base) we're landed at, or ""
+var _at_spaceport := false # landed at the planet's base, on its surface, rather than in its High Port
 var _dock_panel: PanelContainer
 var _dock_title: Label
 var _dock_list: VBoxContainer
@@ -62,7 +63,8 @@ var _others := {} # id -> {"node": Node3D, "pos": Array, "shown": Array}
 var _waypoints := [] # {"id", "name", "pos"}
 var _raid: Node3D # the on-foot raid while one is running
 var _raid_from := "" # the High Port (planet id) the raid left from, to return to
-var _station: Node3D # the High Port's interior while walking it on foot
+var _station: Node3D # where the ship is landed: the High Port's hangar (station.gd) or a base (surface.gd)
+var _menu_standing := false # the ship's menu is up over the place while you stand (the transit terminal)
 var _world_env: WorldEnvironment
 var _sky_layer: CanvasLayer
 var _hud_layer: CanvasLayer
@@ -358,7 +360,10 @@ func _build_hud() -> void:
 	_nav.waypoint_added.connect(_add_waypoint)
 	_nav.waypoint_removed.connect(_remove_waypoint)
 
-	_build_dock_panel(layer)
+	var dock_layer := CanvasLayer.new()
+	dock_layer.layer = 5
+	add_child(dock_layer)
+	_build_dock_panel(dock_layer)
 
 	_settings = SettingsMenu.new()
 	_settings.controls = controls
@@ -370,6 +375,10 @@ func _build_hud() -> void:
 # --- Input -------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _station and _menu_standing and (event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel")):
+		_close_standing_menu()
+		get_viewport().set_input_as_handled()
+		return
 	if _raid or _station:
 		return
 	if _settings.visible:
@@ -380,18 +389,6 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _chat.is_typing():
 		if event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel"):
 			_chat.close()
-			get_viewport().set_input_as_handled()
-		return
-	if _docked != "" and not _nav.visible:
-		if event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel"):
-			if _at_spaceport:
-				_at_spaceport = false
-				_refresh_dock()
-			else:
-				undock()
-			get_viewport().set_input_as_handled()
-		elif event.is_action_pressed("chat"):
-			_chat.open()
 			get_viewport().set_input_as_handled()
 		return
 	if _nav.visible:
@@ -664,22 +661,95 @@ func _near_station(range_m: float) -> String:
 
 # --- Docking and surface transit ----------------------------------------------------------
 
+## Lands at a planet's High Port: the ship sets down on pad 06 in the hangar and you're in the
+## pilot's seat, with the ship's menu up.
 func dock(planet_id: String) -> void:
 	_docked = planet_id
-	_at_spaceport = false
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
+	_land_in(Station.new(planet_id), false)
+
+
+## Moves the ship (and you in it) to a place: the High Port's hangar, or a base on the surface.
+func _land_in(place: Node3D, at_base: bool) -> void:
+	_leave_place()
+	_at_spaceport = at_base
+	controls.enabled = false
+	_set_space_visible(false)
+	_station = place
+	_station.controls = controls
+	_station.seated_down.connect(_show_ship_menu)
+	_station.wants_menu.connect(_open_standing_menu)
+	_station.service.connect(func(kind):
+		if kind == "repair":
+			flight.repair())
+	add_child(_station)
+	_show_ship_menu()
+
+
+func _leave_place() -> void:
+	if _station:
+		_station.queue_free()
+		_station = null
+	_menu_standing = false
+	_dock_panel.visible = false
+
+
+## Seated in your ship: the ship's menu, with the mouse free to click it.
+func _show_ship_menu() -> void:
+	_menu_standing = false
 	_dock_panel.visible = true
-	_refresh_focus()
+	controls.release_mouse()
 	_refresh_dock()
 
 
+## Leave the pilot's seat and walk down the ramp.
+func _leave_seat() -> void:
+	_dock_panel.visible = false
+	_station.stand()
+
+
+## The transit terminal in the station: the same trips, while you stand at the console.
+func _open_standing_menu() -> void:
+	_menu_standing = true
+	_station.set_menu_open(true)
+	_dock_panel.visible = true
+	_refresh_dock()
+
+
+func _close_standing_menu() -> void:
+	_menu_standing = false
+	_dock_panel.visible = false
+	if _station:
+		_station.set_menu_open(false)
+
+
+## Your ship flies down to the planet's surface and lands at its Builder's base, beside the Spaceport.
+func _fly_to_base() -> void:
+	var p := Net.planet(_docked)
+	_land_in(Surface.new(_docked), true)
+	_say("Landed at %s's base on %s." % [p.get("owner", "the Builder"), p.get("name", _docked)])
+
+
+## Back up to orbit: from a base to the High Port's hangar.
+func _fly_to_station() -> void:
+	dock(_docked)
+
+
+## Launch from the High Port: the ship lifts off the pad and flies out of the hangar into space.
 func undock() -> void:
+	var from := _docked
+	_leave_place()
 	_docked = ""
 	_at_spaceport = false
-	_dock_panel.visible = false
+	_set_space_visible(true)
+	_camera.make_current()
+	controls.enabled = true
+	if _stations.has(from):
+		teleport(System.offset(_stations[from].pos, Vector3(0, 0, 1_200)))
+		flight.basis = Basis()
 	_refresh_focus()
-	_say("Undocked. Fly safe.")
+	_say("Launched from %s. Fly safe." % (_stations[from].name if _stations.has(from) else "the High Port"))
 
 
 ## Facilities on a planet's satellite sites (and any still on its own pads).
@@ -695,11 +765,11 @@ func _refresh_dock() -> void:
 	var p := Net.planet(_docked)
 	var owner: String = str(p.get("owner", "nobody")) if p.get("owner") != null else "nobody"
 	if _at_spaceport:
-		_dock_title.text = "%s's Spaceport, on %s" % [owner, p.get("name", _docked)]
+		_dock_title.text = "Landed at %s's base on %s" % [owner, p.get("name", _docked)]
 		var job := Net.open_job(_docked)
 		var stash: Array = _me().get("stash", [])
 		if job.is_empty():
-			_dock_note("No open jobs here.")
+			_dock_note("No open jobs at this Spaceport.")
 		elif _cargo(job.resource) <= 0:
 			_dock_note("Job #%d wants %d %s (%d delivered). Go mine some." % [job.id, job.amount, job.resource, job.delivered])
 		else:
@@ -710,17 +780,16 @@ func _refresh_dock() -> void:
 		else:
 			_dock_button("Sell %d raided items to the Fence for %d credits" % [stash.size(), _stash_value() / 2],
 				func(): Net.send({"type": "sell"}))
-		_dock_button("Shuttle back up to %s" % _stations[_docked].name, func():
-			_at_spaceport = false
-			_refresh_dock())
+		_dock_button("Leave your seat and walk around the base", _leave_seat)
+		_dock_button("Fly back up to %s" % _stations[_docked].name, _fly_to_station)
 	else:
-		_dock_title.text = "Docked at %s, orbiting %s" % [_stations[_docked].name, p.get("name", _docked)]
-		_dock_button("Walk into %s on foot" % _stations[_docked].name, _enter_station)
+		if _menu_standing:
+			_dock_title.text = "Surface Transit, %s" % _stations[_docked].name
+		else:
+			_dock_title.text = "In your ship on pad 06, %s" % _stations[_docked].name
+			_dock_button("Leave your seat and walk into the station", _leave_seat)
 		if Net.has_building("spaceport", _docked):
-			_dock_button("Shuttle down to %s's Spaceport" % owner, func():
-				_at_spaceport = true
-				_say("Your ship is shuttled down to %s's Spaceport." % owner)
-				_refresh_dock())
+			_dock_button("Fly down to %s's base and land at the Spaceport" % owner, _fly_to_base)
 		else:
 			_dock_note("%s has no Spaceport yet." % p.get("name", _docked))
 		var facs := facilities_on(_docked)
@@ -741,7 +810,10 @@ func _refresh_dock() -> void:
 				_dock_note("%s: security on alert after a raid (%d s)" % [fac_name, ceili(cool)])
 			else:
 				_dock_button(label, board.bind(f.planet, f.slot))
-		_dock_button("Undock", undock)
+		if _menu_standing:
+			_dock_button("Close", _close_standing_menu)
+		else:
+			_dock_button("Launch", undock)
 	var first := _dock_list.get_children().filter(func(c): return c is Button and not c.is_queued_for_deletion())
 	if not first.is_empty():
 		first[0].grab_focus.call_deferred()
@@ -764,10 +836,12 @@ func _dock_note(text: String) -> void:
 
 
 func _build_dock_panel(layer: CanvasLayer) -> void:
+	# Low on the screen, like a cockpit display, so the view out of the canopy stays clear.
 	_dock_panel = PanelContainer.new()
-	_dock_panel.set_anchors_preset(Control.PRESET_CENTER)
+	_dock_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_dock_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_dock_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_dock_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_dock_panel.position.y -= 40
 	_dock_panel.custom_minimum_size = Vector2(620, 0)
 	_dock_panel.visible = false
 	layer.add_child(_dock_panel)
@@ -1021,35 +1095,11 @@ func _draw_hud() -> void:
 
 func _on_state(_state: Dictionary) -> void:
 	_sync_stations()
-	if _docked != "" and _raid == null and _station == null:
+	if _docked != "" and _raid == null and _station and _dock_panel.visible:
 		_refresh_dock()
 
 
 # --- Raids -------------------------------------------------------------------------------
-
-# --- Walking the High Port --------------------------------------------------------------
-
-func _enter_station() -> void:
-	_dock_panel.visible = false
-	controls.enabled = false
-	_set_space_visible(false)
-	_station = Station.new(_docked)
-	_station.controls = controls
-	_station.left.connect(_leave_station)
-	_station.service.connect(func(kind):
-		if kind == "repair":
-			flight.repair())
-	add_child(_station)
-
-
-## Back to the ship from the station: "ship" returns to the docked menu, "terminal" too, ready to pick a trip.
-func _leave_station(_where: String) -> void:
-	_station.queue_free()
-	_station = null
-	_set_space_visible(true)
-	_camera.make_current()
-	dock(_docked)
-
 
 func _on_raid_event(msg: Dictionary) -> void:
 	if msg.ev == "begin" and _raid == null:
@@ -1060,7 +1110,7 @@ func _enter_raid(briefing: Dictionary) -> void:
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
 	controls.enabled = false
-	_dock_panel.visible = false
+	_leave_place()
 	_set_space_visible(false)
 	_raid = Raid.new(briefing)
 	_raid.controls = controls
@@ -1071,13 +1121,10 @@ func _enter_raid(briefing: Dictionary) -> void:
 func _leave_raid(_result: Dictionary) -> void:
 	_raid.queue_free()
 	_raid = null
-	_set_space_visible(true)
-	_camera.make_current()
-	controls.enabled = true
 	var back := _raid_from if _stations.has(_raid_from) else "aster"
 	teleport(System.offset(_stations[back].pos, Vector3(0, 0, 900)))
 	dock(back)
-	_say("Shuttled back up to %s. Sell your loot to the Fence at a Spaceport." % _stations[back].name)
+	_say("Back in your ship at %s. The Fence is in the back of Fence's Noodles." % _stations[back].name)
 
 
 func _set_space_visible(on: bool) -> void:

@@ -33,6 +33,7 @@ var _shots := "/tmp"
 var _planet := "aster"
 var _i := -1
 var _wait := 2.0
+var _flown := false
 
 
 func _ready() -> void:
@@ -57,20 +58,48 @@ func _process(delta: float) -> void:
 		if not _explorer._stations.has(_planet):
 			return
 		_explorer.dock(_planet)
-		_explorer._enter_station()
+		_explorer._leave_seat()
 		_i = 0
 		_wait = 2.0
 		return
 	if _i == SPOTS.size():
-		# Last: walk onto your own ship's ramp, which should take you back aboard.
-		for sh in _explorer._station._ships:
+		# Walk onto your own ship's ramp, which should sit you back down in it.
+		var st = _explorer._station
+		for sh in st._ships:
 			if sh.mine:
-				_explorer._station._player.global_position = sh.entry.global_position + Vector3(0, -0.2, 0)
+				st._player.global_position = sh.entry.global_position + Vector3(0, -0.2, 0)
 		_i += 1
 		_wait = 1.5
 		return
-	if _i > SPOTS.size():
-		print("PASS ramp boards your ship" if _explorer._station == null and _explorer._dock_panel.visible else "FAIL ramp did not board your ship")
+	if _i == SPOTS.size() + 1:
+		print("PASS ramp seats you in your ship" if _explorer._station.seated and _explorer._dock_panel.visible else "FAIL ramp did not seat you")
+		_save("16-seated-in-your-ship-hangar")
+		_i += 1
+		_wait = 1.5
+		return
+	if _i == SPOTS.size() + 2 and not _flown:
+		_flown = true
+		_explorer._fly_to_base()
+		_wait = 3.0
+		return
+	if _i == SPOTS.size() + 2:
+		_save("20-base-seated-in-your-ship")
+		_explorer._leave_seat()
+		_i += 1
+		_wait = 1.5
+		return
+	if _i == SPOTS.size() + 3:
+		_save("21-base-on-foot")
+		_explorer._station.view_at(_explorer._station, Vector3(-20, 1.65, -30), Vector3(0, 6, 0))
+		_i += 1
+		_wait = 1.5
+		return
+	if _i == SPOTS.size() + 4:
+		_save("22-base-from-the-plate-edge")
+		_i += 1
+		_wait = 1.5
+		return
+	if _i > SPOTS.size() + 4:
 		get_tree().quit()
 		return
 	var spot: Array = SPOTS[_i]
@@ -80,3 +109,8 @@ func _process(delta: float) -> void:
 	await get_tree().create_timer(0.7).timeout
 	get_viewport().get_texture().get_image().save_png("%s/%s.png" % [_shots, spot[0]])
 	print("saved ", spot[0])
+
+
+func _save(name: String) -> void:
+	get_viewport().get_texture().get_image().save_png("%s/%s.png" % [_shots, name])
+	print("saved ", name)

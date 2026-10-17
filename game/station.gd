@@ -1,4 +1,4 @@
-extends Node3D
+extends "res://place.gd"
 ## The inside of a High Port, walked on foot in first person. Built in code from boxes, like the rest.
 ## Designed from Akane's concept art for the orbital station.
 ##
@@ -13,14 +13,7 @@ extends Node3D
 ##   5 Planetary Builder Job Board                and benches facing the windows near 283 degrees
 ##
 ## The boards show live data: the planet's sites and raids, its jobs, the raid log and chat.
-## F uses things, Esc goes back to the ship.
-
-const System := preload("res://teal_prime.gd")
-const Models := preload("res://models.gd")
-const ChatBox := preload("res://chat_box.gd")
-
-signal left(where: String) # "ship" or "terminal"
-signal service(kind: String) # "repair"
+## You arrive seated in your ship on pad 06 in the Hangar (see place.gd). F uses things, Esc pauses.
 
 const R_IN := 21.6 # inner wall of the concourse ring (the Terminal Hall is inside it)
 const R_OUT := 30.0 # outer wall of the ring, where compartments open
@@ -28,26 +21,6 @@ const RING_H := 5.0
 const HALL_H := 7.5
 const SEGMENTS := 120
 const HALL_DOORS := [45.0, 135.0, 225.0, 315.0] # degrees
-
-const WALK := 4.2
-const SPRINT := 7.0
-const JUMP := 4.0
-const GRAVITY := 14.0
-const EYE := 1.65
-const LOOK_SPEED := 2.6
-const REACH := 2.6
-
-# Colours, sampled from the concept art: light grey panels, darker trim, cyan light strips.
-const WALL := Color(0.56, 0.58, 0.61)
-const PANEL := Color(0.47, 0.49, 0.53)
-const TRIM := Color(0.27, 0.29, 0.32)
-const FLOOR := Color(0.43, 0.45, 0.48)
-const FLOOR_DARK := Color(0.32, 0.34, 0.37)
-const CYAN := Color(0.25, 0.95, 0.92)
-const SCREEN_TEXT := Color(0.5, 0.97, 0.95)
-const CUSHION := Color(0.24, 0.47, 0.52)
-const HAZARD := Color(0.95, 0.74, 0.18)
-const ALERT := Color(1.0, 0.32, 0.28)
 
 ## The compartments: slot -> [name, width, depth, height]. Slot angle = slot * 30 degrees.
 const ROOMS := {
@@ -63,38 +36,18 @@ const ROOMS := {
 	10: ["Observation Lounge", 14.0, 12.0, 5.0],
 }
 
-var controls: Node
-var planet_id := "aster"
-
-var _planet := {} # the server's planet record
 var _station_name := ""
-var _player: CharacterBody3D
-var _camera: Camera3D
-var _pitch := 0.0
-var _mats := {}
 var _rooms := {} # slot -> room Node3D (origin at its door, +Z into the room)
-var _uses := [] # {"node": Node3D, "prompt": Callable, "action": Callable}
-var _ships := [] # landed ships: {"root", "entry": Marker3D, "owner", "open", "mine", "pad"}
 var _globe: Node3D
 var _globe_markers: Node3D
 var _boards := {} # name -> Label3D, refreshed from the server state
 var _chat_lines: Array[String] = []
 var _price_time := 0.0
 
-var _prompt: Label
-var _chat: VBoxContainer
-var _where: Label
-var _message: Label
-var _message_time := 0.0
 
-
-func _init(planet := "aster") -> void:
-	planet_id = planet
-
-
-func _ready() -> void:
-	_planet = Net.planet(planet_id)
+func _build() -> void:
 	_station_name = System.station_name(_planet.get("name", "Aster"))
+	place_name = _station_name
 	_build_environment()
 	_build_space()
 	_build_ring()
@@ -115,238 +68,19 @@ func _ready() -> void:
 	_build_window_stretch(283.0, 1.0)
 	_directory(0.0)
 	_directory(283.0)
-	_build_player()
-	_build_hud()
 	Net.state_changed.connect(_on_state)
 	Net.chat_received.connect(_on_chat)
+
+
+func _ready() -> void:
+	super()
 	_refresh_boards()
-	if controls:
-		controls.capture_mouse()
-	_say("Welcome to %s. Esc goes back to your ship." % _station_name, 5.0)
 
 
 func _exit_tree() -> void:
 	if Net.state_changed.is_connected(_on_state):
 		Net.state_changed.disconnect(_on_state)
 		Net.chat_received.disconnect(_on_chat)
-
-
-# --- Materials and building blocks ---------------------------------------------------------
-
-func _mat(colour: Color, glow := 0.0, alpha := 1.0) -> StandardMaterial3D:
-	var key := "%s/%s/%s" % [colour, glow, alpha]
-	if _mats.has(key):
-		return _mats[key]
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(colour, alpha)
-	m.roughness = 0.75
-	if glow > 0.0:
-		m.emission_enabled = true
-		m.emission = colour
-		m.emission_energy_multiplier = glow
-	if alpha < 1.0:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.roughness = 0.05
-		m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_mats[key] = m
-	return m
-
-
-## A box in `parent`'s space. Solid boxes block the player.
-func _box(parent: Node3D, size: Vector3, pos: Vector3, colour: Color, solid := true, glow := 0.0, alpha := 1.0, rot := Vector3.ZERO) -> Node3D:
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	mesh.material = _mat(colour, glow, alpha)
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	if alpha < 1.0:
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var node: Node3D = mi
-	if solid:
-		var body := StaticBody3D.new()
-		var shape := CollisionShape3D.new()
-		shape.shape = BoxShape3D.new()
-		shape.shape.size = size
-		body.add_child(shape)
-		body.add_child(mi)
-		node = body
-	node.position = pos
-	node.rotation_degrees = rot
-	parent.add_child(node)
-	return node
-
-
-func _cyl(parent: Node3D, radius: float, height: float, pos: Vector3, colour: Color, solid := true, glow := 0.0, top := -1.0, sides := 24) -> Node3D:
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius if top < 0.0 else top
-	mesh.bottom_radius = radius
-	mesh.height = height
-	mesh.radial_segments = sides
-	mesh.material = _mat(colour, glow)
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	var node: Node3D = mi
-	if solid:
-		var body := StaticBody3D.new()
-		var shape := CollisionShape3D.new()
-		shape.shape = CylinderShape3D.new()
-		shape.shape.radius = maxf(radius, mesh.top_radius)
-		shape.shape.height = height
-		body.add_child(shape)
-		body.add_child(mi)
-		node = body
-	node.position = pos
-	parent.add_child(node)
-	return node
-
-
-## A flat glowing ring on the floor or around a pad.
-func _ring_line(parent: Node3D, radius: float, pos: Vector3, colour: Color, width := 0.12, glow := 2.0) -> void:
-	var mesh := TorusMesh.new()
-	mesh.inner_radius = radius - width * 0.5
-	mesh.outer_radius = radius + width * 0.5
-	mesh.rings = 64
-	mesh.material = _mat(colour, glow)
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	mi.position = pos
-	mi.scale = Vector3(1, 0.15, 1)
-	parent.add_child(mi)
-
-
-## Words in the world, facing `facing` (readable from that side).
-func _text(parent: Node3D, text: String, pos: Vector3, facing: Vector3, size := 48, colour := SCREEN_TEXT, left := false, width := 0.0) -> Label3D:
-	var l := Label3D.new()
-	l.text = text
-	l.font_size = size
-	l.pixel_size = 0.004
-	l.modulate = colour
-	l.outline_size = 0
-	l.position = pos
-	l.basis = _facing_basis(facing)
-	if left:
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		l.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	if width > 0.0:
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.width = width / l.pixel_size
-	parent.add_child(l)
-	return l
-
-
-func _facing_basis(facing: Vector3) -> Basis:
-	if absf(facing.y) > 0.99:
-		return Basis(Vector3.RIGHT, -signf(facing.y) * PI / 2)
-	return Basis.looking_at(-facing, Vector3.UP)
-
-
-## A wall screen: a dark bezel, a faintly glowing face, a title and a body. Returns the body label.
-func _screen(parent: Node3D, pos: Vector3, facing: Vector3, size: Vector2, title: String, body := "", title_size := 56, body_size := 34, accent := CYAN) -> Label3D:
-	var s := Node3D.new()
-	s.position = pos
-	s.basis = _facing_basis(facing)
-	parent.add_child(s)
-	_box(s, Vector3(size.x + 0.24, size.y + 0.24, 0.14), Vector3(0, 0, -0.07), TRIM, false)
-	_box(s, Vector3(size.x, size.y, 0.02), Vector3(0, 0, 0.01), Color(0.02, 0.07, 0.085), false, 1.0)
-	_box(s, Vector3(size.x, 0.04, 0.02), Vector3(0, size.y / 2 - 0.02, 0.025), accent, false, 2.5)
-	var top_left := Vector3(-size.x / 2 + 0.16, size.y / 2 - 0.14, 0.03)
-	_text(s, title, top_left, Vector3.BACK, title_size, accent, true, size.x - 0.3)
-	return _text(s, body, top_left + Vector3(0, -title_size * 0.004 - 0.12, 0), Vector3.BACK, body_size, SCREEN_TEXT, true, size.x - 0.3)
-
-
-## A sign: words in bold on a dark plate.
-func _sign(parent: Node3D, text: String, pos: Vector3, facing: Vector3, size := 72, colour := SCREEN_TEXT, plate := Vector2.ZERO) -> Label3D:
-	var s := Node3D.new()
-	s.position = pos
-	s.basis = _facing_basis(facing)
-	parent.add_child(s)
-	var w := plate.x if plate.x > 0.0 else text.length() * size * 0.0026 + 0.6
-	var h := plate.y if plate.y > 0.0 else size * 0.004 * (text.count("\n") + 1) + 0.35
-	_box(s, Vector3(w, h, 0.1), Vector3(0, 0, -0.05), Color(0.16, 0.18, 0.2), false)
-	_box(s, Vector3(w, 0.03, 0.02), Vector3(0, -h / 2 + 0.06, 0.01), colour, false, 2.0)
-	return _text(s, text, Vector3(0, 0.02, 0.02), Vector3.BACK, size, colour)
-
-
-func _light(parent: Node3D, pos: Vector3, colour := Color(0.85, 0.92, 1.0), energy := 1.0, reach := 9.0) -> void:
-	var l := OmniLight3D.new()
-	l.position = pos
-	l.light_color = colour
-	l.light_energy = energy
-	l.omni_range = reach
-	l.omni_attenuation = 1.0
-	parent.add_child(l)
-
-
-## Something to use with F. `prompt` returns the words shown when close; `action` runs on F.
-func _use(parent: Node3D, pos: Vector3, prompt: Callable, action: Callable) -> void:
-	var m := Marker3D.new()
-	m.position = pos
-	parent.add_child(m)
-	_uses.append({"node": m, "prompt": prompt, "action": action})
-
-
-func _seat(parent: Node3D, pos: Vector3, height := 0.75) -> void:
-	_cyl(parent, 0.1, height, pos + Vector3(0, height / 2, 0), TRIM, false)
-	_cyl(parent, 0.36, 0.06, pos + Vector3(0, 0.03, 0), TRIM, true)
-	_cyl(parent, 0.34, 0.16, pos + Vector3(0, height, 0), Color(0.2, 0.22, 0.25), false)
-	_ring_line(parent, 0.33, pos + Vector3(0, height - 0.09, 0), CYAN, 0.04, 2.5)
-
-
-## A terminal: a pedestal with a sloped control deck in front and an upright screen standing on its
-## back edge, facing `facing`. Returns the screen's body label.
-func _console(parent: Node3D, pos: Vector3, facing: Vector3, title: String, body := "", width := 1.6) -> Label3D:
-	var c := Node3D.new()
-	c.position = pos
-	c.basis = _facing_basis(facing)
-	parent.add_child(c)
-	_box(c, Vector3(width, 0.9, 0.7), Vector3(0, 0.45, 0), PANEL)
-	_box(c, Vector3(width + 0.06, 0.08, 0.76), Vector3(0, 0.04, 0), TRIM, false)
-	_box(c, Vector3(width - 0.1, 0.04, 0.04), Vector3(0, 0.22, 0.36), CYAN, false, 2.0)
-	# The control deck: a slab on top, its front edge tipped down 14 degrees, with a few lit keys.
-	var deck := Node3D.new()
-	deck.position = Vector3(0, 0.93, 0.08)
-	deck.rotation_degrees.x = 14.0
-	c.add_child(deck)
-	_box(deck, Vector3(width + 0.04, 0.06, 0.56), Vector3.ZERO, TRIM, false)
-	for i in 5:
-		_box(deck, Vector3(0.12, 0.025, 0.1), Vector3(-width / 2.0 + 0.22 + i * 0.18, 0.04, 0.12), [CYAN, HAZARD, CYAN, ALERT, CYAN][i], false, 2.0)
-	_box(deck, Vector3(width * 0.3, 0.02, 0.18), Vector3(width * 0.25, 0.04, 0.08), Color(0.05, 0.12, 0.14), false, 1.0)
-	# The screen, on a short stand at the back, leaning back a little.
-	var sw := width * 0.9
-	var sh := 0.62
-	_box(c, Vector3(0.18, 0.2, 0.12), Vector3(0, 1.02, -0.26), TRIM, false)
-	return _screen(c, Vector3(0, 1.12 + sh / 2.0 + 0.12, -0.3), Vector3(0, 0.22, 1).normalized(), Vector2(sw, sh), title, body, 28, 20)
-
-
-func _crate(parent: Node3D, size: Vector3, pos: Vector3, label := "") -> void:
-	_box(parent, size, pos + Vector3(0, size.y / 2, 0), Color(0.36, 0.38, 0.41))
-	_box(parent, Vector3(size.x + 0.04, 0.08, size.z + 0.04), pos + Vector3(0, size.y * 0.75, 0), TRIM, false)
-	_box(parent, Vector3(size.x * 0.6, 0.04, 0.02), pos + Vector3(0, size.y * 0.75, size.z / 2 + 0.03), CYAN, false, 2.0)
-	if label != "":
-		_text(parent, label, pos + Vector3(0, size.y * 0.4, size.z / 2 + 0.03), Vector3.BACK, 28, Color(0.85, 0.87, 0.9))
-
-
-func _planter(parent: Node3D, pos: Vector3) -> void:
-	_box(parent, Vector3(0.8, 0.6, 0.8), pos + Vector3(0, 0.3, 0), PANEL)
-	for i in 5:
-		var leaf := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = 0.22
-		mesh.height = 0.5
-		mesh.material = _mat(Color(0.22, 0.5, 0.25))
-		leaf.mesh = mesh
-		leaf.position = pos + Vector3(cos(i * 1.3) * 0.18, 0.75 + (i % 2) * 0.12, sin(i * 1.3) * 0.18)
-		parent.add_child(leaf)
-
-
-func _bench(parent: Node3D, pos: Vector3, facing: Vector3, length := 3.0) -> void:
-	var b := Node3D.new()
-	b.position = pos
-	b.basis = _facing_basis(facing)
-	parent.add_child(b)
-	_box(b, Vector3(length, 0.45, 0.7), Vector3(0, 0.22, 0), PANEL)
-	_box(b, Vector3(length - 0.1, 0.14, 0.62), Vector3(0, 0.52, 0.02), CUSHION, false)
-	_box(b, Vector3(length - 0.1, 0.55, 0.16), Vector3(0, 0.85, -0.3), CUSHION, false)
 
 
 # --- Space outside the windows --------------------------------------------------------------
@@ -626,7 +360,7 @@ func _build_hall() -> void:
 		var c := _console(self, _polar(deg, 11.0, 0.0), _inward(deg), "SURFACE TRANSIT" if travel else "SITE MONITOR",
 			"Shuttles to the Spaceport\nand every facility.\nPress F." if travel else "", 1.8)
 		if travel:
-			_use(self, _polar(deg, 10.3, 1.0), func(): return "Press %s to plan a trip to the surface" % _key(), func(): left.emit("terminal"))
+			_use(self, _polar(deg, 10.3, 1.0), func(): return "Press %s to plan a trip to the surface" % _key(), func(): wants_menu.emit())
 		else:
 			_boards["monitor_%d" % deg] = c
 
@@ -750,97 +484,6 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 	_light(room, Vector3(-10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
 	_light(room, Vector3(10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
 
-
-## A ship standing on a pad on its landing gear. Every ship has an exit ramp under its hull: while the
-## ship is open the ramp is down and anyone can walk up it and board; while locked the ramp is up.
-func _landed_ship(room: Node3D, pad: Vector3, yaw: float, owner: String, open: bool, mine: bool, pad_no: int) -> void:
-	var spec: Dictionary = Models.RAMPS.starter_ship
-	var root := Node3D.new()
-	root.position = pad
-	root.rotation_degrees.y = yaw
-	room.add_child(root)
-	var lift: float = 0.37 + spec.landed_height # the pad's top, plus the gear
-	var ship := Models.starter_ship()
-	ship.position = Vector3(0, lift, 0)
-	root.add_child(ship)
-	# Landing gear: four struts with feet, clear of the ramp.
-	for g in [Vector3(-1.9, 0, -2.8), Vector3(1.9, 0, -2.8), Vector3(-1.9, 0, 3.4), Vector3(1.9, 0, 3.4)]:
-		var top := lift - 1.3
-		_cyl(root, 0.12, top - 0.37, g + Vector3(0, 0.37 + (top - 0.37) / 2.0, 0), TRIM, false)
-		_cyl(root, 0.32, 0.12, g + Vector3(0, 0.43, 0), PANEL, false)
-		_cyl(root, 0.2, 0.3, g + Vector3(0, top - 0.1, 0), PANEL, false)
-	# The hull blocks walking underneath it.
-	_box(root, Vector3(4.6, 2.6, 9.6), Vector3(0, lift, 0.6), Color(0, 0, 0), true, 0.0, 0.0)
-	# The hatch, and the ramp: down to the floor when open, folded up under the hull when locked.
-	var hatch: Vector3 = spec.hatch + Vector3(0, lift, 0)
-	var width: float = spec.width
-	_box(root, Vector3(width, 0.04, 1.8), hatch + Vector3(0, 0.02, 0.9), Color(0.03, 0.03, 0.04), false)
-	var foot := Vector3(0, 0.03, hatch.z + 4.2)
-	var run := foot - hatch
-	var ramp := Node3D.new()
-	root.add_child(ramp)
-	if open:
-		ramp.position = (hatch + foot) / 2.0
-		ramp.rotation.x = atan2(-run.y, run.z)
-		_light(root, hatch + Vector3(0, -0.4, 0.6), Color(1.0, 0.85, 0.6), 1.2, 4.0)
-	else:
-		ramp.position = hatch + Vector3(0, -0.06, run.length() / 2.0 - 0.3)
-	var length := run.length()
-	_box(ramp, Vector3(width, 0.1, length), Vector3.ZERO, Color(0.4, 0.42, 0.45), open)
-	for s in [-1, 1]:
-		_box(ramp, Vector3(0.06, 0.06, length - 0.2), Vector3(s * (width / 2.0 - 0.05), 0.07, 0), CYAN if open else ALERT, false, 2.5)
-	for k in range(1, int(length / 0.45)):
-		_box(ramp, Vector3(width - 0.2, 0.03, 0.05), Vector3(0, 0.06, -length / 2.0 + k * 0.45), TRIM, false)
-	var tag := Label3D.new()
-	tag.text = "%s\n%s" % ["YOUR SHIP" if mine else "%s'S SHIP" % owner.to_upper(), "OPEN · RAMP DOWN" if open else "LOCKED"]
-	tag.position = Vector3(0, lift + 3.4, 1.0)
-	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.pixel_size = 0.004
-	tag.font_size = 64
-	tag.outline_size = 8
-	tag.modulate = Color(0.45, 1.0, 0.6) if open else ALERT
-	root.add_child(tag)
-	var entry := Marker3D.new()
-	entry.position = foot + Vector3(0, 0.5, -1.2) # a step or two up the ramp
-	root.add_child(entry)
-	var spawn := Marker3D.new()
-	spawn.position = foot + Vector3(0, 0.1, 2.6)
-	root.add_child(spawn)
-	_ships.append({"root": root, "entry": entry, "spawn": spawn, "owner": owner, "open": open, "mine": mine, "pad": pad_no})
-
-
-## The landed ship nearest the player, if any is close: {"ship", "distance"}.
-func _near_ship(range_m: float) -> Dictionary:
-	var best := {}
-	for sh in _ships:
-		var e: Vector3 = sh.entry.global_position
-		var d := Vector2(e.x - _player.global_position.x, e.z - _player.global_position.z).length()
-		if d < range_m and (best.is_empty() or d < best.distance):
-			best = {"ship": sh, "distance": d}
-	return best
-
-
-## Walking up an open ship's ramp takes you aboard. Your own ship takes you back to its cockpit.
-func _check_ramps() -> void:
-	var near := _near_ship(1.1)
-	if near.is_empty():
-		return
-	var sh: Dictionary = near.ship
-	if not sh.open or _player.global_position.y < 0.15:
-		return
-	if sh.mine:
-		left.emit("ship")
-	else:
-		_stand_at(sh.spawn)
-		_say("You step aboard %s's ship and look around. Ship interiors come with the ship cabin." % sh.owner, 5.0)
-
-
-## Puts the player on a marker, facing away from the ship it belongs to.
-func _stand_at(marker: Marker3D) -> void:
-	_player.global_position = marker.global_position
-	_player.velocity = Vector3.ZERO
-	var away: Vector3 = marker.global_basis.z
-	_player.rotation.y = atan2(-away.x, -away.z)
 
 
 func _build_services(room: Node3D, w: float, d: float, h: float) -> void:
@@ -1094,114 +737,18 @@ func _build_observation(room: Node3D, w: float, d: float, h: float) -> void:
 	_screen(room, Vector3(-w / 2.0 + 0.25, 3.2, 3.0), Vector3.RIGHT, Vector2(1.0, 1.4), "VIEW", "Look down: %s" % _planet.get("name", "the planet"), 22, 20)
 
 
-# --- The player ---------------------------------------------------------------------------
-
-func _build_player() -> void:
-	_player = CharacterBody3D.new()
-	var shape := CollisionShape3D.new()
-	shape.shape = CapsuleShape3D.new()
-	shape.shape.radius = 0.35
-	shape.shape.height = 1.8
-	shape.position.y = 0.9
-	_player.add_child(shape)
-	add_child(_player)
-	_camera = Camera3D.new()
-	_camera.position.y = EYE
-	_camera.fov = 80.0
-	_camera.near = 0.05
-	_camera.far = 16000.0
-	_player.add_child(_camera)
-	_camera.make_current()
-	# Arrive down your ship's ramp on pad 06, facing the concourse.
-	_build_player_reset()
-
-
 ## For tests and screenshots: stand somewhere in a compartment's space, looking at a point in it.
 func view(slot: int, at: Vector3, look: Vector3) -> void:
-	var space: Node3D = _rooms[slot] if slot >= 0 else self
-	_player.global_position = space.to_global(at) - Vector3(0, EYE, 0)
-	_player.velocity = Vector3.ZERO
-	var dir: Vector3 = space.to_global(look) - space.to_global(at)
-	_player.rotation.y = atan2(-dir.x, -dir.z)
-	_pitch = atan2(dir.y, Vector2(dir.x, dir.z).length())
-	_camera.rotation.x = _pitch
+	view_at(_rooms[slot] if slot >= 0 else self, at, look)
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if _chat.is_typing():
-		return
-	if event.is_action_pressed("chat"):
-		_chat.open()
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_pressed("menu"):
-		left.emit("ship")
-		get_viewport().set_input_as_handled()
-		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var sens: float = (controls.mouse_sensitivity if controls else 1.0) * 0.0022
-		var dy: float = -event.relative.y if controls and controls.invert_mouse else event.relative.y
-		_look(-event.relative.x * sens, -dy * sens)
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and controls:
-		controls.capture_mouse()
-	if event.is_action_pressed("interact"):
-		var u := _nearest_use()
-		if not u.is_empty():
-			u.action.call()
-
-
-func _look(yaw: float, pitch: float) -> void:
-	_player.rotate_y(yaw)
-	_pitch = clampf(_pitch + pitch, -1.45, 1.45)
-	_camera.rotation.x = _pitch
-
-
-func _physics_process(delta: float) -> void:
-	var typing: bool = _chat.is_typing()
-	var input := Vector2.ZERO if typing else Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
-	var look := Vector2.ZERO if typing else Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down")
-	if look.length() > 0.1:
-		_look(-look.x * LOOK_SPEED * delta, -look.y * LOOK_SPEED * delta)
-	var speed := SPRINT if Input.is_action_pressed("foot_sprint") and not typing else WALK
-	var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
-	_player.velocity.x = dir.x * speed
-	_player.velocity.z = dir.z * speed
-	if _player.is_on_floor():
-		if Input.is_action_just_pressed("foot_jump") and not typing:
-			_player.velocity.y = JUMP
-	else:
-		_player.velocity.y -= GRAVITY * delta
-	_player.move_and_slide()
-	if _player.global_position.y < -10.0:
-		_build_player_reset()
-	_check_ramps()
+func _tick(delta: float) -> void:
 	if _globe:
 		_globe.rotate_y(0.12 * delta)
 	_price_time -= delta
 	if _price_time <= 0.0:
 		_price_time = 2.0
 		_refresh_prices()
-	_update_hud(delta)
-
-
-func _build_player_reset() -> void:
-	for sh in _ships:
-		if sh.mine:
-			_stand_at(sh.spawn)
-
-
-func _nearest_use() -> Dictionary:
-	var best := {}
-	var best_d := REACH
-	var eye := _camera.global_position
-	var forward := -_camera.global_basis.z
-	for u in _uses:
-		var p: Vector3 = u.node.global_position
-		var d := Vector2(p.x - eye.x, p.z - eye.z).length()
-		if d < best_d and forward.dot((p - eye).normalized()) > 0.2:
-			best_d = d
-			best = u
-	return best
 
 
 ## Which compartment the player is in, from where they stand on the station's plan.
@@ -1219,74 +766,6 @@ func _location() -> String:
 
 # --- HUD and live boards ------------------------------------------------------------------
 
-func _build_hud() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
-	_where = Label.new()
-	_where.position = Vector2(20, 16)
-	_where.add_theme_font_size_override("font_size", 20)
-	_where.modulate = SCREEN_TEXT
-	layer.add_child(_where)
-	_prompt = Label.new()
-	_prompt.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_prompt.position.y -= 120
-	_prompt.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_prompt.add_theme_font_size_override("font_size", 22)
-	layer.add_child(_prompt)
-	_message = Label.new()
-	_message.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_message.position.y += 70
-	_message.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_message.add_theme_font_size_override("font_size", 20)
-	layer.add_child(_message)
-	_chat = ChatBox.new()
-	_chat.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_chat.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_chat.position += Vector2(20, -40)
-	_chat.modulate = SCREEN_TEXT.lightened(0.3)
-	layer.add_child(_chat)
-	var dot := ColorRect.new()
-	dot.color = Color(1, 1, 1, 0.7)
-	dot.size = Vector2(4, 4)
-	dot.set_anchors_preset(Control.PRESET_CENTER)
-	dot.position -= Vector2(2, 2)
-	layer.add_child(dot)
-
-
-func _update_hud(delta: float) -> void:
-	_where.text = "%s · %s\nW A S D walk   Shift run   %s use   %s chat   Esc back to your ship" % [_station_name, _location(), _key(), _chat_key()]
-	var u := _nearest_use()
-	_prompt.text = u.prompt.call() if not u.is_empty() else ""
-	var near := _near_ship(4.5)
-	if _prompt.text == "" and not near.is_empty():
-		var sh: Dictionary = near.ship
-		if sh.mine:
-			_prompt.text = "Your ship, pad %02d. Walk up the ramp to board" % sh.pad
-		elif sh.open:
-			_prompt.text = "%s's ship is open. Walk up the ramp to step aboard" % sh.owner
-		else:
-			_prompt.text = "%s's ship is locked, ramp up" % sh.owner
-	_message_time -= delta
-	_message.visible = _message_time > 0.0
-
-
-func _say(text: String, seconds := 4.0) -> void:
-	_message.text = text
-	_message_time = seconds
-	if _message:
-		_message.visible = true
-
-
-func _chat_key() -> String:
-	return controls.binding_text("chat", false) if controls else "Enter"
-
-
-func _key() -> String:
-	return controls.binding_text("interact", false) if controls else "F"
-
-
 func _on_state(_s: Dictionary) -> void:
 	_planet = Net.planet(planet_id)
 	_refresh_boards()
@@ -1298,10 +777,6 @@ func _on_chat(sender: String, _role: String, text: String) -> void:
 		_chat_lines.pop_front()
 	if _boards.has("chat"):
 		_boards.chat.text = "\n".join(_chat_lines)
-
-
-func _me() -> Dictionary:
-	return Net.state.get("pilots", {}).get(Net.my_name, {}) if not Net.state.is_empty() else {}
 
 
 func _sites() -> Array:

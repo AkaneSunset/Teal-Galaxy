@@ -163,9 +163,9 @@ func _process(delta: float) -> void:
 		"sell":
 			if _explorer._raid != null:
 				_finish(false, "still in the raid after leaving")
-			if _explorer._info.text.contains("Raided loot"):
+			if _explorer._station != null and _explorer._station.seated and not _explorer._me().get("stash", []).is_empty():
 				_shot("7-back-in-the-ship")
-				_finish(_took_from_vault, "raided the vault, extracted with %d stacks worth %d credits, back in the ship" % [_result.kept.size(), int(_result.value)])
+				_finish(_took_from_vault, "raided the vault, extracted with %d stacks worth %d credits, back in your ship in the hangar" % [_result.kept.size(), int(_result.value)])
 
 
 func _facility() -> Dictionary:
