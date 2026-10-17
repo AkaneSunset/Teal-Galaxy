@@ -4,7 +4,8 @@ A galactic city builder you play on your phone, set in a galaxy you explore on P
 Phone players (Builders) grow star systems and planetary bases. PC players (Explorers)
 fly to those places, take the jobs builders post, and play together.
 
-This is the first playable prototype: one star system, one planet, one job loop.
+This is an early playable prototype: one star system with a planet for every Builder, jobs, fleets,
+walkable space stations, and first-person raids on Builders' facilities.
 
 ## What's here
 
@@ -77,6 +78,8 @@ door for raids, placed on any free tiles. Tap a piece to remove it for half its 
 A new site also comes scattered with obstacles that block building until you clear them for credits:
 Boulders (120 credits, leave 10 metal), Ice crystals (40 credits, leave 4 ice) and Old wreckage
 (200 credits, leave 25 metal and 2 alloy). Tap one and press *Clear*.
+Every base and site has its own place on its planet's surface, well apart from the others; the
+High Port's planet hologram marks each one there.
 
 **Ship Foundry** (60 metal, 10 ice, needs a Spaceport, one per base) builds warships for your navy.
 Tap it and open the **Shipyard** to queue Corvettes (25 metal, 1 min), Frigates (50 metal, 10 alloy, 3 min)
@@ -127,63 +130,86 @@ and walk down the ramp into the station, fly down to the planet's base (your shi
 Builder's Spaceport, in the base the Builder sees on their phone, where you deliver jobs, sell to the
 Fence or walk around), raid one of the planet's facilities, or launch back into space. After a raid
 you're back in your seat in the hangar. Walking back up your ship's ramp sits you down again; Esc
-only pauses, since the way out of a place is your ship. Picking a facility in the menu flies your ship down to
-the facility. A raid starts from overhead: click where you want to be dropped off (on open ground, off
-the site and outside every turret's reach, shown as red rings) and confirm. Your ship flies down, drops
-you off and leaves; it comes back, to a pad beside the blast door, only once every outside defence
-(turrets, the core's turrets too, guard posts and power plants) is destroyed, even if you sneaked in
-through a vent. On foot and in first person:
+only pauses, since the way out of a place is your ship.
 
+### How a raid plays
 
-- **Getting in.** The map outside is the site exactly as the Builder laid it out, drawn with the
-  Builder's own models on the same terrain: their turrets, guard posts, walls, power plant and
-  leftover obstacles, plus the turrets the security tier mounts on the core. Shoot defences to
-  destroy them. With the power plant down the core's **blast door** opens; with no power plant the
-  core runs on its own power and the door never opens. Either way you can cut through one of the
-  core's **vent** grates instead (6 s, silent).
-- **Going down.** The facility has one level below ground for each level of its core building, up
-  to five. Deeper levels are bigger, with more guards and turrets and rarer loot. Each level's lift
-  down is in the room furthest from where you arrived. Every minute inside brings a bigger wave of
-  guards.
-- **Getting out.** The **safe room** on the deepest level holds the vault, behind amber doors: swipe
-  the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A Vault
-  Warden may be waiting there. Opening the vault starts the **self-destruct** (70 s plus 30 s per
-  level): ride the lifts back up and board your ship before it ends, or you die with the facility,
-  lose your ship and keep only your Secure Case.
+Picking a facility in the ship's menu flies you to it. Everything after that is on foot, in first
+person:
+
+1. **Pick where to land.** The raid opens on an overhead map of the site and the ground around it.
+   Each turret's reach is a red ring. Click a spot on open ground (off the site, outside every red
+   ring, within 120 m of the core) and confirm. Your ship flies in, drops you off beside it facing
+   the site, and **leaves**.
+2. **Break the outside.** The site is exactly as the Builder laid it out, drawn with their own models
+   on the same terrain: turrets, guard posts, walls, power plant and leftover obstacles, plus the
+   turrets the security tier mounts on the core. Shoot defences (or grenade them) to destroy them.
+   With the power plant down the core's **blast door** opens; with no power plant the core runs on
+   its own power and the door never opens, so cut through one of its **vent** grates instead (6 s,
+   silent). Your ship comes back, to a pad beside the blast door, **only once every outside defence
+   is destroyed**: turrets (the core's too), guard posts and power plants. Sneaking in through a vent
+   doesn't change that. The HUD shows how many are left.
+3. **Clear down to the vault.** The facility has one level below ground for each level of its core
+   building, up to five. Deeper levels are bigger, with more guards and turrets and rarer loot. Each
+   level's lift down is in the room furthest from where you arrived, and every minute inside brings a
+   bigger wave of guards. The **safe room** on the deepest level holds the vault behind amber doors:
+   swipe the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A
+   Vault Warden may be waiting there.
+4. **Escape the self-destruct.** Opening the vault starts the **self-destruct** (70 s plus 30 s per
+   level). Ride the lifts back up and board your ship at the blast door (stand on its pad for 3 s)
+   before it ends, or you die with the facility, lose your ship and keep only your Secure Case.
+
 - **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
   Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
-- **Health and armour.** 100 health plus the armour of your vest, in 25-point segments; armour takes
-  damage first and nothing grows back. Every raid starts in a 50 vest; 75 and 100 vests turn up
-  inside, mostly deeper down. **F** on one puts it on and leaves yours (with what armour it had left);
-  vests are for the raid only.
-- **Healing** lives in your **pouch**, not the backpack: syringes (+25 health, 5 s, up to 4), med kits
-  (full health, 8 s, up to 2), shield cells (+25 armour, 3 s, up to 4) and shield batteries (full
-  armour, 5 s, up to 2). **Tap H** for the best item for what you're missing (armour first), or
-  **hold H** for the wheel: point at a slice and let go (let go in the middle to cancel). You walk
-  slowly while using one; firing, sprinting or switching weapons stops it without using it up, but
-  taking damage doesn't. Green-cross **med cabinets** on the walls of about one room in three (more
-  deeper down) hold healing and sometimes a vest, and loose syringes and shield cells lie on shelves
-  and floors. What's in your pouch when you extract comes with you next raid; die and it's lost. An
-  empty pouch is refilled with the basic kit (2 syringes, a med kit, 2 cells, a battery).
-- **The grenade launcher** is your second weapon: 7 rounds for the whole raid, one a second. Grenades
-  arc and burst on impact (6 m, up to 120 damage at the centre, three times that against the site's
-  defences and turrets). Walls stop the blast, it's loud, and your own does half damage to you. Aim to
-  see where it will land.
 - **Heat** rises with time, gunfire, explosions, being spotted and bodies found. At Alerted guards
   hunt you and turrets wake; Purge sends an elite team. Standing guard posts send out new guards.
-- **Leave** once your ship is back by standing on its pad for 3 s (in the first 2 minutes you can also recall it from the pause menu, keeping nothing). If the raid clock runs out you're
-  missing in action. You end up back in your ship's pilot seat in the High Port's hangar.
-- Extracted loot goes to your stash; sell it to the Fence (the black market terminal in a High Port's Cantina, or any Spaceport) for half its value.
+- **Bailing out:** in the first 2 minutes the pause menu can recall your ship, ending the raid with
+  nothing you found. If the raid clock runs out you're missing in action.
+- Extracted loot goes to your stash; sell it to the Fence (the black market terminal in a High
+  Port's Cantina, or any Spaceport) for half its value.
 
-| On foot | Keyboard and mouse | Gamepad |
+### Your kit: health, armour, healing and weapons
+
+- **Health and armour,** as in Apex Legends: 100 health plus the armour of your vest, shown in
+  25-point segments. Armour takes damage first and nothing grows back. Every raid starts in a
+  50-armour vest; 75 (Heavy) and 100 (Assault) vests turn up inside, mostly on deeper levels. **F**
+  on one puts it on and leaves yours behind, with what armour it had left. Vests are for the raid only.
+- **The healing pouch** is separate from the backpack:
+
+  | Item | Restores | Takes | Pouch holds |
+  | --- | --- | --- | --- |
+  | Syringe | 25 health | 5 s | 4 |
+  | Med kit | all health | 8 s | 2 |
+  | Shield cell | 25 armour | 3 s | 4 |
+  | Shield battery | all armour | 5 s | 2 |
+
+  **Tap H** to use the best item for what you're missing (armour first; the small item for a little,
+  the big one for most of a bar). **Hold H** for the heal wheel: point at a slice with the mouse or
+  right stick and let go, or let go in the middle to cancel. The raid doesn't pause. You walk slowly
+  while using one, and a ring round the crosshair fills; firing, sprinting or switching weapons stops
+  it without using it up, but taking damage doesn't. What's in your pouch when you extract comes with
+  you next raid (the server keeps the counts); die and it's lost. An empty pouch is refilled with the
+  basic kit: 2 syringes, a med kit, 2 shield cells and a battery.
+- **Health supplies inside:** white **med cabinets** with a green cross hang on the walls of about one
+  room in three (more deeper down). Search them like lockers for healing and sometimes a vest. Loose
+  syringes and shield cells lie on shelves and floors; **F** picks them up. If your pouch is full the
+  rest stays where it is.
+- **Two weapons.** The **rifle** (30-round magazine, 150 spare) and the **grenade launcher**: 7 rounds
+  for the whole raid, one a second. Grenades arc and burst on impact: 6 m across, up to 120 damage at
+  the centre falling off to nothing at the edge, and three times that against the site's defences and
+  turrets. Walls stop the blast, it's loud, and your own does half damage to you. While aiming the
+  launcher a dotted arc shows where it will land. Switching takes half a second and stops a reload.
+
+| Raid | Keyboard and mouse | Gamepad |
 | --- | --- | --- |
+| Pick a landing spot / confirm | Click / F or Enter | Left stick / A |
 | Move, look | W A S D, mouse (or arrow keys) | Left stick, right stick |
 | Sprint / crouch (quiet) / jump | Shift / C / Space | Left stick click / B / Y |
 | Fire / aim / reload | Left / right mouse / R | RT / LT / X |
 | Rifle / grenade launcher | 1 / 2, or the mouse wheel | D-pad right |
 | Search, swipe, drill, silent takedown from behind | F | A |
 | Inventory / heal (tap: best item, hold: wheel) | Tab / H | Back / D-pad up (right stick picks a slice) |
-| Pause (bail out in the first 2 minutes) | Esc | Start |
+| Pause (recall your ship and bail out in the first 2 minutes) | Esc | Start |
 
 **Inside the High Port.** *Leave your seat* takes you down your ship's ramp into the station
 (`game/station.gd`), built from Akane's concept art. Every ship has an exit ramp: a landed ship that's
@@ -244,9 +270,11 @@ cd server && npm test     # the ice job, raid rules, and a full raid over real W
 ```
 
 `game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
-Builder lays out a site and upgrades it to level 3, then the pilot lands, checks the site matches,
-blows up the power plant, rides the lifts to the deepest level, find the keycard, open the vault, get back up and
-board the ship (instructions at the top of `game/tests/raid_test.gd`).
+Builder lays out a site and upgrades it to level 3, then the pilot picks a landing spot from overhead,
+is dropped off, checks the site matches, blows up the power plant, checks armour, healing, the heal
+wheel, the grenade launcher and supplies on level 1, rides the lifts to the deepest level, finds the
+keycard, opens the vault, gets back up, destroys the remaining defences so the ship returns, and
+boards it (instructions at the top of `game/tests/raid_test.gd`).
 
 `game/tests/flight_test.gd` checks the flight model on its own:
 `godot --headless --path game --script res://tests/flight_test.gd`
