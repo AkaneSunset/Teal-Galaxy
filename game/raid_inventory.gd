@@ -5,6 +5,7 @@ extends Control
 ##
 ## Left-click moves an item between the container and the backpack.
 ## Right-click moves it into or out of the Secure Case, which you keep even if you die.
+## Healing goes straight into the pouch (shown under the backpack), and clicking a vest puts it on.
 
 signal take(uid: String, to: String)
 signal drop(uid: String)
@@ -25,6 +26,7 @@ var _container_grid := Vector2i.ZERO
 var _slots: Array = [] # container: revealed items, or placeholders {uid, rect, revealIn}
 var _reveal_at := {} # uid -> msec when its search finishes
 var _status := ""
+var _pouch_text := ""
 var _area: Control
 var _help: Label
 
@@ -49,7 +51,7 @@ func _ready() -> void:
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_help.modulate = Color(1, 1, 1, 0.7)
-	_help.text = "Left-click: take from the container / put back.   Right-click: into or out of the Secure Case (kept if you die).\nTab, Esc or F to close."
+	_help.text = "Left-click: take from the container / put back.   Right-click: into or out of the Secure Case (kept if you die).\nHealing goes in your pouch; click a vest to put it on.   Tab, Esc or F to close."
 	add_child(_help)
 
 
@@ -57,6 +59,13 @@ func set_inventory(items: Array, backpack: Array, secure: Array) -> void:
 	_items = items
 	_backpack = Vector2i(int(backpack[0]), int(backpack[1]))
 	_secure = Vector2i(int(secure[0]), int(secure[1]))
+	if _area:
+		_area.queue_redraw()
+
+
+## The pouch and the worn vest, as a line of text under the backpack.
+func set_pouch(text: String) -> void:
+	_pouch_text = text
 	if _area:
 		_area.queue_redraw()
 
@@ -125,6 +134,9 @@ func _draw_grids() -> void:
 		carried_value += int(it.value) * int(it.qty)
 		_draw_item(it, o[it.grid])
 	_area.draw_string(font, o.backpack + Vector2(0, _backpack.y * CELL + 24), "Carrying %d credits of loot" % carried_value, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))
+	var pouch_lines := _pouch_text.split("\n")
+	for i in pouch_lines.size():
+		_area.draw_string(font, o.backpack + Vector2(0, _backpack.y * CELL + 48 + i * 20), pouch_lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.6, 0.95, 0.65) if i == 0 else Color(0.7, 0.8, 1.0))
 	if _container_name != "":
 		for s in _slots:
 			_draw_item(s, o.container)
@@ -135,6 +147,12 @@ func _draw_grids() -> void:
 		var secure_ok: bool = Net.catalog.get("items", {}).get(it.item, {}).get("secure", true) != false
 		var lines := ["%s  x%d" % [it.name, int(it.qty)], "%s, %s" % [it.rarity.capitalize(), it.cat], "Worth %d credits each (%d per cell)" % [int(it.value), int(it.value) / (int(it.size[0]) * int(it.size[1]))],
 			"Fits the Secure Case" if secure_ok else "Too big for the Secure Case"]
+		if it.cat == "medical":
+			lines[2] = "Goes in your pouch (kept if you extract)"
+			lines[3] = "Use it with the heal key"
+		elif it.cat == "armor":
+			lines[2] = "%d / %d armour" % [int(it.get("armor", 0)), int(it.get("vest", 0))]
+			lines[3] = "Click to put on (leaves yours here)"
 		var p := _area.get_local_mouse_position() + Vector2(16, 16)
 		_area.draw_rect(Rect2(p, Vector2(270, 84)), Color(0.02, 0.04, 0.06, 0.95))
 		for i in lines.size():

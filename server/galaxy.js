@@ -254,6 +254,7 @@ function pilot(g, name) {
   const p = g.pilots[name];
   p.stash ||= []; // loot extracted from raids: [{item, qty, fih}]
   p.raids ||= { runs: 0, extracted: 0 };
+  p.pouch ||= {}; // healing extracted with last raid: item -> count (empty: the starter kit)
   return p;
 }
 
@@ -483,7 +484,7 @@ function startRaid(g, name, planetId, slot, now, seed, lootSeed) {
   if (now < b.cooldownUntil) return fail(`security is on alert for another ${Math.ceil((b.cooldownUntil - now) / 1000)} s`);
   const fname = facilityName(g, planetId, b);
   const site = g.system.planets.find((p) => p.id === planetId);
-  const run = H.startRun({ facility: b, facilityName: fname, pilot: name, seed, lootSeed, now, site });
+  const run = H.startRun({ facility: b, facilityName: fname, pilot: name, seed, lootSeed, now, site, pouch: pilot(g, name).pouch });
   run.planet = planetId;
   run.slot = slot;
   pilot(g, name).raids.runs += 1;
@@ -527,6 +528,7 @@ function endRaid(g, run, outcome, now) {
   }
   const p = pilot(g, run.pilot);
   for (const k of result.kept) p.stash.push(k);
+  p.pouch = result.pouch;
   if (outcome === 'extracted') p.raids.extracted += 1;
   g.raids = g.raids.filter((r) => r.id !== run.id);
   const words = { extracted: 'escaped from', killed: 'was killed in', destroyed: 'went down with the self-destruct of', mia: 'was caught when the clock ran out in', bailed: 'bailed out of' };

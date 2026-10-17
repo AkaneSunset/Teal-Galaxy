@@ -128,7 +128,7 @@ Builder's Spaceport, in the base the Builder sees on their phone, where you deli
 Fence or walk around), raid one of the planet's facilities, or launch back into space. After a raid
 you're back in your seat in the hangar. Walking back up your ship's ramp sits you down again; Esc
 only pauses, since the way out of a place is your ship. Picking a facility in the menu flies your ship down to
-the facility's landing pad. On foot and in first person:
+the facility's landing pad, about 50 m off the site's south edge and out of its turrets' reach. On foot and in first person:
 
 
 - **Getting in.** The map outside is the site exactly as the Builder laid it out, drawn with the
@@ -143,11 +143,28 @@ the facility's landing pad. On foot and in first person:
   guards.
 - **Getting out.** The **safe room** on the deepest level holds the vault, behind amber doors: swipe
   the **access keycard** (hidden in a container on that level) or drill it (loud, 30 s). A Vault
-  Warden may be waiting there. Opening the vault starts the **self-destruct** (60 s plus 30 s per
+  Warden may be waiting there. Opening the vault starts the **self-destruct** (70 s plus 30 s per
   level): ride the lifts back up and board your ship before it ends, or you die with the facility,
   lose your ship and keep only your Secure Case.
 - **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
   Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
+- **Health and armour.** 100 health plus the armour of your vest, in 25-point segments; armour takes
+  damage first and nothing grows back. Every raid starts in a 50 vest; 75 and 100 vests turn up
+  inside, mostly deeper down. **F** on one puts it on and leaves yours (with what armour it had left);
+  vests are for the raid only.
+- **Healing** lives in your **pouch**, not the backpack: syringes (+25 health, 5 s, up to 4), med kits
+  (full health, 8 s, up to 2), shield cells (+25 armour, 3 s, up to 4) and shield batteries (full
+  armour, 5 s, up to 2). **Tap H** for the best item for what you're missing (armour first), or
+  **hold H** for the wheel: point at a slice and let go (let go in the middle to cancel). You walk
+  slowly while using one; firing, sprinting or switching weapons stops it without using it up, but
+  taking damage doesn't. Green-cross **med cabinets** on the walls of about one room in three (more
+  deeper down) hold healing and sometimes a vest, and loose syringes and shield cells lie on shelves
+  and floors. What's in your pouch when you extract comes with you next raid; die and it's lost. An
+  empty pouch is refilled with the basic kit (2 syringes, a med kit, 2 cells, a battery).
+- **The grenade launcher** is your second weapon: 7 rounds for the whole raid, one a second. Grenades
+  arc and burst on impact (6 m, up to 120 damage at the centre, three times that against the site's
+  defences and turrets). Walls stop the blast, it's loud, and your own does half damage to you. Aim to
+  see where it will land.
 - **Heat** rises with time, gunfire, explosions, being spotted and bodies found. At Alerted guards
   hunt you and turrets wake; Purge sends an elite team. Standing guard posts send out new guards.
 - **Leave** any time by standing on your ship's pad for 3 s. If the raid clock runs out you're
@@ -159,8 +176,9 @@ the facility's landing pad. On foot and in first person:
 | Move, look | W A S D, mouse (or arrow keys) | Left stick, right stick |
 | Sprint / crouch (quiet) / jump | Shift / C / Space | Left stick click / B / Y |
 | Fire / aim / reload | Left / right mouse / R | RT / LT / X |
+| Rifle / grenade launcher | 1 / 2, or the mouse wheel | D-pad right |
 | Search, swipe, drill, silent takedown from behind | F | A |
-| Inventory / use a trauma kit | Tab / H | Back / D-pad up |
+| Inventory / heal (tap: best item, hold: wheel) | Tab / H | Back / D-pad up (right stick picks a slice) |
 | Pause (bail out in the first 2 minutes) | Esc | Start |
 
 **Inside the High Port.** *Leave your seat* takes you down your ship's ramp into the station

@@ -5,6 +5,9 @@ extends Node
 ## through the blast door, rides the lifts down to the deepest level, searches containers until the
 ## keycard turns up, opens the safe room's vault, takes something from it, rides back up before the
 ## self-destruct, and boards the ship, ending back in the pilot's seat in the hangar.
+## On level 1 it also checks the combat kit: armour soaking damage, healing from the pouch (a tap
+## and the wheel, and cancelling), the grenade launcher (swap, rounds, blast falloff, walls,
+## damage to yourself) and picking up supplies.
 ## (Selling it is covered by the server tests.)
 ##   cd server && DEMO=1 BUILD_SPEED=0 npm start
 ##   godot --headless --path game res://tests/raid.tscn
@@ -32,6 +35,8 @@ var _key := "" # the site being raided
 var _port := "" # the planet whose High Port the pilot docks at
 var _laid_out := false
 var _overview: Camera3D
+var _t := 0.0 # time in the current combat check
+var _pouch_before := {}
 
 
 func _ready() -> void:
@@ -119,6 +124,18 @@ func _process(delta: float) -> void:
 					_finish(false, "no Builder model for piece " + id)
 			if _raid.floors != 3:
 				_finish(false, "a level 3 facility should have 3 levels, not %d" % _raid.floors)
+			# You land well out of the site's turret range, beside your ship, facing the site.
+			var me: Vector3 = _raid._player.position
+			for id in _raid._pieces:
+				var pc: Dictionary = _raid._pieces[id]
+				if pc.data.type == "turret" and Vector2(me.x - pc.data.pos[0], me.z - pc.data.pos[1]).length() < 38.0:
+					_finish(false, "spawned within reach of turret %s" % id)
+			if me.distance_to(_raid._pad()) > 8.0 or (-_raid._player.global_basis.z).dot(-me.normalized()) < 0.8:
+				_finish(false, "not beside the ship facing the site: %s" % me)
+			if _raid.armor != 50.0 or _raid.vest_item != "vest50" or _raid.grenades != 7 or _raid.health != 100.0:
+				_finish(false, "should start with 100 health, a 50 vest and 7 grenades")
+			if _counts(_raid.pouch) != _counts({"syringe": 2, "medkit": 1, "cell": 2, "battery": 1}):
+				_finish(false, "a new raider gets the starter pouch, not %s" % _raid.pouch)
 			for c in _raid.layout.containers:
 				if c.type != "vault" and int(c.floor) == _raid.floors:
 					_queue.append(c.id)
@@ -149,6 +166,19 @@ func _process(delta: float) -> void:
 					power = id
 			if power == "":
 				_finish(false, "the Builder's power plant isn't in the raid")
+			# A grenade does three times the damage to the site's defences.
+			for id in _raid._pieces:
+				var pc: Dictionary = _raid._pieces[id]
+				if pc.data.type == "turret" and not pc.dead and not pc.data.get("ring", false):
+					var body: StaticBody3D = pc.node
+					var half: float = body.get_child(0).shape.size.x / 2.0
+					var inward := (-body.global_position * Vector3(1, 0, 1)).normalized()
+					var before: float = pc.health
+					_raid.burst(body.global_position * Vector3(1, 0, 1) + Vector3(0, 1.0, 0) + inward * (half + 2.0))
+					var want: float = _raid.blast_damage(2.0) * 3.0
+					if absf(before - pc.health - want) > 1.0:
+						_finish(false, "a grenade 2 m from turret %s did %.0f, expected %.0f" % [id, before - pc.health, want])
+					break
 			_raid.destroy_piece(power)
 			_wait = 0.6
 			_step = "door"
@@ -162,6 +192,146 @@ func _process(delta: float) -> void:
 		"inside-core":
 			if not _raid.breached or _raid._floor != 1:
 				return
+			_step = "armour"
+		"armour":
+			# Armour soaks damage first; nothing grows back.
+			_raid.god_mode = false
+			_raid._hurt(30.0, Vector3.ZERO)
+			var after_one := [_raid.armor, _raid.health]
+			_raid._hurt(30.0, Vector3.ZERO)
+			_raid.god_mode = true
+			if after_one != [20.0, 100.0] or _raid.armor != 0.0 or _raid.health != 90.0:
+				_finish(false, "armour should soak first: %s then %s" % [after_one, [_raid.armor, _raid.health]])
+			# A tap of the heal key picks armour before health, and the big item for an empty bar.
+			if _raid.best_item() != "battery":
+				_finish(false, "with no armour left a tap should use the battery, not " + _raid.best_item())
+			_raid.use_best()
+			_t = 0.0
+			_step = "heal"
+		"heal":
+			_t += delta
+			if _t > 0.5 and _t < 0.6:
+				_shot("8-using-battery")
+				if _raid._using.is_empty():
+					_finish(false, "using the battery didn't start")
+			if _raid.armor >= 50.0:
+				if _t < 4.5:
+					_finish(false, "the battery took %.1f s, not 5" % _t)
+				if int(_raid.pouch.get("battery", 0)) != 0:
+					_finish(false, "the server should have counted the battery off")
+				if _raid.best_item() != "syringe":
+					_finish(false, "10 health down should pick the syringe, not " + _raid.best_item())
+				_step = "radial"
+			elif _t > 9.0:
+				_finish(false, "the battery never finished")
+		"radial":
+			# Hold for the wheel: point at a slice, the centre cancels.
+			_raid.open_radial()
+			_raid._radial_vec = Vector2(80, -60)
+			_wait = 0.2
+			_step = "radial-shot"
+		"radial-shot":
+			_shot("9-heal-wheel")
+			var picks := []
+			for v in [Vector2(-80, -60), Vector2(80, -60), Vector2(80, 60), Vector2(-80, 60), Vector2(10, 5)]:
+				_raid._radial_vec = v
+				picks.append(_raid.radial_choice())
+			if picks != ["syringe", "cell", "battery", "medkit", ""]:
+				_finish(false, "wheel slices: %s" % [picks])
+			_raid.close_radial(true) # in the middle: cancelled
+			if _raid._use_asked != "" or not _raid._using.is_empty():
+				_finish(false, "letting go in the middle should cancel")
+			# Starting a syringe and swapping weapons stops it without using one.
+			_pouch_before = _raid.pouch.duplicate()
+			_raid.use_item("syringe")
+			_t = 0.0
+			_step = "cancel"
+		"cancel":
+			_t += delta
+			if _raid._using.is_empty():
+				if _t > 3.0:
+					_finish(false, "the syringe never started")
+				return
+			_raid.select_weapon("launcher")
+			_wait = 0.8
+			_step = "launcher"
+		"launcher":
+			if not _raid._using.is_empty() or _counts(_raid.pouch) != _counts(_pouch_before):
+				_finish(false, "swapping should cancel the syringe without using it: %s" % _raid.pouch)
+			if _raid.weapon != "launcher" or _raid._swap_left > 0.0 or not _raid._launcher_model.visible:
+				_finish(false, "the swap to the launcher didn't finish")
+			Input.action_press("foot_aim")
+			_wait = 0.4
+			_step = "launcher-shot"
+		"launcher-shot":
+			_shot("10-launcher-aiming")
+			Input.action_release("foot_aim")
+			if _raid.grenade_path().size() < 3:
+				_finish(false, "no arc for the launcher")
+			_raid.fire_grenade()
+			_t = 0.0
+			_step = "grenade"
+		"grenade":
+			_t += delta
+			if _t < 1.0:
+				return
+			if _raid.grenades != 6 or not _raid._flying.is_empty():
+				_finish(false, "the grenade should be gone and 6 rounds left, not %d" % _raid.grenades)
+			if not _blast_checks():
+				return
+			_raid.select_weapon("rifle")
+			_step = "pickup"
+		"pickup":
+			# Supplies lying about go in the pouch with F.
+			var pick := ""
+			for id in _raid._loose:
+				var l: Dictionary = _raid._loose[id].data
+				if int(l.floor) == _raid._floor and l.item in ["syringe", "cell"] and int(_raid.pouch.get(l.item, 0)) < 4:
+					pick = id
+			if pick == "":
+				_finish(false, "no loose syringe or shield cell on level 1")
+			_pouch_before = _raid.pouch.duplicate()
+			_pouch_before["item"] = _raid._loose[pick].data.item
+			var spot: Vector3 = _raid._loose[pick].pos
+			var room_c: Vector3 = _raid._room_centre(int(_raid._loose[pick].data.room))
+			_raid.teleport_to(spot + (room_c - spot).normalized() * 1.2)
+			_raid._player.look_at(Vector3(spot.x, _raid._player.position.y, spot.z))
+			_raid._pitch = -0.5
+			_wait = 0.2
+			_step = "pickup-go"
+		"pickup-go":
+			_shot("11-loose-supplies")
+			_raid._interact()
+			_t = 0.0
+			_step = "picked"
+		"picked":
+			_t += delta
+			var item: String = _pouch_before.item
+			if int(_raid.pouch.get(item, 0)) > int(_pouch_before.get(item, 0)):
+				_step = "cabinet"
+			elif _t > 3.0:
+				_finish(false, "picking up the %s didn't reach the pouch" % item)
+		"cabinet":
+			# Every med cabinet is a container on a wall with a green cross.
+			var cabs := 0
+			for id in _raid._containers:
+				if _raid._containers[id].data.type == "medcab":
+					cabs += 1
+					var cab: Node3D = _raid._containers[id].node
+					if cab.global_position.y + _raid.floor_depth * int(_raid._containers[id].data.floor) < 1.0:
+						_finish(false, "med cabinet %s isn't on the wall" % id)
+			if cabs == 0:
+				_finish(false, "no med cabinets anywhere in a three-level facility")
+			for id in _raid._containers:
+				if _raid._containers[id].data.type == "medcab" and int(_raid._containers[id].data.floor) == _raid._floor:
+					_go_to_container(id)
+					_raid._player.look_at(_raid._containers[id].node.global_position * Vector3(1, 0, 1) + Vector3(0, _raid._player.position.y, 0))
+					_wait = 0.3
+					_step = "cabinet-shot"
+					return
+			_step = "down"
+		"cabinet-shot":
+			_shot("12-med-cabinet")
 			_step = "down"
 		"down":
 			if _raid._floor == _raid.floors:
@@ -261,6 +431,60 @@ func _process(delta: float) -> void:
 			if _explorer._station != null and _explorer._station.seated and not _explorer._me().get("stash", []).is_empty():
 				_shot("7-back-in-the-ship")
 				_finish(_took_from_vault, "raided the vault, extracted with %d stacks worth %d credits, back in your ship in the hangar" % [_result.kept.size(), int(_result.value)])
+
+
+# Blast falloff, walls and your own grenade, with grenades set off by hand on level 1.
+func _blast_checks() -> bool:
+	var r := _raid
+	# Two neighbouring rooms with a wall (no door) between them.
+	var a := -1
+	var b := -1
+	for id in r.rooms:
+		var room: Dictionary = r.rooms[id]
+		var lv: Dictionary = r._level(int(room.floor))
+		if int(room.floor) == r._floor and int(room.x) + 1 < int(lv.cols) and r._door_between(id, id + 1).is_empty():
+			a = id
+			b = id + 1
+			break
+	if a < 0:
+		return true # every pair has a door: nothing to check here
+	var wall_x: float = r._room_centre(a).x + r.room / 2.0
+	var at := Vector3(wall_x + 1.5, r._room_centre(b).y + 1.0, r._room_centre(b).z)
+	var g: Dictionary = r._spawn_guard("blast-test", [a], Vector3(wall_x - 1.5, r._room_centre(a).y, r._room_centre(a).z), false)
+	g.body.position = Vector3(wall_x - 1.5, r._room_centre(a).y + 0.05, r._room_centre(a).z)
+	r.burst(at)
+	if g.health != r.GUARD_HEALTH:
+		_finish(false, "a blast went through a wall (guard at %d)" % g.health)
+		return false
+	var near := Vector3(wall_x - 4.0, at.y, at.z)
+	var d := near.distance_to(g.body.global_position + Vector3(0, 0.9, 0))
+	r.burst(near)
+	if absf((r.GUARD_HEALTH - g.health) - r.blast_damage(d)) > 0.5:
+		_finish(false, "blast damage %.1f at %.1f m, expected %.1f" % [r.GUARD_HEALTH - g.health, d, r.blast_damage(d)])
+		return false
+	if r.blast_damage(0) != 120.0 or r.blast_damage(6.0) != 0.0:
+		_finish(false, "the blast should do 120 at the centre, nothing at 6 m")
+		return false
+	# Your own grenade: half damage, armour first.
+	r.teleport_to(r._room_centre(a))
+	r.health = 100.0
+	r.armor = 10.0
+	r.god_mode = false
+	var mine: Vector3 = r._player.position + Vector3(2.0, 0.9, 0)
+	r.burst(mine)
+	r.god_mode = true
+	var taken: float = 110.0 - r.health - r.armor
+	if absf(taken - r.blast_damage(2.0) * 0.5) > 0.5 or r.armor != 0.0:
+		_finish(false, "your own grenade did %.1f (armour %.0f), expected %.1f" % [taken, r.armor, r.blast_damage(2.0) * 0.5])
+		return false
+	return true
+
+
+func _counts(d: Dictionary) -> String:
+	var out := []
+	for k in ["syringe", "medkit", "cell", "battery"]:
+		out.append(int(d.get(k, 0)))
+	return str(out)
 
 
 func _send_builder(msg: Dictionary) -> void:

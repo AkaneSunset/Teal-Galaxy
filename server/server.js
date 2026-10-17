@@ -73,6 +73,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 
   function sendInventory(run) {
     toRaider(run, { ev: 'inventory', items: H.inventoryView(run) });
+    toRaider(run, { ev: 'pouch', pouch: run.pouch, vest: run.vest, grenades: run.grenades });
   }
 
   function sendHeat(run) {
@@ -143,7 +144,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         sendContainer(run);
         return { ok: true, quiet: true };
       case 'raid_take':
-        r = H.take(run, String(msg.uid), msg.to === 'secure' ? 'secure' : 'backpack', t);
+        r = H.take(run, String(msg.uid), msg.to === 'secure' ? 'secure' : 'backpack', t, Number(msg.armor) || 0);
         break;
       case 'raid_drop':
         r = H.drop(run, String(msg.uid), t);
@@ -151,9 +152,23 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'raid_stow':
         r = H.stow(run, String(msg.uid), msg.to === 'secure' ? 'secure' : 'backpack');
         break;
-      case 'raid_use':
-        r = H.use(run, String(msg.uid));
-        if (r.ok) send(ws, { type: 'raid', ev: 'heal', amount: r.heal });
+      case 'raid_use_start':
+        r = H.useStart(run, String(msg.item), t);
+        if (r.ok) send(ws, { type: 'raid', ev: 'using', item: r.item, seconds: r.seconds });
+        return { ...r, quiet: true };
+      case 'raid_use_stop':
+        return { ...H.useStop(run), quiet: true };
+      case 'raid_use_finish':
+        r = H.useFinish(run, t);
+        if (r.ok) send(ws, { type: 'raid', ev: 'used', item: r.item, health: r.health, armor: r.armor });
+        break;
+      case 'raid_pickup':
+        r = H.pickUp(run, String(msg.id), Number(msg.armor) || 0);
+        if (r.ok) toRaider(run, { ev: 'loose', loose: H.looseView(run) });
+        break;
+      case 'raid_grenade':
+        r = H.fireGrenade(run, t);
+        if (r.ok && r.changed) changed();
         break;
       case 'raid_noise':
         r = H.report(run, String(msg.kind), t);

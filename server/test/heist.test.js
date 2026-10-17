@@ -191,7 +191,7 @@ test('each level of the facility adds a level of better loot below', () => {
   assert.strictEqual(key.floor, 3, 'the keycard is on the deepest level');
   assert.ok(H.reachFloor(run, 2).ok);
   assert.match(H.reachFloor(run, 4).reason, /level/);
-  assert.strictEqual(H.selfDestructSeconds(3), 150);
+  assert.strictEqual(H.selfDestructSeconds(3), 160);
 });
 
 test('Heat rises with time and reported noise, rate-limited per kind', () => {
@@ -275,6 +275,150 @@ test('facilities fill their vaults, ship to HQ and buy security', () => {
   g.bases.Akane.stock.drive = 1;
   assert.ok(G.secure(g, id, 0).ok);
   assert.strictEqual(fac.security, 2);
+});
+
+// --- Combat: the landing pad, armour, the pouch, supplies and the launcher ----------------------
+
+test('the ship lands well out of turret range, and the self-destruct allows for the run', () => {
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const L = H.generateLayout(seed, 3, 'lab');
+    assert.deepStrictEqual(L.pad, [0, L.half + H.PAD_OFF]);
+    assert.strictEqual(H.PAD_OFF, 50);
+    // The raider steps off a few metres north of the pad: every turret on the site is over 34 m away.
+    const spawn = [L.pad[0] - 4.5, L.pad[1] - 4];
+    for (const t of L.pieces.filter((p) => p.type === 'turret')) assert.ok(Math.hypot(t.pos[0] - spawn[0], t.pos[1] - spawn[1]) > 34 + 5, `turret ${t.id} too close`);
+    assert.deepStrictEqual(L.extracts[0].pos, L.pad, 'the ship is still the way out');
+  }
+  assert.strictEqual(H.selfDestructSeconds(1), 100, 'ten seconds more than before for the longer run');
+});
+
+test('every raid starts in a 50 vest; a found vest swaps on and keeps what armour it has', () => {
+  const { run } = setup();
+  assert.deepStrictEqual(run.vest, { item: 'vest50', armor: 50 });
+  run.loose.lx = { id: 'lx', floor: 1, room: 100, pos: [0, 4.2], item: 'vest75', qty: 1, armor: 75 };
+  assert.ok(H.pickUp(run, 'lx', 30).ok);
+  assert.deepStrictEqual(run.vest, { item: 'vest75', armor: 75 });
+  assert.deepStrictEqual([run.loose.lx.item, run.loose.lx.armor], ['vest50', 30], 'the old vest is left where the new one lay');
+  assert.ok(H.pickUp(run, 'lx', 999).ok, 'swap back');
+  assert.deepStrictEqual(run.vest, { item: 'vest50', armor: 30 });
+  assert.deepStrictEqual([run.loose.lx.item, run.loose.lx.armor], ['vest75', 75], 'reported armour is capped at the vest');
+  // From a cabinet: the old vest goes into the cabinet in its place.
+  const c = run.layout.containers.find((x) => x.type !== 'vault');
+  const box = run.boxes[c.id];
+  box.items = [];
+  box.grid = new H.Grid(3, 2);
+  box.grid.place('v1', { x: 0, y: 0, w: 2, h: 2 });
+  box.items.push({ uid: 'v1', item: 'vest100', qty: 1, vaultQty: 0, armor: 100 });
+  H.openContainer(run, c.id, 0);
+  assert.ok(H.take(run, 'v1', 'backpack', 10_000, 12).ok);
+  assert.deepStrictEqual(run.vest, { item: 'vest100', armor: 100 });
+  assert.deepStrictEqual(box.items.map((it) => [it.item, it.armor]), [['vest50', 12]]);
+  assert.strictEqual(H.inventoryView(run).length, 0, 'vests are worn, never carried');
+  assert.strictEqual(H.finish(run, 'extracted', 300_000).kept.length, 0, 'and they stay behind');
+});
+
+test('pouch items take their time, cancel for free, and never go past the cap', () => {
+  const { run } = setup();
+  assert.deepStrictEqual(run.pouch, H.STARTER_POUCH);
+  assert.deepStrictEqual(H.STARTER_POUCH, { syringe: 2, medkit: 1, cell: 2, battery: 1 });
+  const caps = Object.fromEntries(['syringe', 'medkit', 'cell', 'battery'].map((k) => [k, H.ITEMS[k].pouch.cap]));
+  assert.deepStrictEqual(caps, { syringe: 4, medkit: 2, cell: 4, battery: 2 });
+  assert.deepStrictEqual(['syringe', 'medkit', 'cell', 'battery'].map((k) => H.ITEMS[k].pouch.seconds), [5, 8, 3, 5]);
+
+  assert.strictEqual(H.useStart(run, 'syringe', 10_000).seconds, 5);
+  assert.match(H.useFinish(run, 12_000).reason, /not done/);
+  H.useStop(run); // fired, sprinted or swapped
+  assert.match(H.useFinish(run, 20_000).reason, /not using/);
+  assert.strictEqual(run.pouch.syringe, 2, 'cancelling uses nothing');
+  H.useStart(run, 'syringe', 20_000);
+  assert.deepStrictEqual(H.useFinish(run, 25_000), { ok: true, item: 'syringe', health: 25, armor: 0 });
+  assert.strictEqual(run.pouch.syringe, 1);
+  H.useStart(run, 'battery', 30_000);
+  assert.strictEqual(H.useFinish(run, 35_000).armor, 100);
+  assert.strictEqual(run.pouch.battery, undefined);
+  assert.match(H.useStart(run, 'battery', 40_000).reason, /no shield batter/);
+  assert.match(H.useStart(run, 'scrap', 40_000).reason, /nothing/);
+
+  // Found supplies fill the pouch up to the cap; the rest stays where it was.
+  const c = run.layout.containers.find((x) => x.type !== 'vault');
+  const box = run.boxes[c.id];
+  box.items = [];
+  box.grid = new H.Grid(3, 3);
+  box.grid.place('s1', { x: 0, y: 0, w: 1, h: 1 });
+  box.items.push({ uid: 's1', item: 'cell', qty: 4, vaultQty: 0 });
+  H.openContainer(run, c.id, 0);
+  assert.deepStrictEqual(H.take(run, 's1', 'backpack', 10_000), { ok: true, pouch: true, partial: true });
+  assert.strictEqual(run.pouch.cell, 4);
+  assert.strictEqual(box.items[0].qty, 2, 'two left in the container');
+  assert.match(H.take(run, 's1', 'backpack', 10_000).reason, /no room in your pouch/);
+  assert.strictEqual(H.inventoryView(run).length, 0, 'none of it went in the backpack');
+  run.loose.ly = { id: 'ly', floor: 1, room: 100, pos: [0, 4.2], item: 'syringe', qty: 2 };
+  assert.ok(H.pickUp(run, 'ly', 0).ok);
+  assert.strictEqual(run.pouch.syringe, 3);
+  assert.strictEqual(run.loose.ly, undefined);
+});
+
+test('you extract with your pouch and bring it next time; die and it is gone', () => {
+  const { g, run } = setup();
+  run.pouch = { syringe: 4, cell: 1 };
+  G.endRaid(g, run, 'extracted', 300_000);
+  assert.deepStrictEqual(g.pilots['Pilot A'].pouch, { syringe: 4, cell: 1 });
+  const fac = G.facility(g, run.planet, 0);
+  fac.cooldownUntil = 0;
+  const next = G.startRaid(g, 'Pilot A', run.planet, 0, 400_000, 77, 78).run;
+  assert.deepStrictEqual(next.pouch, { syringe: 4, cell: 1 }, 'saved with the account');
+  G.endRaid(g, next, 'killed', 500_000);
+  assert.deepStrictEqual(g.pilots['Pilot A'].pouch, {});
+  fac.cooldownUntil = 0;
+  assert.deepStrictEqual(G.startRaid(g, 'Pilot A', run.planet, 0, 600_000, 79, 80).run.pouch, H.STARTER_POUCH, 'an empty pouch gets the starter kit');
+  assert.deepStrictEqual(H.startingPouch({ syringe: 9, medkit: 0.5, scrap: 3 }), { syringe: 4 }, 'saved counts are kept within the caps');
+});
+
+test('med cabinets in about one room in three, more on deeper levels, with supplies on the floors', () => {
+  const byFloor = {};
+  let vests = { 1: 0, deep: 0 };
+  for (let seed = 1; seed <= 200; seed++) {
+    const L = H.generateLayout(seed, 1, 'refinery', { floors: 4 });
+    for (const fl of L.floors) {
+      const rooms = L.rooms.filter((r) => r.floor === fl.n && r.id !== L.vault).length;
+      const cabs = L.containers.filter((c) => c.type === 'medcab' && c.floor === fl.n);
+      byFloor[fl.n] ||= { rooms: 0, cabs: 0 };
+      byFloor[fl.n].rooms += rooms;
+      byFloor[fl.n].cabs += cabs.length;
+      assert.ok(cabs.every((c) => c.room !== L.vault && c.wall && Math.max(Math.abs(c.pos[0]), Math.abs(c.pos[1])) > 6.5), 'on a wall, never in the safe room');
+      const loose = L.loose.filter((l) => l.floor === fl.n);
+      assert.ok(loose.filter((l) => ['syringe', 'cell'].includes(l.item)).length >= 1, 'loose syringes or shield cells on every level');
+      assert.ok(loose.every((l) => ['syringe', 'cell', 'vest75', 'vest100'].includes(l.item) && l.room !== L.vault));
+      for (const l of loose) if (l.item.startsWith('vest')) vests[fl.n === 1 ? 1 : 'deep']++;
+    }
+  }
+  const share = (n) => byFloor[n].cabs / byFloor[n].rooms;
+  assert.ok(share(1) > 0.22 && share(1) < 0.4, `level 1: ${share(1)}`);
+  assert.ok(share(4) > share(1) + 0.1, `deeper levels have more: ${share(4)} vs ${share(1)}`);
+  assert.ok(vests.deep / 3 > vests[1] * 2, 'vests turn up mostly on the deeper levels');
+
+  // What a cabinet holds: healing and sometimes a vest, never the keycard.
+  const { run } = setup({}, { levels: 3, security: 2 });
+  const cabs = run.layout.containers.filter((c) => c.type === 'medcab');
+  assert.ok(cabs.length > 0);
+  for (const c of cabs) assert.ok(run.boxes[c.id].items.every((it) => ['syringe', 'medkit', 'cell', 'battery', 'vest75', 'vest100'].includes(it.item)));
+  let seen = new Set();
+  const r = H.rng(5);
+  for (let i = 0; i < 4000; i++) for (const s of H.rollTable({ rolls: [3, 3], none: 0.5, entries: [['syringe', 4, 1, 2], ['cell', 4, 1, 2], ['medkit', 2, 1, 1], ['battery', 2, 1, 1], ['vest75', 0.5, 1, 1], ['vest100', 0.15, 1, 1]] }, 3, 'material', r)) seen.add(s.item);
+  assert.ok(seen.has('vest75') && seen.has('vest100'));
+});
+
+test('the grenade launcher has seven rounds for the whole raid, a second apart', () => {
+  const { run } = setup();
+  assert.strictEqual(run.grenades, 7);
+  let t = 10_000;
+  for (let i = 6; i >= 0; i--) {
+    assert.deepStrictEqual([H.fireGrenade(run, t).ok, run.grenades], [true, i]);
+    if (i === 6) assert.match(H.fireGrenade(run, t + 300).reason, /cycling/);
+    t += 1000;
+  }
+  assert.match(H.fireGrenade(run, t).reason, /empty/);
+  assert.strictEqual(run.heat, 7 * H.GRENADE_HEAT, 'every burst is loud');
 });
 
 // --- Over the wire ---------------------------------------------------------------------------
@@ -445,6 +589,48 @@ test('the self-destruct kills a raider still inside when it ends', async () => {
     const end = await pc.next((m) => m.type === 'raid' && m.ev === 'end');
     assert.strictEqual(end.result.outcome, 'destroyed');
     assert.match(server.galaxy.feed.at(-1).text, /self-destruct/);
+    pc.close();
+  } finally {
+    await server.close();
+  }
+});
+
+test('healing over the wire: the server counts, the app waits for the timer', async () => {
+  const port = 18093;
+  let clock = 0;
+  const server = startServer({ port, buildSpeed: Infinity, tickMs: 60000, now: () => clock });
+  try {
+    const pc = await connect(port);
+    pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
+    await pc.next((m) => m.type === 'welcome');
+    G.claimBase(server.galaxy, 'Akane');
+    const { site } = G.foundSite(server.galaxy, 'Akane', 'refinery');
+    pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
+    const begin = await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
+    assert.deepStrictEqual(begin.run.pouch, H.STARTER_POUCH, 'a new raider gets the starter kit');
+    assert.deepStrictEqual(begin.run.vest, { item: 'vest50', armor: 50 });
+    assert.strictEqual(begin.run.grenades, 7);
+    assert.ok(Array.isArray(begin.run.loose) && begin.run.loose.length > 0);
+
+    pc.send({ type: 'raid_use_start', item: 'cell' });
+    const using = await pc.next((m) => m.type === 'raid' && m.ev === 'using');
+    assert.strictEqual(using.seconds, 3);
+    clock += 1000;
+    pc.send({ type: 'raid_use_finish' });
+    await pc.next((m) => m.type === 'error' && /not done/.test(m.reason));
+    clock += 2000;
+    pc.send({ type: 'raid_use_finish' });
+    const used = await pc.next((m) => m.type === 'raid' && m.ev === 'used');
+    assert.deepStrictEqual([used.item, used.armor], ['cell', 25]);
+    const pouch = await pc.next((m) => m.type === 'raid' && m.ev === 'pouch');
+    assert.strictEqual(pouch.pouch.cell, 1);
+
+    pc.send({ type: 'raid_grenade' });
+    const after = await pc.next((m) => m.type === 'raid' && m.ev === 'pouch' && m.grenades === 6);
+    assert.ok(after);
+    pc.send({ type: 'raid_died' });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'end');
+    assert.deepStrictEqual(server.galaxy.pilots['Pilot A'].pouch, {}, 'dying loses the pouch');
     pc.close();
   } finally {
     await server.close();

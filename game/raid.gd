@@ -47,6 +47,34 @@ const NOISE_WALK := 8.0
 const NOISE_DRILL := 60.0
 const NOISE_EXTRACT := 150.0
 const NOISE_BLAST := 90.0
+const NOISE_GRENADE := 150.0
+
+# The grenade launcher, the second weapon. The server counts its rounds: 7 for the whole raid.
+const LAUNCHER_GAP := 1.0
+const SWAP_SECONDS := 0.5
+const GRENADE_SPEED := 26.0
+const GRENADE_GRAVITY := 12.0
+const GRENADE_FUSE := 4.0
+const BLAST_RADIUS := 6.0
+const BLAST_DAMAGE := 120.0 # at the centre, falling off to nothing at the edge
+const BLAST_STRUCTURES := 3.0 # times as much against the site's defences and turrets
+const BLAST_SELF := 0.5 # your own grenade hurts you half as much
+
+# Health and armour, Apex style: the vest's armour soaks damage first, and nothing regenerates.
+const HEALTH_MAX := 100.0
+const ARMOR_SEGMENT := 25.0
+const USE_SPEED := 2.0 # walking pace while using a pouch item
+const RADIAL_HOLD := 0.25 # hold the heal key this long for the radial menu; a tap uses the best item
+const RADIAL_DEAD := 40.0 # pixels from the centre that still count as cancel
+# Pouch items: name, most the pouch holds, what it restores, seconds to use (the server has the same).
+const POUCH_ITEMS := {
+	"syringe": ["Syringe", 4, "health", 5.0], "medkit": ["Med kit", 2, "health", 8.0],
+	"cell": ["Shield cell", 4, "armour", 3.0], "battery": ["Shield battery", 2, "armour", 5.0],
+}
+const RADIAL_ITEMS := ["syringe", "cell", "battery", "medkit"] # slices: top-left, top-right, bottom-right, bottom-left
+const VESTS := {"vest50": ["Armour vest", 50, Color(0.86, 0.88, 0.92)], "vest75": ["Heavy vest", 75, Color(0.35, 0.62, 1.0)],
+	"vest100": ["Assault vest", 100, Color(0.74, 0.45, 1.0)]}
+const HEALTH_COLOUR := Color(0.45, 0.95, 0.5)
 
 # Guards.
 const GUARD_HEALTH := 100.0
@@ -90,7 +118,12 @@ var remaining := 0.0
 var extract_states := {}
 var vault_open := false
 var inventory: Array = []
-var health := 100.0
+var health := HEALTH_MAX
+var armor := 50.0
+var vest_item := "vest50"
+var pouch := {} # item -> count, as the server last said
+var grenades := 7
+var weapon := "rifle" # or "launcher"
 var ammo := MAG
 var reserve := RESERVE
 var over := false
@@ -138,6 +171,18 @@ var _drill_left := -1.0
 var _extracting := "" # extract id while standing in one
 var _extract_left := 0.0
 var _open_container := ""
+var _swap_left := 0.0
+var _launcher_cd := 0.0
+var _flying: Array = [] # grenades in the air: {"node", "pos", "vel", "age"}
+var _using := {} # {"item", "left", "total", "sent"} while using a pouch item
+var _use_asked := "" # waiting for the server to start this one
+var _heal_down := false
+var _heal_held := 0.0
+var _radial := false # the heal wheel is open
+var _radial_vec := Vector2.ZERO # where the mouse or stick points on it
+var _loose := {} # id -> {"node", "data"}: supplies and vests lying in the facility
+var _rifle_model: Node3D
+var _launcher_model: Node3D
 
 var _hud: Control
 var _prompt: Label
@@ -167,6 +212,16 @@ func _init(briefing: Dictionary) -> void:
 	destroyed = briefing.get("destroyed", [])
 	if briefing.get("selfDestruct") != null:
 		self_destruct = float(briefing.selfDestruct) / 1000.0
+	pouch = briefing.get("pouch", {})
+	grenades = int(briefing.get("grenades", 7))
+	var vest: Dictionary = briefing.get("vest", {"item": "vest50", "armor": 50})
+	vest_item = vest.item
+	armor = float(vest.armor)
+
+
+## How much armour the worn vest holds.
+func vest_cap() -> float:
+	return float(VESTS.get(vest_item, ["", 50])[1])
 
 
 func _ready() -> void:
@@ -404,7 +459,7 @@ func _build_site() -> void:
 	var terrain := Terrain.new()
 	terrain.position.y = -SiteView.DECK_TOP # the site's deck stands this far above the ground
 	_into.add_child(terrain)
-	terrain.generate(str(layout.view.id), 44.0)
+	terrain.generate(str(layout.view.id), maxf(44.0, float(layout.pad[1]) + 20.0)) # flat out past the landing pad
 	_site_view = SiteView.new()
 	_into.add_child(_site_view)
 	var view: Dictionary = layout.view.duplicate()
@@ -417,6 +472,13 @@ func _build_site() -> void:
 	var deck := half * 2.0 + 2.0
 	_box(Vector3(deck, 1.2, deck), Vector3(0, -0.6, 0), "navy", true, false, true)
 	_box(Vector3(19.0, 1.2, pad.z - half + 9.4), Vector3(0, -0.6, (half + pad.z + 9.4) / 2.0), "navy", true, false, true)
+	# The landing apron you walk in on, from the site's edge to the pad.
+	var apron := pad.z - 9.0 - (half + 1.0)
+	_box(Vector3(19.0, 0.62, apron), Vector3(0, -0.31, half + 1.0 + apron / 2.0), "navy", false)
+	for i in range(1, int(apron / 8.0) + 1):
+		_box(Vector3(19.0, 0.02, 0.12), Vector3(0, 0.01, half + 1.0 + i * 8.0), Color(0.32, 0.42, 0.56), false)
+	for sx in [-1, 1]:
+		_box(Vector3(0.3, 0.06, apron), Vector3(sx * 9.2, 0.03, half + 1.0 + apron / 2.0), "amber", false)
 	var edge := half + 1.0
 	for side in [-1, 1]:
 		_box(Vector3(0.5, 6, deck), Vector3(side * edge, 3, 0), "navy", true, false, true)
@@ -542,18 +604,25 @@ func _wreck(p: Dictionary) -> void:
 
 
 func _build_props() -> void:
-	var sizes := {"locker": Vector3(1.0, 2.0, 0.6), "crate": Vector3(1.2, 0.8, 0.8), "desk": Vector3(1.6, 0.8, 0.8), "rack": Vector3(0.8, 2.1, 1.0), "vault": Vector3(1.2, 1.2, 1.2)}
-	var names := {"locker": "Locker", "crate": "Crate", "desk": "Desk", "rack": "Server rack", "vault": "Vault box"}
+	var sizes := {"locker": Vector3(1.0, 2.0, 0.6), "crate": Vector3(1.2, 0.8, 0.8), "desk": Vector3(1.6, 0.8, 0.8), "rack": Vector3(0.8, 2.1, 1.0), "vault": Vector3(1.2, 1.2, 1.2),
+		"medcab": Vector3(0.9, 0.75, 0.3)}
+	var names := {"locker": "Locker", "crate": "Crate", "desk": "Desk", "rack": "Server rack", "vault": "Vault box", "medcab": "Med cabinet"}
+	var facing := {"south": 0.0, "north": PI, "east": PI / 2.0, "west": -PI / 2.0} # turns a cabinet's front (-Z) to the room
 	for c in layout.containers:
 		_into = _floor_nodes[int(c.floor)]
 		var size: Vector3 = sizes[c.type]
-		var pos := _room_centre(int(c.room)) + Vector3(c.pos[0], size.y / 2.0, c.pos[1])
+		var lift := 1.0 if c.type == "medcab" else 0.0 # cabinets hang on the wall
+		var pos := _room_centre(int(c.room)) + Vector3(c.pos[0], lift + size.y / 2.0, c.pos[1])
 		var node := _box(size, pos, Color.BLACK, true, false, true)
+		node.rotation.y = facing.get(c.get("wall", ""), 0.0)
 		var look := _container_model(c.type, size)
 		look.position = Vector3(0, -size.y / 2.0, 0)
 		node.add_child(look)
-		var tag := _label(names[c.type], pos + Vector3(0, size.y / 2.0 + 0.3, 0), 28, Color(1, 1, 1, 0.7))
+		var tag := _label(names[c.type], pos + Vector3(0, size.y / 2.0 + 0.3, 0), 28, Color(0.5, 1.0, 0.55, 0.85) if c.type == "medcab" else Color(1, 1, 1, 0.7))
 		_containers[c.id] = {"node": node, "data": c, "name": names[c.type], "tag": tag}
+
+	for l in brief.get("loose", []):
+		_place_loose(l)
 
 	_into = _floor_nodes[0]
 	for ex in layout.extracts:
@@ -609,7 +678,96 @@ func _container_model(type: String, size: Vector3) -> Node3D:
 		"vault":
 			Models.block(n, size, "steel", Vector3(0, size.y / 2.0, 0), 0.12)
 			Models.drum(n, 0.3, 0.1, "amber", Vector3(0, size.y / 2.0, -size.z / 2.0 - 0.04), Vector3(90, 0, 0), 12)
+		"medcab":
+			# A white wall cabinet with a glowing green cross on its door.
+			_plain_block(n, size, Color(0.86, 0.9, 0.92), Vector3(0, size.y / 2.0, 0))
+			_plain_block(n, Vector3(size.x - 0.1, size.y - 0.1, 0.02), Color(0.75, 0.8, 0.84), Vector3(0, size.y / 2.0, -size.z / 2.0 - 0.01))
+			_plain_block(n, Vector3(0.36, 0.11, 0.03), HEALTH_COLOUR, Vector3(0, size.y / 2.0, -size.z / 2.0 - 0.03), true)
+			_plain_block(n, Vector3(0.11, 0.36, 0.03), HEALTH_COLOUR, Vector3(0, size.y / 2.0, -size.z / 2.0 - 0.03), true)
 	return n
+
+
+func _plain_block(parent: Node3D, size: Vector3, colour: Color, pos: Vector3, glow := false) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = colour
+	mat.roughness = 0.6
+	if glow:
+		mat.emission_enabled = true
+		mat.emission = colour
+		mat.emission_energy_multiplier = 0.5
+	mesh.material = mat
+	mi.mesh = mesh
+	mi.position = pos
+	parent.add_child(mi)
+	return mi
+
+
+## Something lying in the facility for F to pick up: a syringe or shield cell, or a vest. Near a wall
+## it sits on a small shelf.
+func _place_loose(l: Dictionary) -> void:
+	var was := _into
+	_into = _floor_nodes[int(l.floor)]
+	var at := _room_centre(int(l.room)) + Vector3(l.pos[0], 0, l.pos[1])
+	var holder := Node3D.new()
+	holder.position = at
+	_into.add_child(holder)
+	var top := 0.0
+	if maxf(absf(l.pos[0]), absf(l.pos[1])) > 5.0:
+		top = 0.9
+		var along_x: bool = absf(l.pos[1]) > absf(l.pos[0]) # the shelf runs along its wall
+		var shelf := _box(Vector3(1.3, 0.9, 0.5) if along_x else Vector3(0.5, 0.9, 1.3), at + Vector3(0, 0.45, 0), "steel")
+		holder.set_meta("shelf", shelf)
+	var item: String = l.item
+	var label := "%s x%d" % [l.get("name", item), int(l.qty)]
+	if VESTS.has(item):
+		var v: Array = VESTS[item]
+		_plain_block(holder, Vector3(0.55, 0.08, 0.65), v[2].darkened(0.35), Vector3(0, top + 0.04, 0))
+		_plain_block(holder, Vector3(0.45, 0.06, 0.5), v[2], Vector3(0, top + 0.11, 0), true)
+		label = "%s (%d armour)" % [v[0], int(l.get("armor", v[1]))]
+	elif item == "syringe":
+		var tube := _plain_block(holder, Vector3(0.06, 0.06, 0.32), Color(0.9, 0.95, 0.95), Vector3(0, top + 0.04, 0))
+		tube.rotation.y = 0.6
+		_plain_block(tube, Vector3(0.07, 0.07, 0.1), HEALTH_COLOUR, Vector3(0, 0, -0.1), true)
+	else:
+		_plain_block(holder, Vector3(0.22, 0.28, 0.14), Color(0.25, 0.5, 1.0), Vector3(0, top + 0.14, 0), true)
+	var health_item: bool = POUCH_ITEMS.has(item) and POUCH_ITEMS[item][2] == "health"
+	var tag := Label3D.new()
+	tag.text = label
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.font_size = 26
+	tag.pixel_size = 0.004
+	tag.outline_size = 8
+	tag.modulate = HEALTH_COLOUR if health_item else (VESTS[item][2] if VESTS.has(item) else Color(0.5, 0.75, 1.0))
+	tag.position = Vector3(0, top + 0.55, 0)
+	holder.add_child(tag)
+	_loose[l.id] = {"node": holder, "data": l, "pos": at}
+	_into = was
+
+
+func _drop_loose(id: String) -> void:
+	var node: Node3D = _loose[id].node
+	if node.has_meta("shelf"):
+		node.get_meta("shelf").queue_free()
+	node.queue_free()
+	_loose.erase(id)
+
+
+## The server's list of what's lying about, after something was picked up or a vest left behind.
+func _set_loose(list: Array) -> void:
+	var keep := {}
+	for l in list:
+		keep[l.id] = true
+		var old: Dictionary = _loose.get(l.id, {})
+		if old.is_empty() or old.data.item != l.item or int(old.data.qty) != int(l.qty) or old.data.get("armor") != l.get("armor"):
+			if not old.is_empty():
+				_drop_loose(l.id)
+			_place_loose(l)
+	for id in _loose.keys():
+		if not keep.has(id):
+			_drop_loose(id)
 
 
 ## Where you stand outside the blast door.
@@ -631,7 +789,7 @@ func _build_player() -> void:
 	shape.shape.height = 1.8
 	shape.position.y = 0.9
 	_player.add_child(shape)
-	_player.position = _pad() + Vector3(0, 0.05, -9.5)
+	_player.position = _pad() + Vector3(-4.5, 0.05, -4.0) # beside the ship, facing the site
 	add_child(_player)
 	_camera = Camera3D.new()
 	_camera.position.y = EYE
@@ -646,6 +804,7 @@ func _build_player() -> void:
 	gun.position = Vector3(0.22, -0.2, -0.45)
 	gun.name = "Gun"
 	_camera.add_child(gun)
+	_rifle_model = gun
 	var parts := [[Vector3(0.07, 0.09, 0.55), Vector3(0, 0, 0), Color(0.12, 0.13, 0.15)],
 		[Vector3(0.04, 0.04, 0.3), Vector3(0, 0.015, -0.4), Color(0.08, 0.08, 0.09)],
 		[Vector3(0.05, 0.12, 0.06), Vector3(0, -0.09, 0.08), Color(0.12, 0.13, 0.15)],
@@ -663,6 +822,19 @@ func _build_player() -> void:
 		mi.mesh = mesh
 		mi.position = p[1]
 		gun.add_child(mi)
+
+	# The grenade launcher: a stubby tube over a revolving drum.
+	_launcher_model = Node3D.new()
+	_launcher_model.name = "Launcher"
+	_launcher_model.position = gun.position
+	_launcher_model.visible = false
+	_launcher_model.scale = Vector3.ONE * 0.8
+	_camera.add_child(_launcher_model)
+	Models.drum(_launcher_model, 0.065, 0.62, "navy", Vector3(0, 0.02, -0.12), Vector3(90, 0, 0), 12)
+	Models.drum(_launcher_model, 0.075, 0.06, "amber", Vector3(0, 0.02, -0.43), Vector3(90, 0, 0), 12)
+	Models.drum(_launcher_model, 0.11, 0.16, "steel", Vector3(0, -0.02, 0.1), Vector3(90, 0, 0), 7)
+	Models.block(_launcher_model, Vector3(0.05, 0.13, 0.06), "navy", Vector3(0, -0.13, 0.16), 0.01)
+	Models.block(_launcher_model, Vector3(0.03, 0.03, 0.1), "teal_light", Vector3(0, 0.1, -0.05), 0.005)
 
 
 func _guard_body(elite := false) -> CharacterBody3D:
@@ -833,11 +1005,12 @@ func _build_hud() -> void:
 	_inv = InventoryView.new()
 	_inv.visible = false
 	layer.add_child(_inv)
-	_inv.take.connect(func(uid, to): Net.send({"type": "raid_take", "uid": uid, "to": to}))
+	_inv.take.connect(func(uid, to): Net.send({"type": "raid_take", "uid": uid, "to": to, "armor": armor}))
 	_inv.drop.connect(func(uid): Net.send({"type": "raid_drop", "uid": uid}))
 	_inv.stow.connect(func(uid, to): Net.send({"type": "raid_stow", "uid": uid, "to": to}))
 	_inv.closed.connect(_close_inventory)
 	_inv.set_inventory(inventory, brief.backpack, brief.secure)
+	_inv.set_pouch(_pouch_text())
 
 	_paused = _overlay_panel()
 	layer.add_child(_paused)
@@ -912,7 +1085,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.is_action_pressed("interact"):
 			_close_inventory()
 		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and _radial:
+		_radial_vec = (_radial_vec + event.relative).limit_length(140.0) # pointing at a slice of the heal wheel
+	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var s: float = controls.mouse_sensitivity * 0.0022 * (FOV_AIM / FOV if _aiming() else 1.0)
 		var dy: float = -event.relative.y if controls.invert_mouse else event.relative.y
 		_look(-event.relative.x * s, -dy * s)
@@ -922,8 +1097,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_interact()
 	elif event.is_action_pressed("foot_reload"):
 		_reload()
-	elif event.is_action_pressed("foot_heal"):
-		_heal()
+	elif event.is_action_pressed("foot_weapon_1"):
+		select_weapon("rifle")
+	elif event.is_action_pressed("foot_weapon_2"):
+		select_weapon("launcher")
+	elif (event.is_action_pressed("foot_weapon_next") or event.is_action_pressed("foot_weapon_prev")) and not _radial:
+		select_weapon("launcher" if weapon == "rifle" else "rifle")
 	elif event.is_action_pressed("foot_crouch"):
 		_crouched = not _crouched
 
@@ -953,8 +1132,11 @@ func _physics_process(delta: float) -> void:
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	if over:
 		return
+	_update_heal_key(delta)
+	_update_use(delta)
 	_move_player(delta)
 	_shoot(delta)
+	_update_grenades(delta)
 	_update_guards(delta)
 	_update_turrets(delta)
 	_update_drill(delta)
@@ -972,12 +1154,21 @@ func _move_player(delta: float) -> void:
 	if _active():
 		input = Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
 		look = Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down")
+	if _radial:
+		if look.length() > 0.3:
+			_radial_vec = look.normalized() * 100.0 # the right stick points at a slice of the heal wheel
+		look = Vector2.ZERO
 	if look.length() > 0.1:
 		_look(-look.x * LOOK_SPEED * delta, -look.y * LOOK_SPEED * delta)
-	var sprinting: bool = _active() and Input.is_action_pressed("foot_sprint") and input.y < -0.1 and not _crouched
+	var wants_sprint: bool = _active() and Input.is_action_pressed("foot_sprint") and input.y < -0.1 and not _crouched
+	if wants_sprint and not _using.is_empty():
+		_cancel_use("Sprinting")
+	var sprinting := wants_sprint and _using.is_empty()
 	var speed := CROUCH if _crouched else (SPRINT if sprinting else WALK)
 	if _aiming():
 		speed = minf(speed, WALK * 0.6)
+	if not _using.is_empty():
+		speed = minf(speed, USE_SPEED) # a slow walk while patching up
 	var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
 	_player.velocity.x = dir.x * speed
 	_player.velocity.z = dir.z * speed
@@ -1005,6 +1196,16 @@ func _move_player(delta: float) -> void:
 
 func _shoot(delta: float) -> void:
 	_fire_cd -= delta
+	_launcher_cd -= delta
+	if _active() and not _using.is_empty() and Input.is_action_just_pressed("foot_fire"):
+		_cancel_use("Firing")
+	if _swap_left > 0.0:
+		_swap_left = maxf(0.0, _swap_left - delta)
+		_pose_weapon()
+		return
+	if weapon == "launcher":
+		_fire_launcher()
+		return
 	if _reload_left > 0.0:
 		_reload_left -= delta
 		if _reload_left <= 0.0:
@@ -1012,7 +1213,7 @@ func _shoot(delta: float) -> void:
 			ammo += n
 			reserve -= n
 		return
-	if not _active() or not Input.is_action_pressed("foot_fire") or _fire_cd > 0.0:
+	if not _active() or _radial or not _using.is_empty() or not Input.is_action_pressed("foot_fire") or _fire_cd > 0.0:
 		return
 	if ammo <= 0:
 		if Input.is_action_just_pressed("foot_fire"):
@@ -1082,8 +1283,157 @@ func destroy_piece(id: String) -> void:
 	_say("%s destroyed." % names.get(p.data.type, "Defence"), 2.0)
 
 
+# --- The grenade launcher ----------------------------------------------------------------
+
+## Switches between the rifle and the launcher: half a second with neither, and it stops a reload.
+func select_weapon(w: String) -> void:
+	if w == weapon or over:
+		return
+	weapon = w
+	_swap_left = SWAP_SECONDS
+	if _reload_left > 0.0:
+		_reload_left = 0.0
+		_say("Reload cancelled.", 1.5)
+	if not _using.is_empty() or _use_asked != "":
+		_cancel_use("Swapping weapons")
+	_pose_weapon()
+
+
+# The outgoing weapon dips out of view for the first half of a swap, the new one comes up in the second.
+func _pose_weapon() -> void:
+	var t := clampf(_swap_left / SWAP_SECONDS, 0.0, 1.0) # 1 as the swap starts, 0 when it's done
+	var rifle_up := (weapon == "rifle") == (t < 0.5)
+	_rifle_model.visible = rifle_up
+	_launcher_model.visible = not rifle_up
+	var dip := (1.0 - absf(t - 0.5) * 2.0) * 0.35
+	for m in [_rifle_model, _launcher_model]:
+		m.position.y = -0.2 - dip
+
+
+func _fire_launcher() -> void:
+	if not _active() or _radial or not _using.is_empty() or not Input.is_action_pressed("foot_fire") or _launcher_cd > 0.0:
+		return
+	if grenades <= 0:
+		if Input.is_action_just_pressed("foot_fire"):
+			_say("The launcher is empty: it has 7 rounds a raid.", 2.0)
+		return
+	fire_grenade()
+
+
+## Lobs a grenade where you're looking (tests call this directly).
+func fire_grenade() -> void:
+	_launcher_cd = LAUNCHER_GAP
+	grenades -= 1
+	var from := _muzzle()
+	var node := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.09
+	mesh.height = 0.18
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Models.AMBER
+	mat.emission_enabled = true
+	mat.emission = Models.AMBER
+	mesh.material = mat
+	node.mesh = mesh
+	add_child(node)
+	node.global_position = from
+	_flying.append({"node": node, "pos": from, "vel": _launch_velocity(), "age": 0.0})
+	_recoil += 0.06
+	_noise(_player.position, NOISE_GUNSHOT, true)
+	Net.send({"type": "raid_grenade"}) # the server counts the rounds, and the bang adds Heat
+
+
+func _muzzle() -> Vector3:
+	return _camera.global_position + _camera.global_basis * Vector3(0.22, -0.16, -0.9)
+
+
+func _launch_velocity() -> Vector3:
+	return -_camera.global_basis.z * GRENADE_SPEED
+
+
+func _update_grenades(delta: float) -> void:
+	for g in _flying.duplicate():
+		g.age += delta
+		var prev: Vector3 = g.pos
+		var vel: Vector3 = g.vel
+		vel.y -= GRENADE_GRAVITY * delta
+		g.vel = vel
+		g.pos = prev + vel * delta
+		var hit := _ray(prev, g.pos, LAYER_WORLD | LAYER_GUARDS)
+		if hit or g.age >= GRENADE_FUSE or g.pos.y < -floor_depth * (floors + 1):
+			_flying.erase(g)
+			g.node.queue_free()
+			burst(hit.position - vel.normalized() * 0.15 if hit else g.pos) # just off whatever it struck
+		else:
+			g.node.global_position = g.pos
+
+
+## Where a grenade fired now would fly, up to where it bursts: the arc marker while aiming.
+func grenade_path() -> Array:
+	var pts := []
+	var p := _muzzle()
+	var v := _launch_velocity()
+	var t := 0.0
+	pts.append(p)
+	while t < GRENADE_FUSE:
+		var step := 0.04
+		v.y -= GRENADE_GRAVITY * step
+		var q := p + v * step
+		var hit := _ray(p, q, LAYER_WORLD | LAYER_GUARDS)
+		if hit:
+			pts.append(hit.position)
+			return pts
+		pts.append(q)
+		p = q
+		t += step
+	return pts
+
+
+## A grenade goes off: everyone and everything within its reach, with a clear line from the burst,
+## takes damage that falls off with distance. Walls stop it. Your own does half to you.
+func burst(at: Vector3) -> void:
+	_blast(at, 0.6)
+	_noise(at, NOISE_GRENADE, false)
+	var on := _floor_of(at)
+	for g in _guards:
+		if g.dead or g.floor != on:
+			continue
+		var p: Vector3 = g.body.global_position + Vector3(0, 0.9, 0)
+		var d := at.distance_to(p)
+		if d <= BLAST_RADIUS and _can_see(at, p, [g.body]):
+			_damage_guard(g.body, blast_damage(d))
+	for t in _turrets:
+		if not t.dead and t.piece == "" and t.floor == on:
+			_blast_structure(at, t.base)
+	if on == 0:
+		for id in _pieces:
+			var pc: Dictionary = _pieces[id]
+			if not pc.dead and float(pc.data.hp) > 0.0:
+				_blast_structure(at, pc.node)
+	var me := _player.position + Vector3(0, 0.9, 0)
+	var dm := at.distance_to(me)
+	if dm <= BLAST_RADIUS and _can_see(at, me, []):
+		_hurt(blast_damage(dm) * BLAST_SELF, at)
+
+
+func blast_damage(distance: float) -> float:
+	return BLAST_DAMAGE * clampf(1.0 - distance / BLAST_RADIUS, 0.0, 1.0)
+
+
+# A turret or a piece of the site's defences in a blast: measured to the nearest point of it.
+func _blast_structure(at: Vector3, body: StaticBody3D) -> void:
+	var shape: BoxShape3D = body.get_child(0).shape
+	var half: Vector3 = shape.size / 2.0
+	var local := body.global_transform.affine_inverse() * at
+	var near := body.global_transform * local.clamp(-half, half)
+	var d := at.distance_to(near)
+	if d > BLAST_RADIUS or not _can_see(at, near.lerp(body.global_position, 0.05), [body]):
+		return
+	_damage_structure(body, blast_damage(d) * BLAST_STRUCTURES)
+
+
 # A flash and a fireball where something blew up.
-func _blast(at: Vector3) -> void:
+func _blast(at: Vector3, size := 1.0) -> void:
 	var light := OmniLight3D.new()
 	light.light_color = Color(1.0, 0.6, 0.25)
 	light.light_energy = 8.0
@@ -1092,8 +1442,8 @@ func _blast(at: Vector3) -> void:
 	light.global_position = at + Vector3(0, 2, 0)
 	var ball := MeshInstance3D.new()
 	var mesh := SphereMesh.new()
-	mesh.radius = 2.5
-	mesh.height = 5.0
+	mesh.radius = 2.5 * size
+	mesh.height = 5.0 * size
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(1.0, 0.55, 0.2, 0.8)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1110,18 +1460,130 @@ func _blast(at: Vector3) -> void:
 
 
 func _reload() -> void:
-	if _reload_left > 0.0 or ammo == MAG or reserve <= 0:
+	if weapon != "rifle" or _swap_left > 0.0 or _reload_left > 0.0 or ammo == MAG or reserve <= 0:
 		return
 	_reload_left = RELOAD_SECONDS
 	_say("Reloading", RELOAD_SECONDS)
 
 
-func _heal() -> void:
-	for it in inventory:
-		if it.cat == "medical":
-			Net.send({"type": "raid_use", "uid": it.uid})
-			return
-	_say("No trauma kits. Search lockers and crates.", 2.0)
+# --- Healing: the pouch and the heal wheel ------------------------------------------------
+
+# Tap the heal key for the best item for what you're missing; hold it for the wheel, point at a
+# slice and let go to use that one (let go in the middle to cancel). The raid doesn't pause.
+func _update_heal_key(delta: float) -> void:
+	if not _active():
+		_heal_down = false
+		_radial = false
+		return
+	if Input.is_action_pressed("foot_heal"):
+		if not _heal_down:
+			_heal_down = true
+			_heal_held = 0.0
+		_heal_held += delta
+		if _heal_held >= RADIAL_HOLD and not _radial:
+			open_radial()
+	elif _heal_down:
+		_heal_down = false
+		if _radial:
+			close_radial(true)
+		else:
+			use_best()
+
+
+func open_radial() -> void:
+	_radial = true
+	_radial_vec = Vector2.ZERO
+
+
+## Closes the wheel, using the item pointed at if `use`.
+func close_radial(use: bool) -> void:
+	var pick := radial_choice()
+	_radial = false
+	if use and pick != "":
+		use_item(pick)
+
+
+## The slice the wheel points at, or "" in the middle.
+func radial_choice() -> String:
+	var v := _radial_vec
+	if v.length() < RADIAL_DEAD:
+		return ""
+	if v.y < 0.0:
+		return RADIAL_ITEMS[0] if v.x < 0.0 else RADIAL_ITEMS[1]
+	return RADIAL_ITEMS[2] if v.x >= 0.0 else RADIAL_ITEMS[3]
+
+
+## What a tap of the heal key uses: armour before health, the small item when a little is missing
+## and the big one when most of the bar is gone, falling back to whichever you have.
+func best_item() -> String:
+	var picks := []
+	var cap := vest_cap()
+	if armor < cap:
+		picks.append(["battery", "cell"] if cap - armor > cap * 0.5 else ["cell", "battery"])
+	if health < HEALTH_MAX:
+		picks.append(["medkit", "syringe"] if HEALTH_MAX - health > HEALTH_MAX * 0.5 else ["syringe", "medkit"])
+	for pair in picks:
+		for item in pair:
+			if int(pouch.get(item, 0)) > 0:
+				return item
+	return ""
+
+
+func use_best() -> void:
+	var item := best_item()
+	if item != "":
+		use_item(item)
+	elif health >= HEALTH_MAX and armor >= vest_cap():
+		_say("Health and armour are full.", 2.0)
+	else:
+		_say("Nothing in your pouch for that. Look for med cabinets.", 2.5)
+
+
+## Starts using a pouch item; the server says when, and confirms it at the end.
+func use_item(item: String) -> void:
+	if over or not _using.is_empty() or _use_asked != "":
+		return
+	var def: Array = POUCH_ITEMS[item]
+	if int(pouch.get(item, 0)) <= 0:
+		_say("No %s left." % _plural(def[0]), 2.0)
+	elif def[2] == "health" and health >= HEALTH_MAX:
+		_say("Health is full.", 2.0)
+	elif def[2] == "armour" and armor >= vest_cap():
+		_say("Armour is full.", 2.0)
+	else:
+		_use_asked = item
+		Net.send({"type": "raid_use_start", "item": item})
+
+
+func _update_use(delta: float) -> void:
+	if _using.is_empty() or _using.sent:
+		return
+	_using.left -= delta
+	if _using.left <= 0.0:
+		_using.sent = true
+		Net.send({"type": "raid_use_finish"})
+
+
+## Firing, sprinting or swapping weapons stops it, and nothing is used up.
+func _cancel_use(why: String) -> void:
+	if _using.is_empty() and _use_asked == "":
+		return
+	var item: String = _using.get("item", _use_asked)
+	_using = {}
+	_use_asked = ""
+	Net.send({"type": "raid_use_stop"})
+	_say("%s stopped the %s (nothing used)." % [why, POUCH_ITEMS[item][0].to_lower()], 2.0)
+
+
+func _plural(word: String) -> String:
+	return word.to_lower().trim_suffix("y") + "ies" if word.ends_with("y") else word.to_lower() + "s"
+
+
+func _pouch_text() -> String:
+	var parts := []
+	for item in ["syringe", "medkit", "cell", "battery"]:
+		parts.append("%s %d/%d" % [POUCH_ITEMS[item][0], int(pouch.get(item, 0)), POUCH_ITEMS[item][1]])
+	return "Pouch: %s\nWearing: %s, %d / %d armour" % ["   ".join(parts), VESTS[vest_item][0], ceili(armor), int(vest_cap())]
 
 
 func _tracer(from: Vector3, to: Vector3) -> void:
@@ -1433,7 +1895,9 @@ func _update_turrets(delta: float) -> void:
 func _hurt(amount: float, from: Vector3) -> void:
 	if god_mode or over:
 		return
-	health -= amount
+	var soak := minf(armor, amount) # the vest takes it first
+	armor -= soak
+	health -= amount - soak
 	_hurt_flash = 0.35
 	_hurt_from = from
 	if health <= 0.0:
@@ -1657,9 +2121,32 @@ func _interact() -> void:
 		elif _drill_left < 0.0:
 			Net.send({"type": "raid_drill_start"})
 		return
+	var l := _near_loose()
+	if l != "":
+		pick_up(l)
+		return
 	var c := _near_container()
 	if c != "":
 		open_container(c)
+
+
+func _near_loose() -> String:
+	var best := ""
+	var best_d := REACH
+	for id in _loose:
+		if int(_loose[id].data.floor) != _floor:
+			continue
+		var p: Vector3 = _loose[id].pos
+		var d := Vector2(p.x - _player.position.x, p.z - _player.position.z).length()
+		if d < best_d:
+			best = id
+			best_d = d
+	return best
+
+
+## Picks up a syringe or shield cell into the pouch, or swaps your vest for one lying here.
+func pick_up(id: String) -> void:
+	Net.send({"type": "raid_pickup", "id": id, "armor": armor})
 
 
 func open_container(id: String) -> void:
@@ -1778,6 +2265,15 @@ func _update_prompt() -> void:
 			text = "Drilling: %d s" % ceili(_drill_left)
 		else:
 			text = "Vault door: %s to drill it open (loud, %d s), or find an access keycard" % [key, 30]
+	elif _near_loose() != "":
+		var l: Dictionary = _loose[_near_loose()].data
+		if VESTS.has(l.item):
+			text = "%s: put on the %s (%d armour), leaving your %s (%d)" % [key, VESTS[l.item][0].to_lower(), int(l.get("armor", VESTS[l.item][1])),
+				VESTS[vest_item][0].to_lower(), ceili(armor)]
+		elif int(pouch.get(l.item, 0)) >= int(POUCH_ITEMS[l.item][1]):
+			text = "Your pouch is full of %s" % _plural(POUCH_ITEMS[l.item][0])
+		else:
+			text = "%s: pick up the %s x%d" % [key, POUCH_ITEMS[l.item][0].to_lower(), int(l.qty)]
 	elif _near_container() != "":
 		text = "%s: search the %s" % [key, _containers[_near_container()].name.to_lower()]
 	_prompt.text = text
@@ -1799,9 +2295,9 @@ func _update_hud() -> void:
 	var carried := 0
 	for it in inventory:
 		carried += int(it.value) * int(it.qty)
-	_status.text = "%s%s\nTime left %d:%02d\nHeat %d  %s\nHealth %d   Ammo %d / %d\nCarrying %d credits of loot" % [
+	_status.text = "%s%s\nTime left %d:%02d\nHeat %d  %s\nCarrying %d credits of loot" % [
 		brief.facility, ("  Level %d" % _floor) if _floor > 0 else "", int(remaining) / 60, int(remaining) % 60, heat, levels[mini(level, levels.size() - 1)].name.to_upper(),
-		ceili(health), ammo, reserve, carried]
+		carried]
 	if _message_time <= 0.0:
 		_message.text = ""
 	_hud.queue_redraw()
@@ -1863,6 +2359,23 @@ func _draw_hud() -> void:
 				_hud.draw_circle(sp, 4, col)
 				_hud.draw_string(_hud.get_theme_default_font(), sp + Vector2(8, 5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col)
 
+	_draw_vitals(size)
+	_draw_weapons(size)
+	if weapon == "launcher" and _aiming() and _swap_left <= 0.0 and grenades > 0:
+		_draw_arc_marker(size)
+	if not _using.is_empty():
+		# Using a pouch item: a ring round the crosshair fills as it works.
+		var def: Array = POUCH_ITEMS[_using.item]
+		var col := HEALTH_COLOUR if def[2] == "health" else Color(0.45, 0.7, 1.0)
+		var done := clampf(1.0 - float(_using.left) / float(_using.total), 0.0, 1.0)
+		_hud.draw_arc(c, 30, 0, TAU, 48, Color(1, 1, 1, 0.15), 4.0)
+		_hud.draw_arc(c, 30, -PI / 2.0, -PI / 2.0 + TAU * done, 48, col, 4.0)
+		var t := "%s  %.1f s" % [def[0], maxf(0.0, float(_using.left))]
+		var font := _hud.get_theme_default_font()
+		_hud.draw_string(font, c + Vector2(-font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x / 2.0, 58), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, col)
+	if _radial:
+		_draw_radial(c)
+
 	# Damage: red at the screen edge toward whoever hit you.
 	if _hurt_flash > 0.0:
 		var local := _camera.global_basis.inverse() * (_hurt_from - _player.position)
@@ -1873,10 +2386,136 @@ func _draw_hud() -> void:
 		_hud.draw_circle(p, 18, Color(1.0, 0.1, 0.05, 0.6 * a))
 
 
+# Armour (in 25-point segments, the vest's colour) over health, and the pouch, bottom left.
+func _draw_vitals(size: Vector2) -> void:
+	var font := _hud.get_theme_default_font()
+	var at := Vector2(24, size.y - 104)
+	var seg := 58.0
+	var width := seg * 4 + 12.0
+	var vest: Array = VESTS.get(vest_item, VESTS.vest50)
+	_hud.draw_rect(Rect2(at - Vector2(10, 26), Vector2(width + 20, 116)), Color(0, 0.02, 0.05, 0.45))
+	_hud.draw_string(font, at + Vector2(0, -8), "%s  %d / %d" % [vest[0].to_upper(), ceili(armor), int(vest_cap())], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, vest[2])
+	for i in int(vest_cap() / ARMOR_SEGMENT):
+		var r := Rect2(at + Vector2(i * (seg + 4.0), 0), Vector2(seg, 10))
+		_hud.draw_rect(r, Color(1, 1, 1, 0.12))
+		var fill := clampf((armor - i * ARMOR_SEGMENT) / ARMOR_SEGMENT, 0.0, 1.0)
+		if fill > 0.0:
+			_hud.draw_rect(Rect2(r.position, Vector2(seg * fill, 10)), vest[2])
+	var low := health <= 35.0
+	var hc := Color(1.0, 0.3, 0.2) if low else HEALTH_COLOUR
+	var bar := Rect2(at + Vector2(0, 16), Vector2(width, 14))
+	_hud.draw_rect(bar, Color(1, 1, 1, 0.12))
+	_hud.draw_rect(Rect2(bar.position, Vector2(width * health / HEALTH_MAX, 14)), hc)
+	_hud.draw_string(font, at + Vector2(0, 48), "HEALTH  %d" % ceili(health), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, hc)
+	var x := at.x
+	for item in ["syringe", "medkit", "cell", "battery"]:
+		var def: Array = POUCH_ITEMS[item]
+		var n := int(pouch.get(item, 0))
+		var col := HEALTH_COLOUR if def[2] == "health" else Color(0.5, 0.75, 1.0)
+		var text := "%s %d" % [def[0], n]
+		_hud.draw_string(font, Vector2(x, at.y + 72), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col if n > 0 else Color(1, 1, 1, 0.3))
+		x += font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 12.0
+	var hint := "%s: heal (hold for the wheel)" % controls.binding_text("foot_heal", false)
+	_hud.draw_string(font, Vector2(at.x, at.y + 86), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.45))
+
+
+# The two weapon slots, bottom right; the one in your hands is lit.
+func _draw_weapons(size: Vector2) -> void:
+	var font := _hud.get_theme_default_font()
+	var w := 250.0
+	var at := Vector2(size.x - w - 24, size.y - 104)
+	var teal := Color(0.35, 0.95, 0.88)
+	var rows := [["rifle", "1", "RIFLE", "%d / %d" % [ammo, reserve]], ["launcher", "2", "GRENADE LAUNCHER", "%d / 7" % grenades]]
+	for i in rows.size():
+		var r: Array = rows[i]
+		var on: bool = weapon == r[0]
+		var box := Rect2(at + Vector2(0, i * 40), Vector2(w, 34))
+		_hud.draw_rect(box, Color(0.35, 0.95, 0.88, 0.16) if on else Color(0, 0.02, 0.05, 0.45))
+		if on:
+			_hud.draw_rect(Rect2(box.position, Vector2(3, 34)), teal)
+		var col := teal if on else Color(1, 1, 1, 0.45)
+		_hud.draw_string(font, box.position + Vector2(10, 22), r[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.5))
+		_hud.draw_string(font, box.position + Vector2(28, 22), r[2], HORIZONTAL_ALIGNMENT_LEFT, -1, 14 if on else 12, col)
+		var ammo_text: String = r[3]
+		if on and _swap_left > 0.0:
+			ammo_text = "..."
+		elif on and _reload_left > 0.0:
+			ammo_text = "RELOADING"
+		var aw := font.get_string_size(ammo_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x
+		_hud.draw_string(font, box.position + Vector2(w - aw - 10, 24), ammo_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, col)
+	var keys := "%s / %s or wheel, D-pad right: switch" % [controls.binding_text("foot_weapon_1", false), controls.binding_text("foot_weapon_2", false)]
+	_hud.draw_string(font, at + Vector2(0, 94), keys, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.45))
+
+
+# Where the grenade will fly, dotted, and the reach of its burst where it lands.
+func _draw_arc_marker(size: Vector2) -> void:
+	var amber := Color(1.0, 0.68, 0.2)
+	var pts := grenade_path()
+	for i in range(2, pts.size(), 2):
+		var p: Vector3 = pts[i]
+		if not _camera.is_position_behind(p):
+			_hud.draw_circle(_camera.unproject_position(p), 2.5, Color(amber, 0.85))
+	var end: Vector3 = pts[-1]
+	var ground := -floor_depth * _floor_of(end) + 0.05 # the blast's reach, drawn on the floor below
+	var ring := PackedVector2Array()
+	for i in 33:
+		var a := TAU * i / 32.0
+		var q := Vector3(end.x + cos(a) * BLAST_RADIUS, ground, end.z + sin(a) * BLAST_RADIUS)
+		if _camera.is_position_behind(q):
+			ring = PackedVector2Array()
+			break
+		ring.append(_camera.unproject_position(q))
+	if ring.size() > 1:
+		_hud.draw_polyline(ring, Color(amber, 0.8), 2.0)
+	if not _camera.is_position_behind(end):
+		var e := _camera.unproject_position(end)
+		_hud.draw_circle(e, 5, amber)
+		_hud.draw_string(_hud.get_theme_default_font(), e + Vector2(9, 5), "%d m" % roundi(end.distance_to(_player.position)), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, amber)
+
+
+# The heal wheel round the crosshair: one slice per pouch item, with counts.
+func _draw_radial(c: Vector2) -> void:
+	var font := _hud.get_theme_default_font()
+	var inner := 56.0
+	var outer := 150.0
+	var pick := radial_choice()
+	_hud.draw_circle(c, outer + 12, Color(0, 0.02, 0.05, 0.5))
+	for i in 4:
+		var item: String = RADIAL_ITEMS[i]
+		var def: Array = POUCH_ITEMS[item]
+		var n := int(pouch.get(item, 0))
+		var base := HEALTH_COLOUR if def[2] == "health" else Color(0.45, 0.7, 1.0)
+		var a0 := -PI + i * PI / 2.0 + 0.04
+		var a1 := a0 + PI / 2.0 - 0.08
+		var poly := PackedVector2Array()
+		for k in 13:
+			poly.append(c + Vector2.from_angle(lerpf(a0, a1, k / 12.0)) * outer)
+		for k in 13:
+			poly.append(c + Vector2.from_angle(lerpf(a1, a0, k / 12.0)) * inner)
+		var fill := Color(base, 0.55) if item == pick else Color(base.darkened(0.6), 0.55 if n > 0 else 0.25)
+		_hud.draw_colored_polygon(poly, fill)
+		poly.append(poly[0])
+		_hud.draw_polyline(poly, Color(base, 0.9 if item == pick else 0.4), 2.0)
+		var mid := c + Vector2.from_angle((a0 + a1) / 2.0) * (inner + outer) / 2.0
+		var col := Color.WHITE if n > 0 else Color(1, 1, 1, 0.35)
+		for line in [[def[0], 15, -10], ["x%d" % n, 22, 12], ["%d s" % int(def[3]), 12, 30]]:
+			var tw := font.get_string_size(line[0], HORIZONTAL_ALIGNMENT_LEFT, -1, line[1]).x
+			_hud.draw_string(font, mid + Vector2(-tw / 2.0, line[2]), line[0], HORIZONTAL_ALIGNMENT_LEFT, -1, line[1], col)
+	_hud.draw_circle(c, inner - 6, Color(0, 0.02, 0.05, 0.75))
+	var centre: String = "Cancel" if pick == "" else POUCH_ITEMS[pick][0]
+	var cw := font.get_string_size(centre, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	_hud.draw_string(font, c + Vector2(-cw / 2.0, 5), centre, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.8))
+	_hud.draw_circle(c + _radial_vec.limit_length(outer), 5, Color.WHITE)
+
+
 # --- Server events ---------------------------------------------------------------------
 
 func _on_server_error(reason: String) -> void:
 	_say(reason, 3.0)
+	_use_asked = "" # whatever it was, the server didn't start it
+	if not _using.is_empty() and _using.sent and reason.contains("not done"):
+		_using.sent = false # a hair early by the server's clock: ask again in a moment
+		_using.left = 0.25
 
 
 func _on_raid_event(msg: Dictionary) -> void:
@@ -1913,9 +2552,35 @@ func _on_raid_event(msg: Dictionary) -> void:
 			if level > before:
 				var levels: Array = Net.catalog.get("heatLevels", [])
 				_say("Security: %s" % (levels[level].name if levels else str(level)), 3.0)
-		"heal":
-			health = minf(100.0, health + float(msg.amount))
-			_say("Patched up.", 2.0)
+		"pouch":
+			pouch = msg.pouch
+			grenades = int(msg.grenades)
+			_inv.set_pouch(_pouch_text())
+		"vest":
+			vest_item = msg.vest.item
+			armor = float(msg.vest.armor)
+			_say("Wearing the %s: %d / %d armour." % [VESTS[vest_item][0].to_lower(), ceili(armor), int(vest_cap())], 3.0)
+			_inv.set_pouch(_pouch_text())
+		"loose":
+			_set_loose(msg.loose)
+		"using":
+			if msg.item == _use_asked:
+				_use_asked = ""
+				_using = {"item": msg.item, "left": float(msg.seconds), "total": float(msg.seconds), "sent": false}
+			else:
+				Net.send({"type": "raid_use_stop"}) # cancelled before the server started it
+		"used":
+			_using = {}
+			var gained := []
+			if float(msg.health) > 0.0:
+				var h := minf(HEALTH_MAX, health + float(msg.health)) - health
+				health += h
+				gained.append("+%d health" % roundi(h))
+			if float(msg.armor) > 0.0:
+				var a := minf(vest_cap(), armor + float(msg.armor)) - armor
+				armor += a
+				gained.append("+%d armour" % roundi(a))
+			_say("%s: %s" % [POUCH_ITEMS[msg.item][0], ", ".join(gained)], 2.0)
 		"drill":
 			_start_drill(float(msg.seconds))
 		"vent":
@@ -2003,6 +2668,13 @@ func _show_results(result: Dictionary) -> void:
 		for id in result.stolen:
 			s.append("%d %s" % [result.stolen[id], Net.item_name(id)])
 		lines.append("\nTaken from the owner's vault: " + ", ".join(s))
+	var kit := []
+	for item in result.get("pouch", {}):
+		kit.append("%d %s" % [int(result.pouch[item]), POUCH_ITEMS.get(item, [item])[0].to_lower()])
+	if not kit.is_empty():
+		lines.append("\nYour pouch, for the next raid: " + ", ".join(kit))
+	elif result.outcome != "extracted":
+		lines.append("\nYour pouch was lost. Next raid you start with the basic kit.")
 	lines.append("\nSell loot to the Fence at the Spaceport.")
 	var body := Label.new()
 	body.text = "\n".join(lines)

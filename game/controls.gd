@@ -18,7 +18,7 @@ const HUD_COLOURS := [
 	["Blue", Color(0.45, 0.7, 1.0)],
 ]
 
-# action, label, keyboard/mouse default, gamepad default.
+# action, label, keyboard/mouse default, gamepad default (null: none until the player binds one).
 # Keyboard: [physical key] or ["mouse", button]. Gamepad: ["button", index] or ["axis", axis, direction].
 const ACTIONS := [
 	["throttle_up", "Throttle up", [KEY_W], ["axis", JOY_AXIS_TRIGGER_RIGHT, 1]],
@@ -60,7 +60,12 @@ const ACTIONS := [
 	["foot_fire", "On foot: fire", ["mouse", MOUSE_BUTTON_LEFT], ["axis", JOY_AXIS_TRIGGER_RIGHT, 1]],
 	["foot_aim", "On foot: aim down sights", ["mouse", MOUSE_BUTTON_RIGHT], ["axis", JOY_AXIS_TRIGGER_LEFT, 1]],
 	["foot_reload", "On foot: reload", [KEY_R], ["button", JOY_BUTTON_X]],
-	["foot_heal", "On foot: use a trauma kit", [KEY_H], ["button", JOY_BUTTON_DPAD_UP]],
+	["foot_heal", "On foot: heal (tap: best item, hold: wheel)", [KEY_H], ["button", JOY_BUTTON_DPAD_UP]],
+	# Weapons share 1, 2 and the D-pad with ship power: those only act on foot, the power keys only in flight.
+	["foot_weapon_1", "On foot: rifle", [KEY_1], null],
+	["foot_weapon_2", "On foot: grenade launcher", [KEY_2], null],
+	["foot_weapon_next", "On foot: switch weapon", ["mouse", MOUSE_BUTTON_WHEEL_DOWN], ["button", JOY_BUTTON_DPAD_RIGHT]],
+	["foot_weapon_prev", "On foot: switch weapon (back)", ["mouse", MOUSE_BUTTON_WHEEL_UP], null],
 	["foot_inventory", "On foot: inventory", [KEY_TAB], ["button", JOY_BUTTON_BACK]],
 ]
 
@@ -92,8 +97,9 @@ func _install_defaults() -> void:
 			InputMap.action_erase_events(action)
 		else:
 			InputMap.add_action(action, 0.2)
-		InputMap.action_add_event(action, _make_event(a[2]))
-		InputMap.action_add_event(action, _make_event(a[3]))
+		for spec in [a[2], a[3]]:
+			if spec != null:
+				InputMap.action_add_event(action, _make_event(spec))
 
 
 func reset_to_defaults() -> void:
@@ -197,7 +203,8 @@ static func describe(e: InputEvent) -> String:
 	if e is InputEventKey:
 		return OS.get_keycode_string(e.physical_keycode)
 	if e is InputEventMouseButton:
-		return "Mouse %d" % e.button_index
+		var wheel := {MOUSE_BUTTON_WHEEL_UP: "Wheel up", MOUSE_BUTTON_WHEEL_DOWN: "Wheel down"}
+		return wheel.get(e.button_index, "Mouse %d" % e.button_index)
 	if e is InputEventJoypadButton:
 		return PAD_BUTTONS[e.button_index] if e.button_index < PAD_BUTTONS.size() else "Button %d" % e.button_index
 	if e is InputEventJoypadMotion:

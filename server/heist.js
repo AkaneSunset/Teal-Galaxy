@@ -23,8 +23,24 @@ const ITEMS = {
   drive: { name: 'Design drive', cat: 'plan', size: [1, 1], stack: 1, value: 1100, rarity: 'rare' },
   blueprint: { name: 'Blueprint case', cat: 'plan', size: [2, 3], stack: 1, value: 2600, rarity: 'epic', secure: false },
   keycard: { name: 'Access keycard', cat: 'access', size: [1, 1], stack: 1, value: 150, rarity: 'uncommon' },
-  medkit: { name: 'Trauma kit', cat: 'medical', size: [1, 1], stack: 2, value: 80, rarity: 'common' },
+  // Healing goes in the pouch, not the backpack. pouch: the most it holds, how long one takes to
+  // use, and what it restores (100 is a full bar).
+  syringe: { name: 'Syringe', cat: 'medical', size: [1, 1], stack: 4, value: 30, rarity: 'common', pouch: { cap: 4, seconds: 5, health: 25 } },
+  medkit: { name: 'Med kit', cat: 'medical', size: [1, 1], stack: 2, value: 90, rarity: 'uncommon', pouch: { cap: 2, seconds: 8, health: 100 } },
+  cell: { name: 'Shield cell', cat: 'medical', size: [1, 1], stack: 4, value: 30, rarity: 'common', pouch: { cap: 4, seconds: 3, armor: 25 } },
+  battery: { name: 'Shield battery', cat: 'medical', size: [1, 1], stack: 2, value: 90, rarity: 'uncommon', pouch: { cap: 2, seconds: 5, armor: 100 } },
+  // Armour vests: worn, not carried, and only for the raid. vest: the armour it holds.
+  vest50: { name: 'Armour vest', cat: 'armor', size: [2, 2], stack: 1, value: 0, rarity: 'common', vest: 50 },
+  vest75: { name: 'Heavy vest', cat: 'armor', size: [2, 2], stack: 1, value: 0, rarity: 'rare', vest: 75 },
+  vest100: { name: 'Assault vest', cat: 'armor', size: [2, 2], stack: 1, value: 0, rarity: 'epic', vest: 100 },
 };
+
+// What a raider brings when their pouch is empty (a new raider, or after losing it).
+const STARTER_POUCH = { syringe: 2, medkit: 1, cell: 2, battery: 1 };
+const STARTER_VEST = 'vest50';
+const LAUNCHER_ROUNDS = 7; // grenades for the whole raid
+const LAUNCHER_GAP_MS = 1000;
+const GRENADE_HEAT = 4;
 
 // Rarer items get more weight at higher security tiers (tier 1 = x1).
 const RARITY_BOOST = { common: 0, uncommon: 0.25, rare: 0.6, epic: 1.0, legendary: 1.5 };
@@ -99,17 +115,19 @@ const EXTRACTS = { ship: { name: 'Your ship', countdown: 3 } };
 const BAIL_WINDOW_MS = 120_000;
 const BACKPACK = [6, 4];
 const SECURE_CASE = [2, 2];
-const CONTAINER_GRIDS = { locker: [3, 3], crate: [4, 3], desk: [3, 2], rack: [3, 3], vault: [5, 4] };
+const CONTAINER_GRIDS = { locker: [3, 3], crate: [4, 3], desk: [3, 2], rack: [3, 3], vault: [5, 4], medcab: [3, 2] };
 const SEARCH_MS = { common: 400, uncommon: 600, rare: 900, epic: 1200, legendary: 1500 };
 const FENCE_RATE = 0.5;
 
 // Loot tables per container. [item, weight, qtyMin, qtyMax]
 const TABLES = {
-  locker: { rolls: [1, 3], none: 2, entries: [['scrap', 6, 1, 6], ['medkit', 3, 1, 1], ['circuit', 3, 1, 1], ['wafer', 1, 1, 1]] },
-  crate: { rolls: [2, 4], none: 1, entries: [['scrap', 5, 2, 10], ['alloy', 4, 1, 4], ['circuit', 3, 1, 1], ['isotope', 1, 1, 2], ['medkit', 1, 1, 1]] },
+  locker: { rolls: [1, 3], none: 2, entries: [['scrap', 6, 1, 6], ['syringe', 1.5, 1, 2], ['cell', 1.5, 1, 2], ['circuit', 3, 1, 1], ['wafer', 1, 1, 1]] },
+  crate: { rolls: [2, 4], none: 1, entries: [['scrap', 5, 2, 10], ['alloy', 4, 1, 4], ['circuit', 3, 1, 1], ['isotope', 1, 1, 2], ['medkit', 0.5, 1, 1], ['battery', 0.5, 1, 1]] },
   desk: { rolls: [1, 3], none: 2, entries: [['wafer', 3, 1, 2], ['shard', 2, 1, 1], ['circuit', 2, 1, 1], ['art', 0.6, 1, 1]] },
   rack: { rolls: [1, 3], none: 1, entries: [['shard', 4, 1, 1], ['circuit', 4, 1, 1], ['dossier', 1, 1, 1], ['drive', 0.5, 1, 1]] },
   vault: { rolls: [1, 2], none: 0, entries: [['wafer', 3, 1, 3], ['art', 2, 1, 1], ['exotic', 0.6, 1, 1], ['drive', 0.6, 1, 1]] },
+  // The wall med cabinet. Vests are rare and epic, so they turn up mostly on the deeper levels.
+  medcab: { rolls: [2, 4], none: 0.5, entries: [['syringe', 4, 1, 2], ['cell', 4, 1, 2], ['medkit', 2, 1, 1], ['battery', 2, 1, 1], ['vest75', 0.5, 1, 1], ['vest100', 0.15, 1, 1]] },
 };
 const CONTAINERS_BY_RING = { perimeter: ['locker', 'crate'], interior: ['desk', 'rack', 'crate', 'locker'] };
 
@@ -142,8 +160,9 @@ const DESTROY_HEAT = 5; // an explosion outside
 const VENT_SECONDS = 6; // cutting through a vent grate, quietly
 const WAVE_MS = 60_000; // reinforcements arrive every minute inside...
 const WAVE_MAX = 5; // ...one more each time, up to this many
-const SELF_DESTRUCT_BASE_S = 60; // the self-destruct timer: this, plus...
-const SELF_DESTRUCT_PER_FLOOR_S = 30; // ...this for every level you have to climb back up
+const SELF_DESTRUCT_BASE_S = 70; // the self-destruct timer: this (the run out to the ship), plus...
+const SELF_DESTRUCT_PER_FLOOR_S = 30;
+const PAD_OFF = 50; // metres from the site's south edge to the landing pad // ...this for every level you have to climb back up
 
 // --- Seeded random numbers ---------------------------------------------------------------
 
@@ -286,6 +305,36 @@ function tryLayout(seed, tier, type, floorCount, site, now) {
     types.forEach((t, i) => containers.push({ id: `c${containers.length}`, floor: room.floor, room: room.id, type: t, pos: spots[i], grid: CONTAINER_GRIDS[t] }));
   }
 
+  // Health supplies, from their own random numbers so the rest of the layout stays as it was.
+  // A wall med cabinet (the green cross) in about one room in three, more often deeper down; it
+  // hangs beside the doorway, clear of the corner containers. Loose syringes and shield cells lie
+  // on shelves and floors, and a vest now and then, better ones deeper in.
+  const mr = rng((seed ^ 0x9e3779b9) >>> 0);
+  const WALL_SPOTS = [[[-6.65, 3.2], 'west'], [[6.65, -3.2], 'east'], [[3.2, -6.65], 'north'], [[-3.2, 6.65], 'south']];
+  for (const room of rooms) {
+    if (room.id === vault || mr.next() >= 0.22 + 0.06 * room.floor) continue;
+    const [pos, wall] = mr.pick(WALL_SPOTS);
+    containers.push({ id: `c${containers.length}`, floor: room.floor, room: room.id, type: 'medcab', pos, wall, grid: CONTAINER_GRIDS.medcab });
+  }
+  const loose = [];
+  const FLOOR_SPOTS = [[-2.6, -5.6], [2.6, 5.6], [5.6, -2.6], [-5.6, 2.6], [0, 4.2], [-4.2, 0]];
+  const used = new Set();
+  const lay = (floor, item, qty) => {
+    const own = rooms.filter((room) => room.floor === floor && room.id !== vault);
+    for (let tries = 0; tries < 10; tries++) {
+      const room = mr.pick(own);
+      const spot = mr.int(0, FLOOR_SPOTS.length - 1);
+      if (used.has(`${room.id}:${spot}`)) continue;
+      used.add(`${room.id}:${spot}`);
+      loose.push({ id: `l${loose.length}`, floor, room: room.id, pos: FLOOR_SPOTS[spot], item, qty });
+      return;
+    }
+  };
+  for (const fl of floors) {
+    for (let i = 0; i < 1 + Math.floor(fl.n / 2); i++) lay(fl.n, mr.next() < 0.5 ? 'syringe' : 'cell', mr.int(1, 2));
+    if (mr.next() < (fl.n === 1 ? 0.1 : 0.35)) lay(fl.n, fl.n >= 3 && mr.next() < 0.5 ? 'vest100' : 'vest75', 1);
+  }
+
   // Guards patrol short loops of rooms on their own level: more of them, the deeper you go.
   const guards = [];
   const turrets = [];
@@ -319,7 +368,7 @@ function tryLayout(seed, tier, type, floorCount, site, now) {
   return {
     seed, tier, type, room: ROOM, tile: TILE, floorDepth: FLOOR_DEPTH,
     ...outside,
-    floors, rooms, doors, vault, containers, guards, turrets, boss, extracts,
+    floors, rooms, doors, vault, containers, loose, guards, turrets, boss, extracts,
   };
 }
 
@@ -412,7 +461,7 @@ function siteLayout(site, tier, r, now) {
     powered: pieces.some((p) => p.type === 'power') ? 'plant' : 'core',
     door: [0, core / 2], // the blast door, on the south edge of the core's pad
     vents: [{ id: 'v0', pos: [-core / 2, 0], side: 'west' }, { id: 'v1', pos: [core / 2, 0], side: 'east' }, { id: 'v2', pos: [0, -core / 2], side: 'north' }],
-    pad: [0, half + 10], // where the raider's ship sets down, just off the south edge of the site
+    pad: [0, half + PAD_OFF], // where the raider's ship sets down, out of the site's turret range
   };
 }
 
@@ -517,7 +566,7 @@ function selfDestructSeconds(floors) {
 // Starts a raid on a facility. `facility` is the building object in galaxy state, `site` the
 // satellite site it stands on (if any); the exposed part of its vault moves into escrow so the
 // Builder can't ship what raiders are stealing.
-function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = null }) {
+function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = null, pouch = null }) {
   const tier = facility.security || 1;
   const floors = floorsOf(facility);
   const layout = generateLayout(seed, tier, facility.type, { floors, site, now });
@@ -539,8 +588,9 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
   for (const [item, qty] of Object.entries(escrow)) for (const s of stacks(item, qty)) contents[vaultBoxes[i++ % vaultBoxes.length].id].push({ ...s, vaultQty: s.qty });
   for (const c of vaultBoxes) contents[c.id].push(...rollTable(TABLES.vault, lootTier(c), def.bias, r).flatMap((s) => stacks(s.item, s.qty)));
   // One keycard for the safe room, somewhere else on the deepest level.
-  const deep = layout.containers.filter((c) => c.type !== 'vault' && c.floor === floors);
-  const keyBox = r.pick(deep.length ? deep : layout.containers.filter((c) => c.type !== 'vault'));
+  const plain = layout.containers.filter((c) => c.type !== 'vault' && c.type !== 'medcab');
+  const deep = plain.filter((c) => c.floor === floors);
+  const keyBox = r.pick(deep.length ? deep : plain);
   contents[keyBox.id].push({ item: 'keycard', qty: 1 });
 
   // Lay each container's items into its grid; anything that doesn't fit isn't there.
@@ -558,6 +608,7 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
       }
       // vaultQty: how many of these came from the Builder's vault (the rest is ordinary loot).
       const it = { uid: `i${uid++}`, item: s.item, qty: s.qty, vaultQty: s.vaultQty || 0 };
+      if (ITEMS[s.item].vest) it.armor = ITEMS[s.item].vest;
       grid.place(it.uid, rect);
       items.push(it);
     }
@@ -568,6 +619,9 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
     else facility.vault[item] -= qty;
   }
   facility.escrow = escrow;
+  const loose = {};
+  for (const l of layout.loose) loose[l.id] = { ...l, ...(ITEMS[l.item].vest ? { armor: ITEMS[l.item].vest } : {}) };
+  const carried = startingPouch(pouch);
 
   return {
     id: `run-${seed.toString(36)}`,
@@ -593,8 +647,26 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
     breachedAt: null,
     wave: 0, // reinforcement waves sent so far
     selfDestructAt: null, // set when the vault opens
+    pouch: carried, // item -> count; the server keeps the counts
+    pouchStart: { ...carried },
+    vest: { item: STARTER_VEST, armor: ITEMS[STARTER_VEST].vest }, // armour as of the last swap
+    using: null, // {item, since} while a pouch item is being used
+    loose, // id -> pickups lying in the facility
+    looseUid: layout.loose.length,
+    grenades: LAUNCHER_ROUNDS,
+    grenadeAt: null,
     status: 'live',
   };
+}
+
+// The pouch a raider brings: what they extracted with last time, or the starter kit if that's empty.
+function startingPouch(saved) {
+  const out = {};
+  for (const [item, n] of Object.entries(saved || {})) {
+    const cap = ITEMS[item]?.pouch?.cap;
+    if (cap && n >= 1) out[item] = Math.min(cap, Math.floor(n));
+  }
+  return Object.keys(out).length ? out : { ...STARTER_POUCH };
 }
 
 // The part of a run the raider's app is allowed to know at the start: no container contents.
@@ -612,6 +684,10 @@ function briefing(run, now) {
     vaultOpen: run.vaultOpen,
     extracts: extractStates(run, now),
     inventory: inventoryView(run),
+    pouch: run.pouch,
+    vest: run.vest,
+    loose: looseView(run),
+    grenades: run.grenades,
     backpack: BACKPACK,
     secure: SECURE_CASE,
   };
@@ -623,6 +699,10 @@ function inventoryView(run) {
   for (const [gridName, grid] of [['backpack', run.inv.backpack], ['secure', run.inv.secure]])
     for (const [uid, rect] of Object.entries(grid.placed)) out.push({ ...publicItem(run.inv.items[uid]), grid: gridName, rect });
   return out;
+}
+
+function looseView(run) {
+  return Object.values(run.loose).map((l) => ({ ...l, name: ITEMS[l.item].name }));
 }
 
 function addHeat(run, amount) {
@@ -800,16 +880,42 @@ function revealed(run, now) {
 
 function publicItem(it) {
   const def = ITEMS[it.item];
-  return { uid: it.uid, item: it.item, qty: it.qty, name: def.name, cat: def.cat, rarity: def.rarity, size: def.size, value: def.value };
+  const out = { uid: it.uid, item: it.item, qty: it.qty, name: def.name, cat: def.cat, rarity: def.rarity, size: def.size, value: def.value };
+  if (def.vest) Object.assign(out, { armor: it.armor ?? def.vest, vest: def.vest });
+  return out;
 }
 
-function take(run, uid, to, now) {
+// `armor`: what's left on the vest the raider is wearing, for when they swap it for one in here.
+function take(run, uid, to, now, armor = 0) {
   const box = run.open && run.boxes[run.open];
   if (!box) return fail('open a container first');
   const it = box.items.find((x) => x.uid === uid);
   if (!it) return fail('not in this container');
   if (!(box.revealAt[uid] <= now)) return fail('still searching');
   const def = ITEMS[it.item];
+  const gone = () => {
+    box.grid.remove(uid);
+    box.items = box.items.filter((x) => x.uid !== uid);
+    delete box.revealAt[uid];
+  };
+  if (def.pouch) {
+    const n = pouchAdd(run, it.item, it.qty);
+    if (!n) return fail(`no room in your pouch for another ${def.name.toLowerCase()}`);
+    it.qty -= n;
+    if (it.qty <= 0) gone();
+    return { ok: true, pouch: true, partial: it.qty > 0 };
+  }
+  if (def.vest) {
+    // Put it on; the old vest goes where this one was (every vest is the same size).
+    const rect = box.grid.placed[uid];
+    const old = wearVest(run, it.item, it.armor ?? def.vest, armor);
+    gone();
+    const back = { uid: `${uid}w${run.looseUid++}`, item: old.item, qty: 1, vaultQty: 0, armor: old.armor };
+    box.grid.place(back.uid, rect);
+    box.items.push(back);
+    box.revealAt[back.uid] = now;
+    return { ok: true, vest: run.vest };
+  }
   if (to === 'secure' && def.secure === false) return fail(`${def.name} won't fit the Secure Case`);
   const grid = to === 'secure' ? run.inv.secure : run.inv.backpack;
   const before = it.qty;
@@ -874,16 +980,76 @@ function stow(run, uid, to) {
   return { ok: true };
 }
 
-function use(run, uid) {
-  const it = run.inv.items[uid];
-  if (!it || ITEMS[it.item].cat !== 'medical') return fail('nothing to use');
-  it.qty -= 1;
-  if (it.qty <= 0) {
-    run.inv.backpack.remove(uid);
-    run.inv.secure.remove(uid);
-    delete run.inv.items[uid];
+// --- The pouch, vests and the grenade launcher ----------------------------------------------
+
+// Adds up to `qty` of a pouch item, as far as its cap allows. Returns how many went in.
+function pouchAdd(run, item, qty) {
+  const n = Math.max(0, Math.min(qty, ITEMS[item].pouch.cap - (run.pouch[item] || 0)));
+  if (n > 0) run.pouch[item] = (run.pouch[item] || 0) + n;
+  return n;
+}
+
+// Swaps the worn vest for `item` (with `armor` on it). `left` is what the raider's app says is
+// left on the old one. Returns the old vest, to lie where the new one was.
+function wearVest(run, item, armor, left) {
+  const old = run.vest;
+  const cap = ITEMS[old.item].vest;
+  run.vest = { item, armor: Math.max(0, Math.min(ITEMS[item].vest, Number(armor) || 0)) };
+  return { item: old.item, armor: Math.max(0, Math.min(cap, Math.round(Number(left) || 0))) };
+}
+
+// Using a pouch item takes time: start, then finish once it's done. Stopping (firing, sprinting,
+// swapping weapons) uses nothing.
+function useStart(run, item, now) {
+  const def = ITEMS[item]?.pouch;
+  if (!def) return fail('nothing to use');
+  if (!(run.pouch[item] > 0)) return fail(`no ${ITEMS[item].name.toLowerCase()}s left`);
+  run.using = { item, since: now };
+  return { ok: true, item, seconds: def.seconds };
+}
+
+function useStop(run) {
+  run.using = null;
+  return { ok: true };
+}
+
+function useFinish(run, now) {
+  if (!run.using) return fail('not using anything');
+  const { item, since } = run.using;
+  const def = ITEMS[item].pouch;
+  if (now - since < def.seconds * 1000 - 250) return fail('not done yet');
+  run.using = null;
+  run.pouch[item] -= 1;
+  if (run.pouch[item] <= 0) delete run.pouch[item];
+  return { ok: true, item, health: def.health || 0, armor: def.armor || 0 };
+}
+
+// Picking up something lying in the facility: into the pouch (what fits; the rest stays), or a
+// vest to wear, leaving the old one in its place.
+function pickUp(run, id, armor) {
+  const l = run.loose[id];
+  if (!l) return fail('nothing there');
+  if (!run.breached) return fail('get inside the facility first');
+  const def = ITEMS[l.item];
+  if (def.vest) {
+    const old = wearVest(run, l.item, l.armor ?? def.vest, armor);
+    Object.assign(l, old);
+    return { ok: true, vest: run.vest };
   }
-  return { ok: true, heal: 50 };
+  const n = pouchAdd(run, l.item, l.qty);
+  if (!n) return fail(`no room in your pouch for another ${def.name.toLowerCase()}`);
+  l.qty -= n;
+  if (l.qty <= 0) delete run.loose[id];
+  return { ok: true, taken: n };
+}
+
+// A grenade leaves the launcher. The server counts the rounds; a burst is loud.
+function fireGrenade(run, now) {
+  if (run.grenades <= 0) return fail('the launcher is empty');
+  if (run.grenadeAt !== null && now - run.grenadeAt < LAUNCHER_GAP_MS - 150) return fail('the launcher is still cycling');
+  run.grenades -= 1;
+  run.grenadeAt = now;
+  return { ok: true, left: run.grenades, changed: addHeat(run, GRENADE_HEAT) };
 }
 
 // --- Stage 3: the safe room and the self-destruct --------------------------------------------
@@ -962,6 +1128,8 @@ function finish(run, outcome, now) {
     value: value(kept),
     heatPeak: run.heat,
     destroyed: run.destroyed.length,
+    // The pouch goes home with you; die and it's lost. Bailing out early keeps what you brought.
+    pouch: outcome === 'extracted' ? { ...run.pouch } : outcome === 'bailed' ? { ...run.pouchStart } : {},
     deepest: run.deepest || (run.breached ? 1 : 0),
     seconds: Math.round((now - run.startedAt) / 1000),
   };
@@ -969,6 +1137,12 @@ function finish(run, outcome, now) {
 
 module.exports = {
   ITEMS,
+  STARTER_POUCH,
+  STARTER_VEST,
+  LAUNCHER_ROUNDS,
+  LAUNCHER_GAP_MS,
+  GRENADE_HEAT,
+  PAD_OFF,
   FACILITIES,
   SECURITY,
   EXTRACTS,
@@ -1022,7 +1196,15 @@ module.exports = {
   take,
   drop,
   stow,
-  use,
+  pouchAdd,
+  startingPouch,
+  looseView,
+  wearVest,
+  useStart,
+  useStop,
+  useFinish,
+  pickUp,
+  fireGrenade,
   useKeycard,
   drillStart,
   drillStop,
