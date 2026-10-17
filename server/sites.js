@@ -72,6 +72,47 @@ function newSite(g, owner, home, facilityName) {
   };
 }
 
+// --- Where sites sit on the planet ----------------------------------------------------------
+
+// Every home base and satellite site has a place on its planet's surface, [lat, lon] in degrees.
+// New sites take the spot furthest from everything already on the planet, so on the hologram in
+// the High Port's Terminal Hall each one stands clearly apart. Candidates keep away from the poles.
+const HOME_SPOT = [15, 30];
+
+function angleBetween(a, b) {
+  const r = Math.PI / 180;
+  const [la1, lo1, la2, lo2] = [a[0] * r, a[1] * r, b[0] * r, b[1] * r];
+  const c = Math.sin(la1) * Math.sin(la2) + Math.cos(la1) * Math.cos(la2) * Math.cos(lo1 - lo2);
+  return Math.acos(Math.max(-1, Math.min(1, c))) / r;
+}
+
+function surfaceSpot(taken) {
+  let best = null;
+  let bestGap = -1;
+  for (let lat = -60; lat <= 60; lat += 10) {
+    for (let lon = 0; lon < 360; lon += 10) {
+      const gap = Math.min(...taken.map((t) => angleBetween(t, [lat, lon])));
+      if (gap > bestGap + 1e-9) [best, bestGap] = [[lat, lon], gap];
+    }
+  }
+  return best;
+}
+
+// Gives every home planet and site that has no place on its planet one, in founding order.
+// Safe to call any time (on load, after founding a site): places already given never change.
+function locate(g) {
+  for (const home of g.system.planets.filter((p) => p.kind !== 'satellite')) {
+    if (!Array.isArray(home.surface)) home.surface = HOME_SPOT.slice();
+    for (const site of g.system.planets.filter((p) => p.kind === 'satellite' && p.parent === home.id)) {
+      if (Array.isArray(site.surface)) continue;
+      const taken = [home.surface, ...g.system.planets
+        .filter((p) => p.kind === 'satellite' && p.parent === home.id && Array.isArray(p.surface))
+        .map((p) => p.surface)];
+      site.surface = surfaceSpot(taken);
+    }
+  }
+}
+
 // Scatters the starting obstacles on free tiles, the same way every time for a given site id.
 function scatter(site) {
   site.obstacles ||= [];
@@ -152,4 +193,4 @@ function defence(site, now = Date.now()) {
   return { attack, hull };
 }
 
-module.exports = { GRID, CORE, MAX_SITES, PIECES, OBSTACLES, coreRect, newSite, scatter, place, remove, clear, defence };
+module.exports = { GRID, CORE, MAX_SITES, PIECES, OBSTACLES, coreRect, newSite, scatter, place, remove, clear, defence, locate, angleBetween };

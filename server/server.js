@@ -26,6 +26,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   if (saveFile && fs.existsSync(saveFile)) {
     galaxy = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
     G.recoverRaids(galaxy);
+    S.locate(galaxy); // sites founded before they had a place on their planet get one
     console.log(`Loaded galaxy from ${saveFile}`);
   }
   // Demo mode builds 10 times faster; tests can pass Infinity for instant buildings.

@@ -796,6 +796,22 @@ func _sites() -> Array:
 	return Net.facilities().filter(func(f): return f.planet == planet_id or Net.planet(f.planet).get("parent", "") == planet_id)
 
 
+## Where a base or site sits on its planet, [lat, lon] in degrees, as the server placed it.
+## Older servers didn't place them; fall back to a spot from its id.
+func _surface_spot(id: String) -> Vector2:
+	var surface = Net.planet(id).get("surface")
+	if surface is Array and surface.size() == 2:
+		return Vector2(float(surface[0]), float(surface[1]))
+	var h := absi(hash(id))
+	return Vector2(float(h % 100) - 50.0, float((h / 100) % 360))
+
+
+func _lat_lon(id: String) -> String:
+	var s := _surface_spot(id)
+	var lon := wrapf(s.y, -180.0, 180.0)
+	return "%d°%s %d°%s" % [absi(int(s.x)), "N" if s.x >= 0 else "S", absi(int(lon)), "E" if lon >= 0 else "W"]
+
+
 func _site_name(f: Dictionary) -> String:
 	var site := Net.planet(f.planet)
 	return site.name if site.get("kind", "") == "satellite" else f.name
@@ -807,11 +823,11 @@ func _refresh_boards() -> void:
 	var owner: String = str(_planet.get("owner", "nobody")) if _planet.get("owner") != null else "nobody"
 	var sites := _sites()
 	# Terminal Hall: every site, its security and whether it's under raid; the globe's markers.
-	var status := ["%s's home base   %s" % [owner, "SPACEPORT OPEN" if Net.has_building("spaceport", planet_id) else "NO SPACEPORT"]]
+	var status := ["%s's home base   %s   %s" % [owner, _lat_lon(planet_id), "SPACEPORT OPEN" if Net.has_building("spaceport", planet_id) else "NO SPACEPORT"]]
 	var ops := []
 	for f in sites:
 		var raided := not Net.raid_on(f.planet, f.slot).is_empty()
-		status.append("%s   tier %d   %s" % [_site_name(f), int(f.building.security), "UNDER RAID" if raided else "SECURE"])
+		status.append("%s   %s   tier %d   %s" % [_site_name(f), _lat_lon(f.planet), int(f.building.security), "UNDER RAID" if raided else "SECURE"])
 		if raided:
 			var r := Net.raid_on(f.planet, f.slot)
 			ops.append("%s   UNDER RAID   heat %d" % [_site_name(f), int(r.get("heat", 0))])
@@ -829,14 +845,14 @@ func _refresh_boards() -> void:
 	for f in sites:
 		markers.append({"name": _site_name(f), "id": f.planet, "raided": not Net.raid_on(f.planet, f.slot).is_empty()})
 	for m in markers:
-		var h := absi(hash(m.id))
-		var lat := deg_to_rad(float(h % 100) - 50.0)
-		var lon := deg_to_rad(float((h / 100) % 360))
+		var spot := _surface_spot(m.id)
+		var lat := deg_to_rad(spot.x)
+		var lon := deg_to_rad(spot.y)
 		var p := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)) * 2.95
 		var dot := MeshInstance3D.new()
 		var mesh := SphereMesh.new()
-		mesh.radius = 0.16
-		mesh.height = 0.32
+		mesh.radius = 0.22
+		mesh.height = 0.44
 		mesh.material = _mat(ALERT if m.raided else CYAN, 4.0)
 		dot.mesh = mesh
 		dot.position = p
@@ -846,7 +862,7 @@ func _refresh_boards() -> void:
 		tag.position = p * 1.18
 		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		tag.pixel_size = 0.004
-		tag.font_size = 72
+		tag.font_size = 96
 		tag.modulate = ALERT if m.raided else SCREEN_TEXT
 		_globe_markers.add_child(tag)
 

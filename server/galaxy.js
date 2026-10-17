@@ -146,6 +146,7 @@ function claimBase(g, name) {
   const pname = PLANET_NAMES.find((n) => !taken.has(n)) || `Colony ${g.system.planets.length + 1}`;
   const p = { id: pname.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name: pname, owner: name, slots: 6, buildings: [] };
   g.system.planets.push(p);
+  S.locate(g);
   g.bases[name] = newEconomy();
   log(g, `${name} founded a base on ${pname}`);
   return p;
@@ -391,6 +392,7 @@ function foundSite(g, owner, type) {
   r.site.buildings.push(b);
   S.scatter(r.site);
   g.system.planets.push(r.site);
+  S.locate(g);
   log(g, `${owner} founded ${r.site.name}`);
   return { ok: true, site: r.site };
 }
