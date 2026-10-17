@@ -8,6 +8,8 @@ const ExplorerMode := preload("res://explorer.gd")
 # [file name, slot (-1 = station centre), eye position, point looked at], in each slot's own space.
 const SPOTS := [
 	["01-hangar", 0, Vector3(-6, 1.65, 3), Vector3(6, 1.0, 24)],
+	["01b-hangar-your-ship-ramp", 0, Vector3(6.5, 1.65, 13.5), Vector3(10.5, 1.2, 22)],
+	["01c-hangar-open-and-locked-ships", 0, Vector3(-4.5, 1.65, 3.5), Vector3(-11, 1.8, 16)],
 	["02-hangar-pad-board", 0, Vector3(4, 1.65, 4), Vector3(-17, 3.5, 12)],
 	["03-concourse-ring", -1, Vector3(25.5, 1.65, -3.5), Vector3(19, 1.6, 16)],
 	["04-terminal-hall", -1, Vector3(-3, 1.65, -15), Vector3(0, 3.6, 0)],
@@ -57,7 +59,16 @@ func _process(delta: float) -> void:
 		_i = 0
 		_wait = 2.0
 		return
-	if _i >= SPOTS.size():
+	if _i == SPOTS.size():
+		# Last: walk onto your own ship's ramp, which should take you back aboard.
+		for sh in _explorer._station._ships:
+			if sh.mine:
+				_explorer._station._player.global_position = sh.entry.global_position + Vector3(0, -0.2, 0)
+		_i += 1
+		_wait = 1.5
+		return
+	if _i > SPOTS.size():
+		print("PASS ramp boards your ship" if _explorer._station == null and _explorer._dock_panel.visible else "FAIL ramp did not board your ship")
 		get_tree().quit()
 		return
 	var spot: Array = SPOTS[_i]

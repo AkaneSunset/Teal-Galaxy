@@ -126,7 +126,7 @@ facilities to be taken straight down to it and raid it. After a raid you're shut
 High Port, docked. Esc goes back a step or undocks.
 
 **Inside the High Port.** From the docked menu, *Walk into ... on foot* takes you inside the station
-(`game/station.gd`), built from Akane's concept art. You arrive in the Hangar beside your ship on pad 06.
+(`game/station.gd`), built from Akane's concept art. You arrive down your ship's ramp on pad 06. Every ship has an exit ramp: a landed ship that's open has its ramp down, and walking up it boards the ship (yours takes you back to the cockpit); a locked ship keeps its ramp up.
 A Concourse Ring lined with windows circles the Planetary Terminal Hall, where a hologram of the planet
 marks every base and site (red while under raid) and the Surface Transit consoles plan trips down.
 Off the ring: Ship Services (repairs your ship), the Supply Shop, the Commodity Exchange, the Job Board

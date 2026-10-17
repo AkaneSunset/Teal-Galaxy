@@ -73,6 +73,7 @@ var _pitch := 0.0
 var _mats := {}
 var _rooms := {} # slot -> room Node3D (origin at its door, +Z into the room)
 var _uses := [] # {"node": Node3D, "prompt": Callable, "action": Callable}
+var _ships := [] # landed ships: {"root", "entry": Marker3D, "owner", "open", "mine", "pad"}
 var _globe: Node3D
 var _globe_markers: Node3D
 var _boards := {} # name -> Label3D, refreshed from the server state
@@ -678,24 +679,21 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 		_box(room, Vector3(0.9, 0.015, 0.35), Vector3(-15.0 + i * 2.0, 0.008, 6.6), HAZARD if i % 2 == 0 else Color(0.08, 0.08, 0.08), false, 0.3, 1.0, Vector3(0, 30, 0))
 	# Six pads: 01 to 06. Yours is 06.
 	var pads := [Vector3(-11, 0, 14), Vector3(0, 0, 14), Vector3(11, 0, 14), Vector3(-11, 0, 26), Vector3(0, 0, 26), Vector3(11, 0, 26)]
-	var taken := [true, false, false, true, false, true]
+	# Who is on which pad, and whether their ship is open (landed, ramp down) or locked (ramp up).
+	var parked := {0: ["Rook", true], 3: ["BlueLeader", false], 5: [Net.my_name if Net.my_name != "" else "You", true]}
 	for i in pads.size():
 		var p: Vector3 = pads[i]
 		_cyl(room, 4.0, 0.35, p + Vector3(0, 0.17, 0), TRIM)
 		_cyl(room, 3.4, 0.06, p + Vector3(0, 0.37, 0), Color(0.18, 0.22, 0.26), false)
 		_ring_line(room, 3.7, p + Vector3(0, 0.37, 0), CYAN, 0.15, 3.0)
-		_ring_line(room, 2.2, p + Vector3(0, 0.41, 0), CYAN if not taken[i] else HAZARD, 0.06, 2.0)
+		_ring_line(room, 2.2, p + Vector3(0, 0.41, 0), HAZARD if parked.has(i) else CYAN, 0.06, 2.0)
 		_text(room, "%02d" % (i + 1), p + Vector3(0, 0.42, -3.0), Vector3.UP, 120, Color(0.85, 0.9, 0.95))
-		if taken[i]:
-			var ship := Models.starter_ship()
-			ship.position = p + Vector3(0, 1.85, 0)
-			ship.rotation_degrees.y = 180.0 if i != 5 else 160.0
-			room.add_child(ship)
-	_use(room, pads[5] + Vector3(-1.5, 1.0, -4.5), func(): return "Pad 06: your ship. Press %s to board it" % _key(), func(): left.emit("ship"))
+		if parked.has(i):
+			_landed_ship(room, p, 180.0 if i != 5 else 165.0, parked[i][0], parked[i][1], i == 5, i + 1)
 	_sign(room, "DOCK 07 · PADS 01-06", Vector3(0, 6.0, 0.5), Vector3.BACK, 80)
 	_sign(room, "PRESSURIZED", Vector3(-6.5, 5.2, 0.5), Vector3.BACK, 44, Color(0.4, 1.0, 0.55))
 	var board := _screen(room, Vector3(-w / 2.0 + 0.3, 4.6, 9.0), Vector3.RIGHT, Vector2(8.0, 4.0), "PAD ASSIGNMENTS", "", 80, 52)
-	board.text = "01  IN USE        02  AVAILABLE\n\n03  AVAILABLE     04  IN USE\n\n05  AVAILABLE     06  IN USE (YOU)"
+	board.text = "01  ROOK · OPEN           02  AVAILABLE\n\n03  AVAILABLE             04  BLUELEADER · LOCKED\n\n05  AVAILABLE             06  YOU · OPEN"
 	_console(room, Vector3(-w / 2.0 + 1.2, 0, 3.0), Vector3.RIGHT, "DOCK CONTROL", "Shield: holding\nTraffic: light", 2.2)
 	for x in [-12.0, -4.0, 4.0, 12.0]:
 		for z in [10.0, 22.0]:
@@ -703,6 +701,98 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 	_light(room, Vector3(-9, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
 	_light(room, Vector3(9, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
 	_light(room, Vector3(0, h - 1, 28), Color(0.6, 0.85, 1.0), 1.0, 18.0)
+
+
+## A ship standing on a pad on its landing gear. Every ship has an exit ramp under its hull: while the
+## ship is open the ramp is down and anyone can walk up it and board; while locked the ramp is up.
+func _landed_ship(room: Node3D, pad: Vector3, yaw: float, owner: String, open: bool, mine: bool, pad_no: int) -> void:
+	var spec: Dictionary = Models.RAMPS.starter_ship
+	var root := Node3D.new()
+	root.position = pad
+	root.rotation_degrees.y = yaw
+	room.add_child(root)
+	var lift: float = 0.37 + spec.landed_height # the pad's top, plus the gear
+	var ship := Models.starter_ship()
+	ship.position = Vector3(0, lift, 0)
+	root.add_child(ship)
+	# Landing gear: four struts with feet, clear of the ramp.
+	for g in [Vector3(-1.9, 0, -2.8), Vector3(1.9, 0, -2.8), Vector3(-1.9, 0, 3.4), Vector3(1.9, 0, 3.4)]:
+		var top := lift - 1.3
+		_cyl(root, 0.12, top - 0.37, g + Vector3(0, 0.37 + (top - 0.37) / 2.0, 0), TRIM, false)
+		_cyl(root, 0.32, 0.12, g + Vector3(0, 0.43, 0), PANEL, false)
+		_cyl(root, 0.2, 0.3, g + Vector3(0, top - 0.1, 0), PANEL, false)
+	# The hull blocks walking underneath it.
+	_box(root, Vector3(4.6, 2.6, 9.6), Vector3(0, lift, 0.6), Color(0, 0, 0), true, 0.0, 0.0)
+	# The hatch, and the ramp: down to the floor when open, folded up under the hull when locked.
+	var hatch: Vector3 = spec.hatch + Vector3(0, lift, 0)
+	var width: float = spec.width
+	_box(root, Vector3(width, 0.04, 1.8), hatch + Vector3(0, 0.02, 0.9), Color(0.03, 0.03, 0.04), false)
+	var foot := Vector3(0, 0.03, hatch.z + 4.2)
+	var run := foot - hatch
+	var ramp := Node3D.new()
+	root.add_child(ramp)
+	if open:
+		ramp.position = (hatch + foot) / 2.0
+		ramp.rotation.x = atan2(-run.y, run.z)
+		_light(root, hatch + Vector3(0, -0.4, 0.6), Color(1.0, 0.85, 0.6), 1.2, 4.0)
+	else:
+		ramp.position = hatch + Vector3(0, -0.06, run.length() / 2.0 - 0.3)
+	var length := run.length()
+	_box(ramp, Vector3(width, 0.1, length), Vector3.ZERO, Color(0.4, 0.42, 0.45), open)
+	for s in [-1, 1]:
+		_box(ramp, Vector3(0.06, 0.06, length - 0.2), Vector3(s * (width / 2.0 - 0.05), 0.07, 0), CYAN if open else ALERT, false, 2.5)
+	for k in range(1, int(length / 0.45)):
+		_box(ramp, Vector3(width - 0.2, 0.03, 0.05), Vector3(0, 0.06, -length / 2.0 + k * 0.45), TRIM, false)
+	var tag := Label3D.new()
+	tag.text = "%s\n%s" % ["YOUR SHIP" if mine else "%s'S SHIP" % owner.to_upper(), "OPEN · RAMP DOWN" if open else "LOCKED"]
+	tag.position = Vector3(0, lift + 3.4, 1.0)
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.pixel_size = 0.004
+	tag.font_size = 64
+	tag.outline_size = 8
+	tag.modulate = Color(0.45, 1.0, 0.6) if open else ALERT
+	root.add_child(tag)
+	var entry := Marker3D.new()
+	entry.position = foot + Vector3(0, 0.5, -1.2) # a step or two up the ramp
+	root.add_child(entry)
+	var spawn := Marker3D.new()
+	spawn.position = foot + Vector3(0, 0.1, 2.6)
+	root.add_child(spawn)
+	_ships.append({"root": root, "entry": entry, "spawn": spawn, "owner": owner, "open": open, "mine": mine, "pad": pad_no})
+
+
+## The landed ship nearest the player, if any is close: {"ship", "distance"}.
+func _near_ship(range_m: float) -> Dictionary:
+	var best := {}
+	for sh in _ships:
+		var e: Vector3 = sh.entry.global_position
+		var d := Vector2(e.x - _player.global_position.x, e.z - _player.global_position.z).length()
+		if d < range_m and (best.is_empty() or d < best.distance):
+			best = {"ship": sh, "distance": d}
+	return best
+
+
+## Walking up an open ship's ramp takes you aboard. Your own ship takes you back to its cockpit.
+func _check_ramps() -> void:
+	var near := _near_ship(1.1)
+	if near.is_empty():
+		return
+	var sh: Dictionary = near.ship
+	if not sh.open or _player.global_position.y < 0.15:
+		return
+	if sh.mine:
+		left.emit("ship")
+	else:
+		_stand_at(sh.spawn)
+		_say("You step aboard %s's ship and look around. Ship interiors come with the ship cabin." % sh.owner, 5.0)
+
+
+## Puts the player on a marker, facing away from the ship it belongs to.
+func _stand_at(marker: Marker3D) -> void:
+	_player.global_position = marker.global_position
+	_player.velocity = Vector3.ZERO
+	var away: Vector3 = marker.global_basis.z
+	_player.rotation.y = atan2(-away.x, -away.z)
 
 
 func _build_services(room: Node3D, w: float, d: float, h: float) -> void:
@@ -971,11 +1061,8 @@ func _build_player() -> void:
 	_camera.far = 16000.0
 	_player.add_child(_camera)
 	_camera.make_current()
-	# Arrive by your ship on pad 06, facing the concourse.
-	var hangar: Node3D = _rooms[0]
-	_player.global_position = hangar.to_global(Vector3(8.5, 0.1, 19.0))
-	var toward: Vector3 = hangar.to_global(Vector3(0, 0, 0)) - _player.global_position
-	_player.rotation.y = atan2(-toward.x, -toward.z)
+	# Arrive down your ship's ramp on pad 06, facing the concourse.
+	_build_player_reset()
 
 
 ## For tests and screenshots: stand somewhere in a compartment's space, looking at a point in it.
@@ -1029,6 +1116,7 @@ func _physics_process(delta: float) -> void:
 	_player.move_and_slide()
 	if _player.global_position.y < -10.0:
 		_build_player_reset()
+	_check_ramps()
 	if _globe:
 		_globe.rotate_y(0.12 * delta)
 	_price_time -= delta
@@ -1039,8 +1127,9 @@ func _physics_process(delta: float) -> void:
 
 
 func _build_player_reset() -> void:
-	_player.global_position = (_rooms[0] as Node3D).to_global(Vector3(8.5, 0.5, 19.0))
-	_player.velocity = Vector3.ZERO
+	for sh in _ships:
+		if sh.mine:
+			_stand_at(sh.spawn)
 
 
 func _nearest_use() -> Dictionary:
@@ -1106,6 +1195,15 @@ func _update_hud(delta: float) -> void:
 	_where.text = "%s · %s\nW A S D walk   Shift run   %s use   Esc back to your ship" % [_station_name, _location(), _key()]
 	var u := _nearest_use()
 	_prompt.text = u.prompt.call() if not u.is_empty() else ""
+	var near := _near_ship(4.5)
+	if _prompt.text == "" and not near.is_empty():
+		var sh: Dictionary = near.ship
+		if sh.mine:
+			_prompt.text = "Your ship, pad %02d. Walk up the ramp to board" % sh.pad
+		elif sh.open:
+			_prompt.text = "%s's ship is open. Walk up the ramp to step aboard" % sh.owner
+		else:
+			_prompt.text = "%s's ship is locked, ramp up" % sh.owner
 	_message_time -= delta
 	_message.visible = _message_time > 0.0
 

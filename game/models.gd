@@ -15,6 +15,13 @@ const SILVER := Color(0.86, 0.88, 0.92)
 
 static var _materials := {}
 
+## Every ship has an exit ramp. Where each model's ramp folds out, in the model's own space: the hatch
+## under the hull, which way the ramp runs out from it, its width, and how high the model's origin
+## stands above the ground when the ship is landed on its gear.
+const RAMPS := {
+	"starter_ship": {"hatch": Vector3(0, -1.35, 2.2), "out": Vector3(0, 0, 1), "width": 1.5, "landed_height": 2.85},
+}
+
 ## Every model, by name, for the showcase and the exporter.
 const ALL := ["starter_ship", "mining_laser", "ice_canister", "nav_beacon", "loot_crate",
 	"keycard", "habitat_dome", "ice_asteroid", "metal_asteroid"]
