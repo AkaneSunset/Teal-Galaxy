@@ -149,6 +149,18 @@ only pauses, since the way out of a place is your ship. Inside a facility, on fo
 | Inventory / use a trauma kit | Tab / H | Back / D-pad up |
 | Pause (bail out in the first 2 minutes) | Esc | Start |
 
+**Inside the High Port.** *Leave your seat* takes you down your ship's ramp into the station
+(`game/station.gd`), built from Akane's concept art. Every ship has an exit ramp: a landed ship that's
+open has its ramp down and walking up it boards the ship (yours sits you back in the pilot's seat); a
+locked ship keeps its ramp up. A Concourse Ring lined with windows circles the Planetary Terminal Hall,
+where a hologram of the planet marks every base and site (red while under raid) and the Surface Transit
+consoles open the same trips as the ship's menu. Off the ring: Ship Services (repairs your ship), the
+Supply Shop, the Commodity Exchange, the Job Board (deliver cargo), the Cantina (live chat on its
+screen), Fence's Noodles (the Fence is in the back room), the Security Office (the raid log as a wanted
+board), the Crew Cabins and the Observation Lounge. The mouse looks around, F uses things, Enter chats
+and Esc pauses. A Builder's base on the surface (`game/surface.gd`) works the same way on foot.
+`game/tests/station_interior_shots.tscn` saves a picture of every room and of a base.
+
 ## Flying (Explorer)
 
 Teal Prime is built at roughly real scale: Aster is 200 light seconds from the star, and a
