@@ -8,8 +8,9 @@ const ExplorerMode := preload("res://explorer.gd")
 # [file name, slot (-1 = station centre), eye position, point looked at], in each slot's own space.
 const SPOTS := [
 	["01-hangar", 0, Vector3(-6, 1.65, 3), Vector3(6, 1.0, 24)],
-	["01b-hangar-your-ship-ramp", 0, Vector3(6.5, 1.65, 13.5), Vector3(10.5, 1.2, 22)],
-	["01c-hangar-open-and-locked-ships", 0, Vector3(-4.5, 1.65, 3.5), Vector3(-11, 1.8, 16)],
+	["01b-hangar-your-ship-ramp", 0, Vector3(8.5, 1.65, 18.0), Vector3(13, 1.4, 27)],
+	["01c-hangar-open-and-locked-ships", 0, Vector3(-1.0, 1.65, 9.0), Vector3(-13, 2.5, 26)],
+	["01d-ring-by-hangar-door", -1, Vector3(25.5, 1.65, 12.0), Vector3(29, 1.5, -4)],
 	["02-hangar-pad-board", 0, Vector3(4, 1.65, 4), Vector3(-17, 3.5, 12)],
 	["03-concourse-ring", -1, Vector3(25.5, 1.65, -3.5), Vector3(19, 1.6, 16)],
 	["04-terminal-hall", -1, Vector3(-3, 1.65, -15), Vector3(0, 3.6, 0)],
@@ -23,6 +24,7 @@ const SPOTS := [
 	["12-security-office", 8, Vector3(3.5, 1.65, 1.0), Vector3(-1, 2.2, 10)],
 	["13-crew-cabins", 9, Vector3(0, 1.65, 1.0), Vector3(0, 1.4, 30)],
 	["14-observation-lounge", 10, Vector3(3.0, 1.65, 2.0), Vector3(-3.5, 1.3, 12)],
+	["15-observation-console", 10, Vector3(-2.0, 1.65, 6.0), Vector3(-4.5, 1.2, 4.0)],
 ]
 
 var _explorer: Node

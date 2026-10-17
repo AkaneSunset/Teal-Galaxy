@@ -6,17 +6,18 @@ extends Node3D
 ## Planetary Terminal Hall (the hologram of the planet below). Every compartment opens off the
 ## outside of the ring, one per slot:
 ##   0 Hangar and landing pads (you arrive here)   6 Cantina
-##   1 window stretch with benches                 7 Fence's Noodles, the Fence in the back room
+##   (windows all round the ring between doors)   7 Fence's Noodles, the Fence in the back room
 ##   2 Ship Services Dock                          8 Security Office
 ##   3 Supply Shop                                 9 Crew Cabins corridor
 ##   4 Commodity Exchange                         10 Observation Lounge
-##   5 Planetary Builder Job Board                11 window stretch with benches
+##   5 Planetary Builder Job Board                and benches facing the windows near 283 degrees
 ##
 ## The boards show live data: the planet's sites and raids, its jobs, the raid log and chat.
 ## F uses things, Esc goes back to the ship.
 
 const System := preload("res://teal_prime.gd")
 const Models := preload("res://models.gd")
+const ChatBox := preload("res://chat_box.gd")
 
 signal left(where: String) # "ship" or "terminal"
 signal service(kind: String) # "repair"
@@ -50,7 +51,7 @@ const ALERT := Color(1.0, 0.32, 0.28)
 
 ## The compartments: slot -> [name, width, depth, height]. Slot angle = slot * 30 degrees.
 const ROOMS := {
-	0: ["Hangar", 34.0, 34.0, 9.0],
+	0: ["Hangar", 38.0, 44.0, 9.0],
 	2: ["Ship Services Dock", 12.0, 11.0, 5.0],
 	3: ["Supply Shop", 12.0, 11.0, 4.6],
 	4: ["Commodity Exchange", 14.0, 12.0, 5.5],
@@ -81,6 +82,7 @@ var _chat_lines: Array[String] = []
 var _price_time := 0.0
 
 var _prompt: Label
+var _chat: VBoxContainer
 var _where: Label
 var _message: Label
 var _message_time := 0.0
@@ -100,7 +102,7 @@ func _ready() -> void:
 	for slot in ROOMS:
 		var spec: Array = ROOMS[slot]
 		_rooms[slot] = _room(slot, spec[1], spec[2], spec[3])
-	_build_hangar(_rooms[0], 34.0, 34.0, 9.0)
+	_build_hangar(_rooms[0], 38.0, 44.0, 9.0)
 	_build_services(_rooms[2], 12.0, 11.0, 5.0)
 	_build_supply(_rooms[3], 12.0, 11.0, 4.6)
 	_build_exchange(_rooms[4], 14.0, 12.0, 5.5)
@@ -110,8 +112,9 @@ func _ready() -> void:
 	_build_security(_rooms[8], 12.0, 10.0, 4.6)
 	_build_cabins(_rooms[9], 4.4, 30.0, 3.6)
 	_build_observation(_rooms[10], 14.0, 12.0, 5.0)
-	_build_window_stretch(26.0, 1.0)
-	_build_window_stretch(334.0, -1.0)
+	_build_window_stretch(283.0, 1.0)
+	_directory(0.0)
+	_directory(283.0)
 	_build_player()
 	_build_hud()
 	Net.state_changed.connect(_on_state)
@@ -289,19 +292,30 @@ func _seat(parent: Node3D, pos: Vector3, height := 0.75) -> void:
 	_ring_line(parent, 0.33, pos + Vector3(0, height - 0.09, 0), CYAN, 0.04, 2.5)
 
 
+## A terminal: a pedestal with a sloped control deck in front and an upright screen standing on its
+## back edge, facing `facing`. Returns the screen's body label.
 func _console(parent: Node3D, pos: Vector3, facing: Vector3, title: String, body := "", width := 1.6) -> Label3D:
 	var c := Node3D.new()
 	c.position = pos
 	c.basis = _facing_basis(facing)
 	parent.add_child(c)
-	_box(c, Vector3(width, 1.0, 0.8), Vector3(0, 0.5, 0), PANEL)
-	_box(c, Vector3(width - 0.1, 0.04, 0.05), Vector3(0, 0.25, 0.41), CYAN, false, 2.0)
-	var top := _box(c, Vector3(width, 0.08, 0.9), Vector3(0, 1.08, -0.05), TRIM, false, 0.0, 1.0, Vector3(-28, 0, 0))
-	for i in 4:
-		_box(c, Vector3(0.1, 0.02, 0.1), Vector3(-width / 2 + 0.2 + i * 0.16, 1.18, 0.2), [CYAN, HAZARD, CYAN, ALERT][i], false, 2.0, 1.0, Vector3(-28, 0, 0))
-	var face := _screen(c, Vector3(0.15, 1.55, -0.32), Vector3(0, 0.45, 1).normalized(), Vector2(width * 0.62, 0.62), title, body, 28, 20)
-	top.visible = true
-	return face
+	_box(c, Vector3(width, 0.9, 0.7), Vector3(0, 0.45, 0), PANEL)
+	_box(c, Vector3(width + 0.06, 0.08, 0.76), Vector3(0, 0.04, 0), TRIM, false)
+	_box(c, Vector3(width - 0.1, 0.04, 0.04), Vector3(0, 0.22, 0.36), CYAN, false, 2.0)
+	# The control deck: a slab on top, its front edge tipped down 14 degrees, with a few lit keys.
+	var deck := Node3D.new()
+	deck.position = Vector3(0, 0.93, 0.08)
+	deck.rotation_degrees.x = 14.0
+	c.add_child(deck)
+	_box(deck, Vector3(width + 0.04, 0.06, 0.56), Vector3.ZERO, TRIM, false)
+	for i in 5:
+		_box(deck, Vector3(0.12, 0.025, 0.1), Vector3(-width / 2.0 + 0.22 + i * 0.18, 0.04, 0.12), [CYAN, HAZARD, CYAN, ALERT, CYAN][i], false, 2.0)
+	_box(deck, Vector3(width * 0.3, 0.02, 0.18), Vector3(width * 0.25, 0.04, 0.08), Color(0.05, 0.12, 0.14), false, 1.0)
+	# The screen, on a short stand at the back, leaning back a little.
+	var sw := width * 0.9
+	var sh := 0.62
+	_box(c, Vector3(0.18, 0.2, 0.12), Vector3(0, 1.02, -0.26), TRIM, false)
+	return _screen(c, Vector3(0, 1.12 + sh / 2.0 + 0.12, -0.3), Vector3(0, 0.22, 1).normalized(), Vector2(sw, sh), title, body, 28, 20)
 
 
 func _crate(parent: Node3D, size: Vector3, pos: Vector3, label := "") -> void:
@@ -426,6 +440,16 @@ func _room_half_angle(slot: int) -> float:
 	return rad_to_deg(asin(minf(0.99, (ROOMS[slot][1] / 2.0 + 0.2) / R_OUT)))
 
 
+func _door_width(slot: int) -> float:
+	return 8.0 if slot == 0 else (3.0 if slot == 9 else 3.4)
+
+
+## Half the angle of a compartment's doorway on the ring. The ring wall stays closed everywhere
+## else, so the gap between the curved ring and a room's flat front wall is never open.
+func _door_half_angle(slot: int) -> float:
+	return rad_to_deg(asin((_door_width(slot) / 2.0 + 0.1) / R_OUT))
+
+
 func _build_ring() -> void:
 	var step := 360.0 / SEGMENTS
 	for i in SEGMENTS:
@@ -458,10 +482,17 @@ func _build_ring() -> void:
 				_box(f, Vector3(arc.call(R_IN) * 1.6, 2.2, 0.06), Vector3(0, 2.1, R_IN + 0.02), PANEL, false)
 		# Outer wall: windows onto the planet, except where a compartment opens.
 		var room_here := false
+		var door_here := false
 		for slot in ROOMS:
 			if _angle_diff(deg, slot * 30.0) < _room_half_angle(slot):
 				room_here = true
-		if not room_here:
+			if _angle_diff(deg, slot * 30.0) < _door_half_angle(slot):
+				door_here = true
+		if room_here and not door_here:
+			_box(f, Vector3(arc.call(R_OUT), RING_H, 0.4), Vector3(0, RING_H / 2.0, R_OUT + 0.2), WALL)
+			if i % 2 == 0:
+				_box(f, Vector3(arc.call(R_OUT) * 1.6, 2.2, 0.06), Vector3(0, 2.1, R_OUT - 0.02), PANEL, false)
+		elif not room_here:
 			var w: float = arc.call(R_OUT)
 			_box(f, Vector3(w, 1.0, 0.5), Vector3(0, 0.5, R_OUT + 0.2), WALL)
 			_box(f, Vector3(w, 0.12, 0.62), Vector3(0, 1.02, R_OUT + 0.1), TRIM, false)
@@ -499,19 +530,34 @@ func _build_ring() -> void:
 
 
 ## A stretch of the ring with nothing but windows: benches facing them, planters and info kiosks.
-## `side` puts the info kiosk on the end away from the nearest hall doorway.
-func _build_window_stretch(deg: float, side: float) -> void:
+## A frame on the ring at `deg` degrees: +Z points straight out to the windows.
+func _ring_frame(deg: float) -> Node3D:
 	var f := Node3D.new()
 	f.rotation.y = PI / 2 - deg_to_rad(deg)
 	add_child(f)
-	_bench(f, Vector3(-2.0, 0, R_IN + 1.2), Vector3.BACK, 3.4)
-	_bench(f, Vector3(2.0, 0, R_IN + 1.2), Vector3.BACK, 3.4)
-	_planter(f, Vector3(-4.2, 0, R_IN + 1.2))
-	_planter(f, Vector3(4.2, 0, R_IN + 1.2))
-	_planter(f, Vector3(0, 0, R_IN + 1.2))
-	var kiosk := _console(f, Vector3(6.5 * side, 0, R_IN + 1.0), Vector3.BACK, "INFO", "Concourse Ring\nCompartments are signed\nover each door.", 1.0)
+	return f
+
+
+## Degrees along the ring that `metres` of walking covers at radius `r`.
+func _arc_deg(metres: float, r: float) -> float:
+	return rad_to_deg(metres / r)
+
+
+## `side` puts the info kiosk on the end away from the nearest hall doorway. Every piece sits at its
+## own angle around the ring, so it lines up with the curved walls.
+func _build_window_stretch(deg: float, side: float) -> void:
+	var r := R_IN + 1.2
+	for off in [-2.0, 2.0]:
+		_bench(_ring_frame(deg + _arc_deg(off, r)), Vector3(0, 0, r), Vector3.BACK, 3.4)
+	for off in [-4.2, 0.0, 4.2]:
+		_planter(_ring_frame(deg + _arc_deg(off, r)), Vector3(0, 0, r))
+	var kiosk := _console(_ring_frame(deg - side * _arc_deg(6.5, r)), Vector3(0, 0, R_IN + 1.0), Vector3.BACK, "INFO", "Concourse Ring\nCompartments are signed\nover each door.", 1.0)
 	kiosk.font_size = 18
-	var dir := _screen(f, Vector3(0, 3.0, R_IN + 0.08), Vector3.BACK, Vector2(4.6, 1.5), "CONCOURSE RING", "", 44, 26)
+
+
+## The list of compartments, on the ring's inner wall at `deg` degrees.
+func _directory(deg: float) -> void:
+	var dir := _screen(_ring_frame(deg), Vector3(0, 3.0, R_IN + 0.08), Vector3.BACK, Vector2(4.6, 1.5), "CONCOURSE RING", "", 44, 26)
 	var lines := []
 	for slot in [2, 3, 4, 5, 6, 7, 8, 9, 10]:
 		lines.append(ROOMS[slot][0])
@@ -607,7 +653,7 @@ func _room(slot: int, w: float, d: float, h: float) -> Node3D:
 	room.position = Vector3(0, 0, R_OUT)
 	room.name = ROOMS[slot][0]
 	f.add_child(room)
-	var door_w := 8.0 if slot == 0 else (3.0 if slot == 9 else 3.4)
+	var door_w := _door_width(slot)
 	var door_h := 4.6 if slot == 0 else 3.3
 	var near_h := maxf(h, RING_H)
 	var side := (w - door_w) / 2.0
@@ -669,16 +715,17 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 	_box(room, Vector3(w, 0.3, 1.0), Vector3(0, 0.15, d), TRIM)
 	_box(room, Vector3(w - 1.0, 0.05, 0.05), Vector3(0, h - 0.65, d - 0.5), CYAN, false, 3.0)
 	# Walkway, railings and hazard stripes between the concourse and the pads.
-	for x in [-10.0, 10.0]:
-		_box(room, Vector3(13.0, 0.08, 0.08), Vector3(x, 1.05, 6.0), TRIM, false)
-		_box(room, Vector3(13.0, 0.08, 0.08), Vector3(x, 0.6, 6.0), TRIM, false)
-		_box(room, Vector3(13.0, 1.1, 0.1), Vector3(x, 0.55, 6.0), Color(0, 0, 0), true, 0.0, 0.0)
+	for x in [-11.0, 11.0]:
+		_box(room, Vector3(15.0, 0.08, 0.08), Vector3(x, 1.05, 6.0), TRIM, false)
+		_box(room, Vector3(15.0, 0.08, 0.08), Vector3(x, 0.6, 6.0), TRIM, false)
+		_box(room, Vector3(15.0, 1.1, 0.1), Vector3(x, 0.55, 6.0), Color(0, 0, 0), true, 0.0, 0.0)
 		for px in range(-6, 7, 3):
 			_box(room, Vector3(0.12, 1.1, 0.12), Vector3(x + px, 0.55, 6.0), PANEL, false)
-	for i in 16:
-		_box(room, Vector3(0.9, 0.015, 0.35), Vector3(-15.0 + i * 2.0, 0.008, 6.6), HAZARD if i % 2 == 0 else Color(0.08, 0.08, 0.08), false, 0.3, 1.0, Vector3(0, 30, 0))
+	for i in 18:
+		_box(room, Vector3(0.9, 0.015, 0.35), Vector3(-17.0 + i * 2.0, 0.008, 6.6), HAZARD if i % 2 == 0 else Color(0.08, 0.08, 0.08), false, 0.3, 1.0, Vector3(0, 30, 0))
 	# Six pads: 01 to 06. Yours is 06.
-	var pads := [Vector3(-11, 0, 14), Vector3(0, 0, 14), Vector3(11, 0, 14), Vector3(-11, 0, 26), Vector3(0, 0, 26), Vector3(11, 0, 26)]
+	# 13 m apart side by side (wings span 11 m) and 16 m front to back (a ship and its ramp are 13 m).
+	var pads := [Vector3(-13, 0, 16), Vector3(0, 0, 16), Vector3(13, 0, 16), Vector3(-13, 0, 32), Vector3(0, 0, 32), Vector3(13, 0, 32)]
 	# Who is on which pad, and whether their ship is open (landed, ramp down) or locked (ramp up).
 	var parked := {0: ["Rook", true], 3: ["BlueLeader", false], 5: [Net.my_name if Net.my_name != "" else "You", true]}
 	for i in pads.size():
@@ -687,20 +734,21 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 		_cyl(room, 3.4, 0.06, p + Vector3(0, 0.37, 0), Color(0.18, 0.22, 0.26), false)
 		_ring_line(room, 3.7, p + Vector3(0, 0.37, 0), CYAN, 0.15, 3.0)
 		_ring_line(room, 2.2, p + Vector3(0, 0.41, 0), HAZARD if parked.has(i) else CYAN, 0.06, 2.0)
-		_text(room, "%02d" % (i + 1), p + Vector3(0, 0.42, -3.0), Vector3.UP, 120, Color(0.85, 0.9, 0.95))
+		_text(room, "%02d" % (i + 1), p + Vector3(0, 0.42, -3.0), Vector3.UP, 120, Color(0.85, 0.9, 0.95)).rotate_y(PI) # read from the walkway
 		if parked.has(i):
-			_landed_ship(room, p, 180.0 if i != 5 else 165.0, parked[i][0], parked[i][1], i == 5, i + 1)
+			_landed_ship(room, p, 180.0, parked[i][0], parked[i][1], i == 5, i + 1)
 	_sign(room, "DOCK 07 · PADS 01-06", Vector3(0, 6.0, 0.5), Vector3.BACK, 80)
 	_sign(room, "PRESSURIZED", Vector3(-6.5, 5.2, 0.5), Vector3.BACK, 44, Color(0.4, 1.0, 0.55))
 	var board := _screen(room, Vector3(-w / 2.0 + 0.3, 4.6, 9.0), Vector3.RIGHT, Vector2(8.0, 4.0), "PAD ASSIGNMENTS", "", 80, 52)
 	board.text = "01  ROOK · OPEN           02  AVAILABLE\n\n03  AVAILABLE             04  BLUELEADER · LOCKED\n\n05  AVAILABLE             06  YOU · OPEN"
 	_console(room, Vector3(-w / 2.0 + 1.2, 0, 3.0), Vector3.RIGHT, "DOCK CONTROL", "Shield: holding\nTraffic: light", 2.2)
-	for x in [-12.0, -4.0, 4.0, 12.0]:
-		for z in [10.0, 22.0]:
+	for x in [-13.0, -4.5, 4.5, 13.0]:
+		for z in [12.0, 24.0, 36.0]:
 			_box(room, Vector3(2.4, 0.04, 0.3), Vector3(x, h - 0.02, z), Color(0.95, 0.97, 1.0), false, 2.0)
-	_light(room, Vector3(-9, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
-	_light(room, Vector3(9, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
-	_light(room, Vector3(0, h - 1, 28), Color(0.6, 0.85, 1.0), 1.0, 18.0)
+	_light(room, Vector3(-10, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
+	_light(room, Vector3(10, h - 1, 16), Color(0.85, 0.92, 1.0), 1.4, 20.0)
+	_light(room, Vector3(-10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
+	_light(room, Vector3(10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
 
 
 ## A ship standing on a pad on its landing gear. Every ship has an exit ramp under its hull: while the
@@ -927,7 +975,10 @@ func _build_cantina(room: Node3D, w: float, d: float, h: float) -> void:
 			var bottle := _cyl(room, 0.07, 0.36, Vector3(sx, y + 0.21, 4.9 + i * 0.4), [Color(0.55, 0.35, 0.15), Color(0.2, 0.45, 0.3), Color(0.6, 0.6, 0.65)][i % 3], false, 0.4)
 			bottle.visible = true
 	_sign(room, "%s CANTINA" % _planet.get("name", "DOCK 7").to_upper(), Vector3(sx + 0.1, 3.4, 7.5), Vector3.RIGHT, 80)
-	_boards.chat = _screen(room, Vector3(bx + 0.2, 1.55, 3.0), Vector3(0.3, 0.3, -1).normalized(), Vector2(1.5, 0.9), "CHANNEL: DOCKED-PILOTS", "", 22, 18)
+	# The chat terminal stands on the end of the bar, facing the door.
+	_box(room, Vector3(0.16, 0.5, 0.16), Vector3(bx, 1.45, 2.6), TRIM, false)
+	_boards.chat = _screen(room, Vector3(bx, 2.0, 2.55), Vector3(0.25, 0.1, -1).normalized(), Vector2(1.5, 0.9), "CHANNEL: PILOTS", "", 22, 18)
+	_use(room, Vector3(bx + 0.4, 1.0, 1.6), func(): return "Press %s to talk on the pilots' channel" % _chat_key(), func(): _chat.open())
 	# Round tables with stools on the right, by the window.
 	for t in [Vector3(3.0, 0, 5.0), Vector3(5.2, 0, 9.5), Vector3(1.5, 0, 10.5)]:
 		_cyl(room, 0.12, 1.0, t + Vector3(0, 0.5, 0), TRIM, false)
@@ -1077,6 +1128,12 @@ func view(slot: int, at: Vector3, look: Vector3) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _chat.is_typing():
+		return
+	if event.is_action_pressed("chat"):
+		_chat.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("menu"):
 		left.emit("ship")
 		get_viewport().set_input_as_handled()
@@ -1100,16 +1157,17 @@ func _look(yaw: float, pitch: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	var input := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
-	var look := Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down")
+	var typing: bool = _chat.is_typing()
+	var input := Vector2.ZERO if typing else Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
+	var look := Vector2.ZERO if typing else Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down")
 	if look.length() > 0.1:
 		_look(-look.x * LOOK_SPEED * delta, -look.y * LOOK_SPEED * delta)
-	var speed := SPRINT if Input.is_action_pressed("foot_sprint") else WALK
+	var speed := SPRINT if Input.is_action_pressed("foot_sprint") and not typing else WALK
 	var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
 	_player.velocity.x = dir.x * speed
 	_player.velocity.z = dir.z * speed
 	if _player.is_on_floor():
-		if Input.is_action_just_pressed("foot_jump"):
+		if Input.is_action_just_pressed("foot_jump") and not typing:
 			_player.velocity.y = JUMP
 	else:
 		_player.velocity.y -= GRAVITY * delta
@@ -1183,6 +1241,12 @@ func _build_hud() -> void:
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_message.add_theme_font_size_override("font_size", 20)
 	layer.add_child(_message)
+	_chat = ChatBox.new()
+	_chat.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_chat.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_chat.position += Vector2(20, -40)
+	_chat.modulate = SCREEN_TEXT.lightened(0.3)
+	layer.add_child(_chat)
 	var dot := ColorRect.new()
 	dot.color = Color(1, 1, 1, 0.7)
 	dot.size = Vector2(4, 4)
@@ -1192,7 +1256,7 @@ func _build_hud() -> void:
 
 
 func _update_hud(delta: float) -> void:
-	_where.text = "%s · %s\nW A S D walk   Shift run   %s use   Esc back to your ship" % [_station_name, _location(), _key()]
+	_where.text = "%s · %s\nW A S D walk   Shift run   %s use   %s chat   Esc back to your ship" % [_station_name, _location(), _key(), _chat_key()]
 	var u := _nearest_use()
 	_prompt.text = u.prompt.call() if not u.is_empty() else ""
 	var near := _near_ship(4.5)
@@ -1215,6 +1279,10 @@ func _say(text: String, seconds := 4.0) -> void:
 		_message.visible = true
 
 
+func _chat_key() -> String:
+	return controls.binding_text("chat", false) if controls else "Enter"
+
+
 func _key() -> String:
 	return controls.binding_text("interact", false) if controls else "F"
 
@@ -1229,7 +1297,7 @@ func _on_chat(sender: String, _role: String, text: String) -> void:
 	if _chat_lines.size() > 5:
 		_chat_lines.pop_front()
 	if _boards.has("chat"):
-		_boards.chat.text = "\n".join(_chat_lines) + "\nSay something..."
+		_boards.chat.text = "\n".join(_chat_lines)
 
 
 func _me() -> Dictionary:
@@ -1292,7 +1360,6 @@ func _refresh_boards() -> void:
 		tag.pixel_size = 0.004
 		tag.font_size = 72
 		tag.modulate = ALERT if m.raided else SCREEN_TEXT
-		tag.no_depth_test = true
 		_globe_markers.add_child(tag)
 
 	# Job board: this planet's jobs, posted by its Builder.
@@ -1326,7 +1393,7 @@ func _refresh_boards() -> void:
 	_boards.fence.text = "%d items to sell\nworth about %d CR" % [stash.size(), _stash_value() / 2] if not stash.is_empty() else "Nothing to sell"
 	if not _boards.has("chat_init"):
 		_boards.chat_init = true
-		_boards.chat.text = "No one's said anything yet.\nSay something..."
+		_boards.chat.text = "No one's said anything yet.\nPress %s to say something." % _chat_key()
 
 
 ## The exchange board: prices drift a little every couple of seconds.
