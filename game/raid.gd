@@ -10,6 +10,10 @@ extends Node3D
 ## The server sends the layout and owns the loot, Heat, the clocks and every extraction; this
 ## scene simulates walking, the guards and the shooting, and reports what happened (see heist.js).
 ## Everything is built from simple shapes in code, like the rest of the prototype.
+##
+## A raid starts from overhead: pick a spot to land (off the site, out of every turret's reach) and
+## confirm. Your ship flies down, drops you off and leaves; it comes back, to a pad by the blast door,
+## only once every outside defence is down. That's the only way out.
 
 signal finished(result: Dictionary)
 
@@ -127,6 +131,9 @@ var weapon := "rifle" # or "launcher"
 var ammo := MAG
 var reserve := RESERVE
 var over := false
+var phase := "choose" # choose (overhead, picking a landing spot) -> dropping (waiting / flying down) -> play
+var ship_state := "carrying" # carrying (not landed yet), away, back (waiting by the blast door)
+var defences_left := 0
 
 var _player: CharacterBody3D
 var _camera: Camera3D
@@ -183,6 +190,13 @@ var _radial_vec := Vector2.ZERO # where the mouse or stick points on it
 var _loose := {} # id -> {"node", "data"}: supplies and vests lying in the facility
 var _rifle_model: Node3D
 var _launcher_model: Node3D
+var _ship: Node3D # your ship, when it's in sight
+var _return_pad: Node3D
+var _overhead: Camera3D # the view you pick a landing spot from
+var _land_pick := Vector3.INF # where the cursor points on the ground
+var _land_choice := Vector3.INF # the spot clicked, waiting for Confirm
+var _confirm: Button
+var _ship_tween: Tween
 
 var _hud: Control
 var _prompt: Label
@@ -212,6 +226,8 @@ func _init(briefing: Dictionary) -> void:
 	destroyed = briefing.get("destroyed", [])
 	if briefing.get("selfDestruct") != null:
 		self_destruct = float(briefing.selfDestruct) / 1000.0
+	ship_state = str(briefing.get("ship", "carrying"))
+	defences_left = int(briefing.get("defencesLeft", 0))
 	pouch = briefing.get("pouch", {})
 	grenades = int(briefing.get("grenades", 7))
 	var vest: Dictionary = briefing.get("vest", {"item": "vest50", "armor": 50})
@@ -243,7 +259,13 @@ func _ready() -> void:
 	_set_floor(0)
 	Net.raid_event.connect(_on_raid_event)
 	Net.server_error.connect(_on_server_error)
-	controls.capture_mouse()
+	if brief.get("landing") != null:
+		# Back after a dropped connection: already on the ground.
+		_start_play(Vector3(brief.landing[0], 0, brief.landing[1]))
+		if ship_state == "back":
+			_ship_returns(false)
+	else:
+		_begin_choosing()
 
 
 func _exit_tree() -> void:
@@ -444,7 +466,7 @@ func _lift(pos: Vector3, to: Vector3, to_floor: int, text: String) -> void:
 
 
 # The surface: the Builder's site, drawn by the same view the Builder uses, on the same terrain,
-# with collision and health added for what's on it. Your ship waits on a pad off the south edge.
+# with collision and health added for what's on it, and open ground round it out to the hills.
 func _build_site() -> void:
 	_into = _floor_nodes[0]
 	var half := float(layout.half)
@@ -457,9 +479,9 @@ func _build_site() -> void:
 	_into.add_child(sun)
 
 	var terrain := Terrain.new()
-	terrain.position.y = -SiteView.DECK_TOP # the site's deck stands this far above the ground
+	terrain.position.y = -0.03 # level with the top of the site's deck, so you can walk on and off it
 	_into.add_child(terrain)
-	terrain.generate(str(layout.view.id), maxf(44.0, float(layout.pad[1]) + 20.0)) # flat out past the landing pad
+	terrain.generate(str(layout.view.id), _land_max() + 15.0) # flat out past where you can land
 	_site_view = SiteView.new()
 	_into.add_child(_site_view)
 	var view: Dictionary = layout.view.duplicate()
@@ -467,25 +489,13 @@ func _build_site() -> void:
 	_site_view.show_site(view, brief.facility, false, int(layout.ringTurrets))
 	_site_view._label.visible = false # the Builder's floating name tag isn't part of the place
 
-	# Where you can walk: the deck, and a causeway to your ship's pad. Invisible walls round both.
-	var pad := _pad()
-	var deck := half * 2.0 + 2.0
-	_box(Vector3(deck, 1.2, deck), Vector3(0, -0.6, 0), "navy", true, false, true)
-	_box(Vector3(19.0, 1.2, pad.z - half + 9.4), Vector3(0, -0.6, (half + pad.z + 9.4) / 2.0), "navy", true, false, true)
-	# The landing apron you walk in on, from the site's edge to the pad.
-	var apron := pad.z - 9.0 - (half + 1.0)
-	_box(Vector3(19.0, 0.62, apron), Vector3(0, -0.31, half + 1.0 + apron / 2.0), "navy", false)
-	for i in range(1, int(apron / 8.0) + 1):
-		_box(Vector3(19.0, 0.02, 0.12), Vector3(0, 0.01, half + 1.0 + i * 8.0), Color(0.32, 0.42, 0.56), false)
-	for sx in [-1, 1]:
-		_box(Vector3(0.3, 0.06, apron), Vector3(sx * 9.2, 0.03, half + 1.0 + apron / 2.0), "amber", false)
-	var edge := half + 1.0
-	for side in [-1, 1]:
-		_box(Vector3(0.5, 6, deck), Vector3(side * edge, 3, 0), "navy", true, false, true)
-		_box(Vector3(0.5, 6, pad.z + 9.4 - edge), Vector3(side * 9.5, 3, (edge + pad.z + 9.4) / 2.0), "navy", true, false, true)
-		_box(Vector3(edge - 9.5, 6, 0.5), Vector3(side * (edge + 9.5) / 2.0, 3, edge), "navy", true, false, true)
-	_box(Vector3(deck, 6, 0.5), Vector3(0, 3, -edge), "navy", true, false, true)
-	_box(Vector3(19.0, 6, 0.5), Vector3(0, 3, pad.z + 9.4), "navy", true, false, true)
+	# Where you can walk: the open ground, out to an invisible ring short of the hills.
+	var reach := _land_max() + 8.0
+	_box(Vector3(reach * 2.0 + 4.0, 1.0, reach * 2.0 + 4.0), Vector3(0, -0.5, 0), "navy", true, false, true)
+	for i in 32:
+		var a := TAU * i / 32.0
+		var wall := _box(Vector3(reach * TAU / 32.0 + 1.0, 8, 0.5), Vector3(cos(a) * reach, 4, sin(a) * reach), "navy", true, false, true)
+		wall.rotation.y = -a + PI / 2.0
 
 	# The core's pad can't be walked onto, and its building stops bullets.
 	var core_pad := StaticBody3D.new()
@@ -538,13 +548,14 @@ func _build_site() -> void:
 			model = models.get("%d,%d" % [roundi(piece.pos[0]), roundi(piece.pos[1])])
 		_build_piece(piece, model)
 
-	# Your ship on a pad from the Builder's set, and the boarding ring.
-	var landing := BaseModels.pad()
-	landing.position = pad + Vector3(0, -0.9, 0)
-	_into.add_child(landing)
-	var ship := Models.starter_ship()
-	ship.position = pad + Vector3(0, 2.2, 1.5) # nose to the site, as it came in
-	_into.add_child(ship)
+	# Your ship (flying you in, then away until the defences are down) and the pad it comes back to.
+	_return_pad = BaseModels.pad()
+	_return_pad.position = _pad() + Vector3(0, -0.9, 0)
+	_return_pad.visible = false
+	_into.add_child(_return_pad)
+	_ship = Models.starter_ship()
+	_ship.visible = false
+	_into.add_child(_ship)
 	_boom_light = OmniLight3D.new()
 	_boom_light.light_color = Color(1.0, 0.15, 0.05)
 	_boom_light.light_energy = 0.0
@@ -775,8 +786,129 @@ func _door_outside() -> Vector3:
 	return Vector3(0, 0, float(layout.core) / 2.0 + 1.6)
 
 
+## Where the ship comes back for you, beside the blast door.
 func _pad() -> Vector3:
 	return Vector3(layout.pad[0], 0, layout.pad[1])
+
+
+func _land_max() -> float:
+	return float(layout.get("landing", {}).get("max", 120))
+
+
+# --- Landing: pick a spot from overhead, and the ship's comings and goings ------------------
+
+## Why the ship can't drop you at (x, z), or "" if it can (the server checks the same).
+func landing_problem(x: float, z: float) -> String:
+	var l: Dictionary = layout.landing
+	if Vector2(x, z).length() > float(l.max):
+		return "Too far out: land nearer the site"
+	if absf(x) < float(l.offSite) and absf(z) < float(l.offSite):
+		return "You can't land on the site itself"
+	for p in layout.pieces:
+		if p.type == "turret" and Vector2(x - float(p.pos[0]), z - float(p.pos[1])).length() < float(l.reach):
+			return "Inside a turret's reach: land further out"
+	return ""
+
+
+func _begin_choosing() -> void:
+	phase = "choose"
+	_overhead = Camera3D.new()
+	_overhead.fov = 60.0
+	_overhead.far = 2000.0
+	add_child(_overhead)
+	_overhead.position = Vector3(0, _land_max() * 1.9, 0.01)
+	_overhead.look_at(Vector3.ZERO, Vector3(0, 0, -1)) # north up
+	_overhead.make_current()
+	controls.release_mouse()
+	_status.visible = false
+
+
+## Picks a landing spot (a click, or tests). Shows Confirm when the ship can land there.
+func choose_landing(at: Vector3) -> void:
+	_land_choice = Vector3(at.x, 0, at.z)
+	_confirm.disabled = landing_problem(at.x, at.z) != ""
+
+
+## Confirm: the ship takes you down to the chosen spot.
+func confirm_landing() -> void:
+	if phase != "choose" or _land_choice == Vector3.INF or landing_problem(_land_choice.x, _land_choice.z) != "":
+		return
+	phase = "dropping"
+	_confirm.visible = false
+	Net.send({"type": "raid_land", "x": snappedf(_land_choice.x, 0.1), "z": snappedf(_land_choice.z, 0.1)})
+
+
+func _ground_under(screen: Vector2) -> Vector3:
+	var from := _overhead.project_ray_origin(screen)
+	var dir := _overhead.project_ray_normal(screen)
+	if absf(dir.y) < 0.001:
+		return Vector3.INF
+	return from + dir * (-from.y / dir.y)
+
+
+# The ship comes in low from the south, sets down on the spot, and the view drops into your eyes.
+func _fly_in(spot: Vector3) -> void:
+	var facing := atan2(-spot.x, -spot.z) # the ship's nose (-Z) toward the site
+	_ship.visible = true
+	_ship.rotation.y = facing
+	_ship.position = spot + Vector3(0, 70, 0) + Basis(Vector3.UP, facing) * Vector3(0, 0, 120)
+	var chase := Camera3D.new()
+	chase.far = 2000.0
+	add_child(chase)
+	chase.make_current()
+	_overhead.queue_free()
+	var follow := func(_v):
+		chase.global_position = _ship.global_position + Basis(Vector3.UP, facing) * Vector3(0, 9, 26)
+		chase.look_at(_ship.global_position, Vector3.UP)
+	var tw := create_tween()
+	tw.tween_property(_ship, "position", spot + Vector3(0, 2.2, 0), 3.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_method(follow, 0.0, 1.0, 3.0)
+	tw.tween_callback(func():
+		chase.queue_free()
+		_start_play(spot)
+		_fly_off())
+
+
+## On the ground beside the ship, facing the site, in your own eyes.
+func _start_play(spot: Vector3) -> void:
+	phase = "play"
+	var toward := (-spot * Vector3(1, 0, 1)).normalized()
+	teleport_to(spot + toward * 3.0 + toward.cross(Vector3.UP) * 2.0) # still clear of every turret's reach
+	_player.look_at(Vector3(0, _player.position.y, 0), Vector3.UP)
+	_camera.make_current()
+	_status.visible = true
+	_confirm.visible = false
+	controls.capture_mouse()
+
+
+# The ship lifts off and heads away until it's safe to come back.
+func _fly_off() -> void:
+	ship_state = "away"
+	_say("Your ship will come back for you once the outside defences are down (%d left)." % defences_left, 6.0)
+	var tw := create_tween()
+	_ship_tween = tw
+	var up := _ship.position + Vector3(0, 30, 0)
+	tw.tween_property(_ship, "position", up, 2.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_property(_ship, "position", up + _ship.basis * Vector3(0, 60, 400), 3.0).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func(): _ship.visible = ship_state == "back")
+
+
+## Every outside defence is down: the ship comes back to its pad by the blast door.
+func _ship_returns(fly := true) -> void:
+	ship_state = "back"
+	var pad := _pad()
+	_return_pad.visible = true
+	_ship.visible = true
+	_ship.rotation.y = 0.0
+	_refresh_extract_labels()
+	if _ship_tween:
+		_ship_tween.kill()
+	if not fly:
+		_ship.position = pad + Vector3(0, 2.2, 1.5)
+		return
+	_say("All outside defences are down. Your ship is landing by the blast door.", 5.0)
+	_ship.position = pad + Vector3(0, 60, 200)
+	create_tween().tween_property(_ship, "position", pad + Vector3(0, 2.2, 1.5), 5.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _build_player() -> void:
@@ -789,7 +921,7 @@ func _build_player() -> void:
 	shape.shape.height = 1.8
 	shape.position.y = 0.9
 	_player.add_child(shape)
-	_player.position = _pad() + Vector3(-4.5, 0.05, -4.0) # beside the ship, facing the site
+	_player.position = Vector3(0, 0.05, _land_max()) # out of the way until the ship drops you off
 	add_child(_player)
 	_camera = Camera3D.new()
 	_camera.position.y = EYE
@@ -1012,6 +1144,16 @@ func _build_hud() -> void:
 	_inv.set_inventory(inventory, brief.backpack, brief.secure)
 	_inv.set_pouch(_pouch_text())
 
+	_confirm = Button.new()
+	_confirm.text = "Confirm landing (F)"
+	_confirm.disabled = true
+	_confirm.add_theme_font_size_override("font_size", 20)
+	_confirm.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_confirm.position += Vector2(-120, -80)
+	_confirm.custom_minimum_size = Vector2(240, 44)
+	_confirm.pressed.connect(confirm_landing)
+	_hud.add_child(_confirm)
+
 	_paused = _overlay_panel()
 	layer.add_child(_paused)
 
@@ -1038,7 +1180,7 @@ func _overlay_panel() -> Control:
 	col.add_child(resume)
 	var bail := Button.new()
 	bail.name = "Bail"
-	bail.text = "Bail out (only in the first 2 minutes; you keep nothing you found)"
+	bail.text = "Recall your ship and bail out (only in the first 2 minutes; you keep nothing you found)"
 	bail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bail.pressed.connect(func(): Net.send({"type": "raid_bail"}); _set_paused(false))
 	col.add_child(bail)
@@ -1054,7 +1196,7 @@ func _set_paused(on: bool) -> void:
 	_paused.visible = on
 	if on:
 		controls.release_mouse()
-	elif not _inv.visible:
+	elif not _inv.visible and phase == "play":
 		controls.capture_mouse()
 
 
@@ -1073,6 +1215,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_set_paused(true)
 		get_viewport().set_input_as_handled()
+		return
+	if phase != "play":
+		_choose_input(event)
 		return
 	if event.is_action_pressed("foot_inventory"):
 		if _inv.visible:
@@ -1107,6 +1252,22 @@ func _unhandled_input(event: InputEvent) -> void:
 		_crouched = not _crouched
 
 
+# Overhead: the mouse points at the ground, a click picks the spot, F (or Enter, or A) confirms.
+func _choose_input(event: InputEvent) -> void:
+	if phase != "choose":
+		return
+	if event is InputEventMouseMotion:
+		_land_pick = _ground_under(event.position)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var at := _ground_under(event.position)
+		if at != Vector3.INF:
+			choose_landing(at)
+	elif event.is_action_pressed("interact") or (event is InputEventKey and event.pressed and event.keycode == KEY_ENTER):
+		if _land_choice == Vector3.INF and _land_pick != Vector3.INF:
+			choose_landing(_land_pick)
+		confirm_landing()
+
+
 func _look(yaw: float, pitch: float) -> void:
 	_player.rotate_y(yaw)
 	_pitch = clampf(_pitch + pitch, -1.45, 1.45)
@@ -1131,6 +1292,15 @@ func _physics_process(delta: float) -> void:
 	_hit_flash = maxf(0.0, _hit_flash - delta)
 	_hurt_flash = maxf(0.0, _hurt_flash - delta)
 	if over:
+		return
+	if phase != "play":
+		if phase == "choose":
+			# A gamepad's left stick moves the cursor over the ground.
+			var stick := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
+			if stick.length() > 0.2:
+				var from := _land_choice if _land_choice != Vector3.INF else Vector3(0, 0, _land_max() * 0.8)
+				choose_landing(from + Vector3(stick.x, 0, stick.y) * 60.0 * delta)
+		_update_hud()
 		return
 	_update_heal_key(delta)
 	_update_use(delta)
@@ -1180,7 +1350,7 @@ func _move_player(delta: float) -> void:
 	_player.move_and_slide()
 	_camera.position.y = lerpf(_camera.position.y, EYE_CROUCHED if _crouched else EYE, minf(1.0, delta * 10.0))
 	if _player.position.y < -floor_depth * (floors + 1):
-		teleport_to(_pad())
+		teleport_to(_pad() if ship_state == "back" else Vector3(0, 0, float(layout.half) + 10.0))
 
 	# Footsteps: guards hear sprinting further than walking, and crouching not at all.
 	if input.length() > 0.1 and _player.is_on_floor() and not _crouched:
@@ -2209,7 +2379,7 @@ func _update_vent(delta: float) -> void:
 
 func _update_extract(delta: float) -> void:
 	var inside := ""
-	for id in _extract_nodes if _floor == 0 else []:
+	for id in _extract_nodes if _floor == 0 and ship_state == "back" else []:
 		var e: Dictionary = _extract_nodes[id]
 		if Vector2(e.pos.x - _player.position.x, e.pos.z - _player.position.z).length() < 2.2:
 			inside = id
@@ -2287,7 +2457,8 @@ func _refresh_extract_labels() -> void:
 		if not st.is_empty():
 			line += ": stand here %d s to board" % int(st.countdown)
 		e.label.text = line
-		e.node.visible = st.get("open", true)
+		e.node.visible = st.get("open", true) and ship_state == "back"
+		e.label.visible = e.node.visible
 
 
 func _update_hud() -> void:
@@ -2295,9 +2466,10 @@ func _update_hud() -> void:
 	var carried := 0
 	for it in inventory:
 		carried += int(it.value) * int(it.qty)
-	_status.text = "%s%s\nTime left %d:%02d\nHeat %d  %s\nCarrying %d credits of loot" % [
+	var ship := "Your ship is waiting by the blast door" if ship_state == "back" else "Ship away: %d outside defence%s left" % [defences_left, "" if defences_left == 1 else "s"]
+	_status.text = "%s%s\nTime left %d:%02d\nHeat %d  %s\nCarrying %d credits of loot\n%s" % [
 		brief.facility, ("  Level %d" % _floor) if _floor > 0 else "", int(remaining) / 60, int(remaining) % 60, heat, levels[mini(level, levels.size() - 1)].name.to_upper(),
-		carried]
+		carried, ship]
 	if _message_time <= 0.0:
 		_message.text = ""
 	_hud.queue_redraw()
@@ -2306,6 +2478,9 @@ func _update_hud() -> void:
 func _draw_hud() -> void:
 	var size := _hud.size
 	var c := size * 0.5
+	if phase != "play":
+		_draw_choosing(size)
+		return
 	var white := Color(0.35, 0.95, 0.88)
 	if not _inv.visible:
 		var gap := 6.0 if _aiming() else 10.0
@@ -2348,6 +2523,8 @@ func _draw_hud() -> void:
 	for id in _extract_nodes:
 		var e: Dictionary = _extract_nodes[id]
 		var st: Dictionary = extract_states.get(id, {})
+		if ship_state != "back":
+			continue
 		var p: Vector3 = e.pos + Vector3(0, 1.5, 0)
 		var col := Color(0.4, 1.0, 0.6) if st.get("open", true) else Color(1, 1, 1, 0.3)
 		var text := "%s %d m" % [e.name, roundi(p.distance_to(_player.position))]
@@ -2384,6 +2561,50 @@ func _draw_hud() -> void:
 		_hud.draw_rect(Rect2(Vector2.ZERO, size), Color(0.8, 0.0, 0.0, 0.12 * a))
 		var p := c + dir * minf(size.x, size.y) * 0.35
 		_hud.draw_circle(p, 18, Color(1.0, 0.1, 0.05, 0.6 * a))
+
+
+# The overhead map: the site, every turret's reach in red, how far out you can land, and your pick.
+func _draw_choosing(size: Vector2) -> void:
+	if _overhead == null or not is_instance_valid(_overhead) or phase != "choose":
+		var t := "Flying in..."
+		_hud.draw_string(_hud.get_theme_default_font(), Vector2(size.x / 2.0 - 50, 60), t, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+		return
+	var font := _hud.get_theme_default_font()
+	var circle := func(centre: Vector3, r: float, col: Color, width: float, fill: Color):
+		var pts := PackedVector2Array()
+		for i in 49:
+			var a := TAU * i / 48.0
+			pts.append(_overhead.unproject_position(centre + Vector3(cos(a), 0, sin(a)) * r))
+		if fill.a > 0.0:
+			_hud.draw_colored_polygon(pts.slice(0, 48), fill)
+		_hud.draw_polyline(pts, col, width)
+	circle.call(Vector3.ZERO, _land_max(), Color(1, 1, 1, 0.5), 2.0, Color(0, 0, 0, 0))
+	var reach := float(layout.landing.reach)
+	for p in layout.pieces:
+		if p.type == "turret":
+			circle.call(Vector3(p.pos[0], 0, p.pos[1]), reach, Color(1.0, 0.25, 0.2, 0.9), 2.0, Color(1.0, 0.2, 0.15, 0.12))
+	var off := float(layout.landing.offSite)
+	var sq := PackedVector2Array()
+	for k in [Vector3(-off, 0, -off), Vector3(off, 0, -off), Vector3(off, 0, off), Vector3(-off, 0, off), Vector3(-off, 0, -off)]:
+		sq.append(_overhead.unproject_position(k))
+	_hud.draw_polyline(sq, Color(1.0, 0.68, 0.2, 0.8), 2.0)
+	var lines := ["Pick where your ship drops you off: click a spot, then confirm.",
+		"Red rings: turret reach. Your ship leaves, and comes back to the blast door only once every outside defence is down (%d)." % defences_left]
+	for i in lines.size():
+		var w := font.get_string_size(lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18 - i * 3).x
+		_hud.draw_string(font, Vector2(size.x / 2.0 - w / 2.0, 40 + i * 26), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18 - i * 3, Color.WHITE)
+	for spot in [_land_pick, _land_choice]:
+		if spot == Vector3.INF:
+			continue
+		var why := landing_problem(spot.x, spot.z)
+		var col := Color(0.4, 1.0, 0.55) if why == "" else Color(1.0, 0.35, 0.3)
+		var sp := _overhead.unproject_position(spot)
+		var chosen: bool = spot == _land_choice
+		_hud.draw_circle(sp, 9.0 if chosen else 5.0, col)
+		if chosen:
+			_hud.draw_arc(sp, 16.0, 0, TAU, 32, col, 2.0)
+		var label := why if why != "" else ("Land here" if chosen else "")
+		_hud.draw_string(font, sp + Vector2(22, 5), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, col)
 
 
 # Armour (in 25-point segments, the vest's colour) over health, and the pouch, bottom left.
@@ -2512,6 +2733,9 @@ func _draw_radial(c: Vector2) -> void:
 
 func _on_server_error(reason: String) -> void:
 	_say(reason, 3.0)
+	if phase == "dropping" and _overhead != null and is_instance_valid(_overhead) and _ship.position.y < 1.0:
+		phase = "choose" # the server turned the spot down: pick again
+		_confirm.visible = true
 	_use_asked = "" # whatever it was, the server didn't start it
 	if not _using.is_empty() and _using.sent and reason.contains("not done"):
 		_using.sent = false # a hair early by the server's clock: ask again in a moment
@@ -2536,6 +2760,9 @@ func _on_raid_event(msg: Dictionary) -> void:
 			level = int(msg.level)
 			remaining = float(msg.remaining) / 1000.0
 			extract_states = msg.extracts
+			defences_left = int(msg.get("defencesLeft", defences_left))
+			if msg.get("ship") == "back" and ship_state != "back":
+				_ship_returns()
 			_refresh_extract_labels()
 			if msg.get("doorOpen", false) and not door_open:
 				_set_blast_door(true)
@@ -2552,6 +2779,8 @@ func _on_raid_event(msg: Dictionary) -> void:
 			if level > before:
 				var levels: Array = Net.catalog.get("heatLevels", [])
 				_say("Security: %s" % (levels[level].name if levels else str(level)), 3.0)
+		"landed":
+			_fly_in(Vector3(msg.landing[0], 0, msg.landing[1]))
 		"pouch":
 			pouch = msg.pouch
 			grenades = int(msg.grenades)

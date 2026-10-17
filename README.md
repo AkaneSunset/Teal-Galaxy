@@ -128,7 +128,11 @@ Builder's Spaceport, in the base the Builder sees on their phone, where you deli
 Fence or walk around), raid one of the planet's facilities, or launch back into space. After a raid
 you're back in your seat in the hangar. Walking back up your ship's ramp sits you down again; Esc
 only pauses, since the way out of a place is your ship. Picking a facility in the menu flies your ship down to
-the facility's landing pad, about 50 m off the site's south edge and out of its turrets' reach. On foot and in first person:
+the facility. A raid starts from overhead: click where you want to be dropped off (on open ground, off
+the site and outside every turret's reach, shown as red rings) and confirm. Your ship flies down, drops
+you off and leaves; it comes back, to a pad beside the blast door, only once every outside defence
+(turrets, the core's turrets too, guard posts and power plants) is destroyed, even if you sneaked in
+through a vent. On foot and in first person:
 
 
 - **Getting in.** The map outside is the site exactly as the Builder laid it out, drawn with the
@@ -167,7 +171,7 @@ the facility's landing pad, about 50 m off the site's south edge and out of its 
   see where it will land.
 - **Heat** rises with time, gunfire, explosions, being spotted and bodies found. At Alerted guards
   hunt you and turrets wake; Purge sends an elite team. Standing guard posts send out new guards.
-- **Leave** any time by standing on your ship's pad for 3 s. If the raid clock runs out you're
+- **Leave** once your ship is back by standing on its pad for 3 s (in the first 2 minutes you can also recall it from the pause menu, keeping nothing). If the raid clock runs out you're
   missing in action. You end up back in your ship's pilot seat in the High Port's hangar.
 - Extracted loot goes to your stash; sell it to the Fence (the black market terminal in a High Port's Cantina, or any Spaceport) for half its value.
 

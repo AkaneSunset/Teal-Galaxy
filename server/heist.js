@@ -162,7 +162,14 @@ const WAVE_MS = 60_000; // reinforcements arrive every minute inside...
 const WAVE_MAX = 5; // ...one more each time, up to this many
 const SELF_DESTRUCT_BASE_S = 70; // the self-destruct timer: this (the run out to the ship), plus...
 const SELF_DESTRUCT_PER_FLOOR_S = 30;
-const PAD_OFF = 50; // metres from the site's south edge to the landing pad // ...this for every level you have to climb back up
+// Landing: the raider picks a spot from overhead. Not on the site, not in any turret's reach, and
+// not out past the flat ground round it.
+const TURRET_REACH = 34; // metres a site turret fires at you
+const LAND_MARGIN = 5; // the drop-off clears a turret's reach by this much
+const LAND_OFF_SITE = 4; // and the site's edge by this much
+const LAND_MAX = 120; // metres from the core
+// Every outside defence that must go before the ship comes back for you.
+const DEFENCE_TYPES = ['turret', 'guardpost', 'power']; // ...this for every level you have to climb back up
 
 // --- Seeded random numbers ---------------------------------------------------------------
 
@@ -362,7 +369,7 @@ function tryLayout(seed, tier, type, floorCount, site, now) {
   // Sometimes a boss waits in the safe room; likelier the better the security.
   const boss = r.next() < 0.2 + 0.15 * tier ? { room: vault, health: 600 + 150 * floorCount } : null;
 
-  // The way out: the ship, where the raider set down on the landing pad.
+  // The way out: the ship, which comes back to a pad beside the blast door once the defences are down.
   const extracts = [{ id: 'ship', kind: 'ship', pos: outside.pad }];
 
   return {
@@ -461,8 +468,17 @@ function siteLayout(site, tier, r, now) {
     powered: pieces.some((p) => p.type === 'power') ? 'plant' : 'core',
     door: [0, core / 2], // the blast door, on the south edge of the core's pad
     vents: [{ id: 'v0', pos: [-core / 2, 0], side: 'west' }, { id: 'v1', pos: [core / 2, 0], side: 'east' }, { id: 'v2', pos: [0, -core / 2], side: 'north' }],
-    pad: [0, half + PAD_OFF], // where the raider's ship sets down, out of the site's turret range
+    pad: returnPad(pieces, core, half), // where the ship comes back for you, beside the blast door
+    landing: { reach: TURRET_REACH + LAND_MARGIN, offSite: half + LAND_OFF_SITE, max: LAND_MAX },
   };
+}
+
+// The first clear spot south of the blast door, between the site's pieces (anything left standing
+// once the defences are down: walls, obstacles and wrecks). Off the site's south edge if none is.
+function returnPad(pieces, core, half) {
+  const clear = (x, z) => pieces.every((p) => Math.abs(x - p.pos[0]) > p.size[0] / 2 + 3 || Math.abs(z - p.pos[1]) > p.size[1] / 2 + 3);
+  for (let z = core / 2 + 6; z <= half + 6; z += 1) for (const x of [0, -6, 6]) if (clear(x, z)) return [x, z];
+  return [0, half + 8];
 }
 
 // Defences for a facility without a site of its own: a power plant, turrets and guard posts from
@@ -641,6 +657,7 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
     boxes,
     inv: { backpack: new Grid(...BACKPACK), secure: new Grid(...SECURE_CASE), items: {} },
     extract: null, // {id, since}
+    landing: null, // [x, z] where the ship dropped the raider off
     destroyed: [], // site pieces knocked out
     vent: null, // {id, since} while cutting a vent grate
     breached: null, // 'door' | 'vent' once inside the core
@@ -678,6 +695,7 @@ function briefing(run, now) {
     floors: run.floors,
     layout: run.layout,
     remaining: Math.max(0, run.endsAt - now),
+    landing: run.landing,
     ...stage(run, now),
     heat: run.heat,
     level: heatLevel(run.heat),
@@ -737,7 +755,41 @@ function heatTick(run, now) {
 }
 
 function extractStates(run, now) {
-  return { ship: { open: true, why: '', countdown: EXTRACTS.ship.countdown, needs: null } };
+  const left = defencesLeft(run);
+  const why = !run.landing ? 'pick a landing spot' : left ? `your ship is away until the outside defences are down (${left} left)` : '';
+  return { ship: { open: shipBack(run), why, countdown: EXTRACTS.ship.countdown, needs: null } };
+}
+
+// --- Landing and the ship ----------------------------------------------------------------------
+
+// Why a landing spot isn't allowed, or '' if it is.
+function landingProblem(layout, x, z) {
+  const L = layout.landing;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return 'pick a spot on the ground';
+  if (Math.hypot(x, z) > L.max) return 'too far out: land nearer the site';
+  if (Math.abs(x) < L.offSite && Math.abs(z) < L.offSite) return "you can't land on the site itself";
+  for (const p of layout.pieces) if (p.type === 'turret' && Math.hypot(x - p.pos[0], z - p.pos[1]) < L.reach) return 'inside a turret\'s reach: land further out';
+  return '';
+}
+
+// The ship drops the raider off at a spot they picked, then leaves.
+function land(run, x, z, now) {
+  if (run.landing) return fail('you have already landed');
+  const why = landingProblem(run.layout, Number(x), Number(z));
+  if (why) return fail(why);
+  run.landing = [Number(x), Number(z)];
+  run.landedAt = now;
+  return { ok: true, landing: run.landing };
+}
+
+// Outside defences still standing: turrets (the core's too), guard posts and power plants.
+function defencesLeft(run) {
+  return run.layout.pieces.filter((p) => DEFENCE_TYPES.includes(p.type) && p.hp > 0 && !run.destroyed.includes(p.id)).length;
+}
+
+// The ship comes back to its pad by the blast door once nothing outside can shoot it down.
+function shipBack(run) {
+  return !!run.landing && defencesLeft(run) === 0;
 }
 
 // Where the raid is up to, for the raider's app and the Builder's watch.
@@ -750,6 +802,8 @@ function stage(run, now) {
     wave: run.wave,
     floor: run.floor ?? 0,
     selfDestruct: run.selfDestructAt ? Math.max(0, run.selfDestructAt - now) : null,
+    defencesLeft: defencesLeft(run),
+    ship: !run.landing ? 'carrying' : shipBack(run) ? 'back' : 'away',
   };
 }
 
@@ -1091,6 +1145,7 @@ function drillFinish(run, now) {
 function extractStart(run, id, now) {
   const ex = run.layout.extracts.find((e) => e.id === id);
   if (!ex) return fail('no such extract');
+  if (!shipBack(run)) return fail(extractStates(run, now).ship.why);
   if (!run.extract || run.extract.id !== id) run.extract = { id, since: now, countdown: EXTRACTS[ex.kind].countdown };
   return { ok: true, countdown: run.extract.countdown, loud: false };
 }
@@ -1142,7 +1197,9 @@ module.exports = {
   LAUNCHER_ROUNDS,
   LAUNCHER_GAP_MS,
   GRENADE_HEAT,
-  PAD_OFF,
+  TURRET_REACH,
+  LAND_MAX,
+  DEFENCE_TYPES,
   FACILITIES,
   SECURITY,
   EXTRACTS,
@@ -1177,6 +1234,10 @@ module.exports = {
   report,
   heatTick,
   extractStates,
+  landingProblem,
+  land,
+  defencesLeft,
+  shipBack,
   floorsOf,
   selfDestructSeconds,
   stage,

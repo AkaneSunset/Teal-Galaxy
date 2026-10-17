@@ -208,6 +208,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'raid_floor':
         r = H.reachFloor(run, Number(msg.floor));
         break;
+      case 'raid_land':
+        r = H.land(run, msg.x, msg.z, t);
+        if (r.ok) send(ws, { type: 'raid', ev: 'landed', landing: r.landing });
+        break;
       case 'raid_extract_start':
         r = H.extractStart(run, String(msg.extract), t);
         if (r.ok) send(ws, { type: 'raid', ev: 'extracting', extract: msg.extract, countdown: r.countdown, loud: r.loud });

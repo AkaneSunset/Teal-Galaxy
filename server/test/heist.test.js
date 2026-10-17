@@ -113,11 +113,26 @@ function setup(vault = { alloy: 10, drive: 2 }, { security = 1, levels = 1, insi
   if (pieces) site.pieces = pieces;
   const r = G.startRaid(g, 'Pilot A', site.id, 0, 0, 1234, 99);
   assert.ok(r.ok, r.reason);
+  assert.ok(H.land(r.run, ...landSpot(r.run.layout), 0).ok);
   if (inside) {
     H.ventStart(r.run, 'v0', 0);
     assert.ok(H.ventFinish(r.run, 6000).ok);
   }
   return { g, fac, run: r.run };
+}
+
+// Somewhere the ship may drop you off.
+function landSpot(layout) {
+  for (let a = 0; a < 360; a += 5) {
+    const spot = [Math.cos((a * Math.PI) / 180) * 100, Math.sin((a * Math.PI) / 180) * 100];
+    if (!H.landingProblem(layout, ...spot)) return spot;
+  }
+  throw new Error('nowhere to land');
+}
+
+// Knocks out every outside defence, so the ship comes back.
+function clearDefences(run) {
+  for (const p of run.layout.pieces) if (H.DEFENCE_TYPES.includes(p.type)) H.destroy(run, p.id, 0);
 }
 
 function boxWith(run, item) {
@@ -208,6 +223,7 @@ test('Heat rises with time and reported noise, rate-limited per kind', () => {
 
 test('boarding the ship needs the full countdown, before the self-destruct ends', () => {
   const { run } = setup();
+  clearDefences(run);
   assert.ok(H.extractStart(run, 'ship', 0).ok);
   assert.match(H.extractFinish(run, 1000).reason, /countdown/);
   assert.ok(H.extractFinish(run, 3000).ok);
@@ -224,6 +240,7 @@ test('the Builder loses only what a raider carries out; the rest goes back in th
   H.openContainer(run, box, 0);
   const drive = run.boxes[box].items.find((it) => it.item === 'drive');
   assert.ok(H.take(run, drive.uid, 'backpack', 60_000).ok);
+  clearDefences(run);
   H.extractStart(run, 'ship', 300_000);
   assert.ok(H.extractFinish(run, 320_000).ok);
   const result = G.endRaid(g, run, 'extracted', 320_000);
@@ -279,17 +296,46 @@ test('facilities fill their vaults, ship to HQ and buy security', () => {
 
 // --- Combat: the landing pad, armour, the pouch, supplies and the launcher ----------------------
 
-test('the ship lands well out of turret range, and the self-destruct allows for the run', () => {
-  for (const seed of [1, 2, 3, 4, 5]) {
-    const L = H.generateLayout(seed, 3, 'lab');
-    assert.deepStrictEqual(L.pad, [0, L.half + H.PAD_OFF]);
-    assert.strictEqual(H.PAD_OFF, 50);
-    // The raider steps off a few metres north of the pad: every turret on the site is over 34 m away.
-    const spawn = [L.pad[0] - 4.5, L.pad[1] - 4];
-    for (const t of L.pieces.filter((p) => p.type === 'turret')) assert.ok(Math.hypot(t.pos[0] - spawn[0], t.pos[1] - spawn[1]) > 34 + 5, `turret ${t.id} too close`);
-    assert.deepStrictEqual(L.extracts[0].pos, L.pad, 'the ship is still the way out');
-  }
-  assert.strictEqual(H.selfDestructSeconds(1), 100, 'ten seconds more than before for the longer run');
+test('you pick where the ship drops you: off the site, out of turret reach, not too far out', () => {
+  const { g } = setup({}, { inside: false });
+  const run = G.startRaid(g, 'Pilot B', g.system.planets[1].id, 0, 0, 1, 1); // someone is inside already
+  assert.match(run.reason, /already inside/);
+  const L = H.generateLayout(3, 3, 'lab');
+  const turret = L.pieces.find((p) => p.type === 'turret');
+  assert.match(H.landingProblem(L, 0, 0), /site itself/);
+  const near = [turret.pos[0] > 0 ? L.half + 6 : -L.half - 6, turret.pos[1]]; // just off the site, beside a turret
+  assert.match(H.landingProblem(L, ...near), /turret/);
+  assert.match(H.landingProblem(L, 200, 0), /too far/);
+  const spot = landSpot(L);
+  assert.strictEqual(H.landingProblem(L, ...spot), '');
+  for (const p of L.pieces.filter((x) => x.type === 'turret')) assert.ok(Math.hypot(spot[0] - p.pos[0], spot[1] - p.pos[1]) >= H.TURRET_REACH + 5);
+});
+
+test('the ship leaves after the drop and comes back only when every outside defence is down', () => {
+  const { run } = setup({}, { inside: false, security: 2 });
+  assert.match(H.land(run, 50, 50, 0).reason, /already landed/);
+  assert.strictEqual(H.stage(run, 0).ship, 'away');
+  const defences = run.layout.pieces.filter((p) => H.DEFENCE_TYPES.includes(p.type));
+  assert.ok(defences.some((p) => p.type === 'power') && defences.some((p) => p.type === 'guardpost') && defences.some((p) => p.ring), 'plants, guard posts and the core\'s turrets all count');
+  assert.strictEqual(H.defencesLeft(run), defences.length);
+  // Sneaking in by a vent doesn't bring the ship.
+  H.ventStart(run, 'v0', 0);
+  assert.ok(H.ventFinish(run, 6000).ok);
+  assert.match(H.extractStart(run, 'ship', 7000).reason, /away.*defences/);
+  assert.strictEqual(H.extractStates(run, 7000).ship.open, false);
+  for (const p of defences.slice(1)) H.destroy(run, p.id, 8000);
+  assert.strictEqual(H.defencesLeft(run), 1);
+  assert.ok(!H.extractStart(run, 'ship', 8000).ok, 'one left is still too many');
+  H.destroy(run, defences[0].id, 9000);
+  assert.strictEqual(H.stage(run, 9000).ship, 'back');
+  assert.ok(H.extractStart(run, 'ship', 9000).ok);
+  assert.ok(H.extractFinish(run, 12_000).ok);
+  // It comes back to a clear spot just south of the blast door.
+  const [x, z] = run.layout.pad;
+  assert.ok(z > run.layout.core / 2 && z <= run.layout.half + 8);
+  for (const p of run.layout.pieces) assert.ok(Math.abs(x - p.pos[0]) > p.size[0] / 2 + 3 || Math.abs(z - p.pos[1]) > p.size[1] / 2 + 3, `pad on ${p.id}`);
+  assert.deepStrictEqual(run.layout.extracts[0].pos, run.layout.pad);
+  assert.strictEqual(H.selfDestructSeconds(1), 100);
 });
 
 test('every raid starts in a 50 vest; a found vest swaps on and keeps what armour it has', () => {
@@ -472,7 +518,12 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     assert.ok(begin.run.layout.rooms.length >= 9);
     assert.ok(!JSON.stringify(begin).includes('"isotope"'), 'no container contents in the briefing');
     assert.strictEqual(begin.run.stage, 'breach');
+    assert.strictEqual(begin.run.ship, 'carrying');
     await phone.next((m) => m.type === 'state' && m.state.raids.length === 1);
+    pc.send({ type: 'raid_land', x: 0, z: 0 });
+    await pc.next((m) => m.type === 'error' && /site itself/.test(m.reason));
+    pc.send({ type: 'raid_land', x: landSpot(begin.run.layout)[0], z: landSpot(begin.run.layout)[1] });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'landed');
 
     // Stage 1: knock out the power plant and walk in through the blast door.
     pc.send({ type: 'raid_enter' });
@@ -515,6 +566,10 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await phone.next((m) => m.type === 'state' && m.state.raids[0]?.heat >= 25);
 
     clock += 10_000;
+    pc.send({ type: 'raid_extract_start', extract: 'ship' });
+    await pc.next((m) => m.type === 'error' && /away/.test(m.reason));
+    for (const p of begin.run.layout.pieces) if (H.DEFENCE_TYPES.includes(p.type) && p.id !== power.id) pc.send({ type: 'raid_destroy', piece: p.id });
+    await pc.next((m) => m.type === 'raid' && m.ev === 'heat' && m.ship === 'back' && m.extracts.ship.open);
     pc.send({ type: 'raid_extract_start', extract: 'ship' });
     const ex = await pc.next((m) => m.type === 'raid' && m.ev === 'extracting');
     clock += ex.countdown * 1000;

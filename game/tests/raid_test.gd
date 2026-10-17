@@ -1,10 +1,12 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
 ## a Builder founds a facility's satellite site and places defences on it, the pilot docks at the
-## planet's High Port and picks the site in the ship's menu, lands, blows up the power plant, walks in
+## planet's High Port and picks the site in the ship's menu, picks a landing spot from overhead (out
+## of the turrets' reach), is dropped off, blows up the power plant, walks in
 ## through the blast door, rides the lifts down to the deepest level, searches containers until the
 ## keycard turns up, opens the safe room's vault, takes something from it, rides back up before the
-## self-destruct, and boards the ship, ending back in the pilot's seat in the hangar.
+## self-destruct, knocks out every outside defence so the ship comes back, and boards it, ending back
+## in the pilot's seat in the hangar.
 ## On level 1 it also checks the combat kit: armour soaking damage, healing from the pouch (a tap
 ## and the wheel, and cancelling), the grenade launcher (swap, rounds, blast falloff, walls,
 ## damage to yourself) and picking up supplies.
@@ -79,7 +81,7 @@ func _process(delta: float) -> void:
 				# and upgrades the facility to level 3, so the raid has three levels below.
 				_laid_out = true
 				for spot in [["power", 0, 0], ["power", 10, 10], ["power", 0, 10], ["power", 10, 0],
-						["turret", 2, 8], ["turret", 8, 2], ["guardpost", 9, 6], ["guardpost", 1, 4],
+						["turret", 2, 8], ["turret", 8, 2], ["turret", 0, 4], ["turret", 10, 5], ["turret", 5, 10], ["guardpost", 9, 6], ["guardpost", 1, 4],
 						["wall", 5, 1], ["wall", 6, 1], ["wall", 11, 5]]:
 					_send_builder({"type": "place_piece", "planet": _key, "piece": spot[0], "x": spot[1], "y": spot[2]})
 				for i in 2:
@@ -124,21 +126,53 @@ func _process(delta: float) -> void:
 					_finish(false, "no Builder model for piece " + id)
 			if _raid.floors != 3:
 				_finish(false, "a level 3 facility should have 3 levels, not %d" % _raid.floors)
+			for c in _raid.layout.containers:
+				if c.type != "vault" and int(c.floor) == _raid.floors:
+					_queue.append(c.id)
+			_wait = 0.5
+			_step = "choose"
+		"choose":
+			# From overhead: no landing on the site or in a turret's reach.
+			if _raid.phase != "choose" or _raid.ship_state != "carrying":
+				_finish(false, "a raid should start overhead, picking a landing spot")
+			_shot("0a-pick-landing")
+			if _raid.landing_problem(0, 0) == "":
+				_finish(false, "landing on the site itself should be refused")
+			var spot := Vector3.INF
+			for a in range(0, 360, 5):
+				var p := Vector3(cos(deg_to_rad(a)), 0, sin(deg_to_rad(a))) * 90.0
+				if spot == Vector3.INF and _raid.landing_problem(p.x, p.z) == "":
+					spot = p
+			if spot == Vector3.INF:
+				_finish(false, "nowhere to land")
+			_raid.choose_landing(spot)
+			_wait = 0.3
+			_step = "confirm"
+		"confirm":
+			_shot("0b-landing-chosen")
+			_raid.confirm_landing()
+			_t = 0.0
+			_step = "dropping"
+		"dropping":
+			_t += delta
+			if _t > 1.5 and _t < 1.6:
+				_shot("0c-flying-in")
+			if _raid.phase != "play":
+				if _t > 10.0:
+					_finish(false, "the ship never set you down")
+				return
 			# You land well out of the site's turret range, beside your ship, facing the site.
 			var me: Vector3 = _raid._player.position
 			for id in _raid._pieces:
 				var pc: Dictionary = _raid._pieces[id]
-				if pc.data.type == "turret" and Vector2(me.x - pc.data.pos[0], me.z - pc.data.pos[1]).length() < 38.0:
+				if pc.data.type == "turret" and Vector2(me.x - pc.data.pos[0], me.z - pc.data.pos[1]).length() < 34.0:
 					_finish(false, "spawned within reach of turret %s" % id)
-			if me.distance_to(_raid._pad()) > 8.0 or (-_raid._player.global_basis.z).dot(-me.normalized()) < 0.8:
+			if _raid._ship.position.distance_to(me) > 10.0 or (-_raid._player.global_basis.z).dot(-me.normalized()) < 0.8:
 				_finish(false, "not beside the ship facing the site: %s" % me)
 			if _raid.armor != 50.0 or _raid.vest_item != "vest50" or _raid.grenades != 7 or _raid.health != 100.0:
 				_finish(false, "should start with 100 health, a 50 vest and 7 grenades")
 			if _counts(_raid.pouch) != _counts({"syringe": 2, "medkit": 1, "cell": 2, "battery": 1}):
 				_finish(false, "a new raider gets the starter pouch, not %s" % _raid.pouch)
-			for c in _raid.layout.containers:
-				if c.type != "vault" and int(c.floor) == _raid.floors:
-					_queue.append(c.id)
 			_wait = 1.0
 			_step = "overview"
 		"overview":
@@ -404,8 +438,15 @@ func _process(delta: float) -> void:
 			_raid._close_inventory()
 			_shot("5-self-destruct")
 			if _raid._floor == 0:
-				_raid.teleport_to(_raid._extract_nodes["ship"].pos)
-				_step = "extracting"
+				# The ship is away until every outside defence is down.
+				if _raid.ship_state != "away":
+					_finish(false, "the ship should still be away, not " + _raid.ship_state)
+				for id in _raid._pieces:
+					var pc: Dictionary = _raid._pieces[id]
+					if pc.data.type in ["turret", "guardpost", "power"] and not pc.dead:
+						_raid.destroy_piece(id)
+				_t = 0.0
+				_step = "ship-back"
 				return
 			for l in _raid._lifts:
 				if _raid._floor_of(l.pos) == _raid._floor and int(l.to_floor) == _raid._floor - 1:
@@ -414,6 +455,17 @@ func _process(delta: float) -> void:
 					_wait = 0.3
 					return
 			_finish(false, "no lift up from level %d" % _raid._floor)
+		"ship-back":
+			_t += delta
+			if _raid.ship_state != "back":
+				if _t > 5.0:
+					_finish(false, "the ship didn't come back with %d defences left" % _raid.defences_left)
+				return
+			if _t < 2.0:
+				return
+			_shot("5b-ship-returning")
+			_raid.teleport_to(_raid._extract_nodes["ship"].pos)
+			_step = "extracting"
 		"extracting":
 			if not _result.is_empty():
 				if _result.outcome != "extracted":
