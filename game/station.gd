@@ -15,6 +15,12 @@ extends "res://place.gd"
 ##
 ## The boards show live data: the planet's sites and raids, its jobs, the raid log and chat.
 ## You arrive seated in your ship on pad 06 in the Hangar (see place.gd). F uses things, Esc pauses.
+##
+## The same station orbits each contested world of the faction war as its orbital station
+## ("Cinder Orbital"). Nobody's base is below one: its hologram shows the planet's sectors in their
+## owners' colours and the outposts in them, tinted by faction (dim when dormant), and its Surface
+## Transit consoles fly you to those outposts. Every station's Terminal Hall has two War
+## terminals, and its Job Board a console for supply contracts.
 
 const R_IN := 21.6 # inner wall of the concourse ring (the Terminal Hall is inside it)
 const R_OUT := 30.0 # outer wall of the ring, where compartments open
@@ -37,6 +43,7 @@ const ROOMS := {
 }
 
 var _station_name := ""
+var _war := {} # the contested planet below an orbital station (g.war), or {} at a High Port
 var _rooms := {} # slot -> room Node3D (origin at its door, +Z into the room)
 var _globe: Node3D
 var _globe_markers: Node3D
@@ -46,7 +53,8 @@ var _price_time := 0.0
 
 
 func _build() -> void:
-	_station_name = System.station_name(_planet.get("name", "Aster"))
+	_war = WarInfo.planet(planet_id) if _planet.is_empty() else {}
+	_station_name = System.orbital_name(_war.name) if not _war.is_empty() else System.station_name(_planet.get("name", "Aster"))
 	place_name = _station_name
 	_build_environment()
 	_build_space()
@@ -327,6 +335,10 @@ func _build_hall() -> void:
 	holo.emission = Color(body.get("color", Color(0.3, 0.6, 0.9))).lerp(Color(0.4, 0.7, 1.0), 0.6)
 	holo.emission_energy_multiplier = 0.9
 	holo.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if not _war.is_empty():
+		# Fainter over a contested world, so its sectors' colours show.
+		holo.albedo_color = Color(0.4, 0.6, 0.8, 0.3)
+		holo.emission_energy_multiplier = 0.45
 	var noise := FastNoiseLite.new()
 	noise.seed = hash(planet_id)
 	noise.frequency = 0.012
@@ -352,16 +364,21 @@ func _build_hall() -> void:
 	# Consoles around the globe, and two big status walls between the doorways.
 	_boards.hall_status = _screen(self, _polar(90.0, R_IN - 0.45, 4.2), _inward(90.0), Vector2(7.5, 3.6), "PLANETARY STATUS", "", 60, 34)
 	_boards.hall_ops = _screen(self, _polar(270.0, R_IN - 0.45, 4.2), _inward(270.0), Vector2(7.5, 3.6), "ACTIVE OPERATIONS", "", 60, 34, ALERT)
-	_boards.hall_sector = _screen(self, _polar(180.0, R_IN - 0.45, 4.2), _inward(180.0), Vector2(5.0, 2.6), "ORBITAL SECTOR", "", 52, 32)
+	_boards.hall_sector = _screen(self, _polar(180.0, R_IN - 0.45, 4.2), _inward(180.0), Vector2(5.0, 2.6), "WAR FRONT · %s" % str(Net.state.get("system", {}).get("name", "TEAL PRIME")).to_upper(), "", 52, 32)
 	_screen(self, _polar(0.0, R_IN - 0.45, 5.6), _inward(0.0), Vector2(5.0, 1.4), "WELCOME TO %s" % _station_name.to_upper(), "Hangar and pads through the concourse ->", 44, 28)
+	# Surface Transit at 20, 110, 200 and 290 degrees, War terminals at 160 and 340, site monitors between.
 	for deg in [20.0, 70.0, 110.0, 160.0, 200.0, 250.0, 290.0, 340.0]:
 		var travel := int(deg) % 90 == 20
-		var c := _console(self, _polar(deg, 11.0, 0.0), _inward(deg), "SURFACE TRANSIT" if travel else "SITE MONITOR",
-			"Shuttles to the Spaceport\nand every facility.\nPress F." if travel else "", 1.8)
+		var war: bool = deg == 160.0 or deg == 340.0
 		if travel:
+			_console(self, _polar(deg, 11.0, 0.0), _inward(deg), "SURFACE TRANSIT",
+				("Shuttles to every\noutpost on %s.\nPress F." % _planet_name()) if not _war.is_empty() else "Shuttles to the Spaceport\nand every facility.\nPress F.", 1.8)
 			_use(self, _polar(deg, 10.3, 1.0), func(): return "Press %s to plan a trip to the surface" % _key(), func(): wants_menu.emit())
+		elif war:
+			_console(self, _polar(deg, 11.0, 0.0), _inward(deg), "WAR TERMINAL", "The front, sector\nby sector.\nPress F.", 1.8)
+			_use(self, _polar(deg, 10.3, 1.0), func(): return "Press %s for the War terminal" % _key(), func(): service.emit("war"))
 		else:
-			_boards["monitor_%d" % deg] = c
+			_boards["monitor_%d" % deg] = _console(self, _polar(deg, 11.0, 0.0), _inward(deg), "SITE MONITOR", "", 1.8)
 
 
 func _polar(deg: float, r: float, y: float) -> Vector3:
@@ -633,7 +650,11 @@ func _build_jobs(room: Node3D, w: float, d: float, h: float) -> void:
 	_planter(room, Vector3(-5.0, 0.96, 3.5))
 	_console(room, Vector3(0.8, 0, d - 3.0), Vector3.FORWARD, "DELIVERIES", "Press F to deliver cargo\nfor the open job", 2.6)
 	_use(room, Vector3(0.8, 1.0, d - 3.7), _jobs_prompt, _deliver)
-	_console(room, Vector3(3.6, 0, d - 2.6), Vector3.FORWARD.rotated(Vector3.UP, 0.4), "JOB FILTERS", "[ ] Infrastructure\n[ ] Resource\n[ ] Logistics", 1.3)
+	# Supply contracts: pilots ask Builders of their faction for war goods.
+	var contracts := Vector3(3.6, 0, d - 2.6)
+	var facing := Vector3.FORWARD.rotated(Vector3.UP, 0.4)
+	_console(room, contracts, facing, "CONTRACTS", "Supply contracts\nfor war goods.\nPress F.", 1.5)
+	_use(room, contracts + facing * 0.7 + Vector3(0, 1.0, 0), func(): return "Press %s for supply contracts" % _key(), func(): service.emit("contracts"))
 
 
 func _build_cantina(room: Node3D, w: float, d: float, h: float) -> void:
@@ -652,7 +673,7 @@ func _build_cantina(room: Node3D, w: float, d: float, h: float) -> void:
 		for i in 14:
 			var bottle := _cyl(room, 0.07, 0.36, Vector3(sx, y + 0.21, 4.9 + i * 0.4), [Color(0.55, 0.35, 0.15), Color(0.2, 0.45, 0.3), Color(0.6, 0.6, 0.65)][i % 3], false, 0.4)
 			bottle.visible = true
-	_sign(room, "%s CANTINA" % _planet.get("name", "DOCK 7").to_upper(), Vector3(sx + 0.1, 3.4, 7.5), Vector3.RIGHT, 80)
+	_sign(room, "%s CANTINA" % _planet_name().to_upper(), Vector3(sx + 0.1, 3.4, 7.5), Vector3.RIGHT, 80)
 	# The chat terminal stands on the end of the bar, facing the door.
 	_box(room, Vector3(0.16, 0.5, 0.16), Vector3(bx, 1.45, 2.6), TRIM, false)
 	_boards.chat = _screen(room, Vector3(bx, 2.0, 2.55), Vector3(0.25, 0.1, -1).normalized(), Vector2(1.5, 0.9), "CHANNEL: PILOTS", "", 22, 18)
@@ -747,7 +768,7 @@ func _build_observation(room: Node3D, w: float, d: float, h: float) -> void:
 	_planter(room, Vector3(5.6, 0, 9.8))
 	_console(room, Vector3(-4.5, 0, 4.0), Vector3(1, 0, 0.6).normalized(), "LONG RANGE", "Teal Prime system\nAll quiet", 1.8)
 	_seat(room, Vector3(-3.0, 0, 6.5), 0.5)
-	_screen(room, Vector3(-w / 2.0 + 0.25, 3.2, 3.0), Vector3.RIGHT, Vector2(1.0, 1.4), "VIEW", "Look down: %s" % _planet.get("name", "the planet"), 22, 20)
+	_screen(room, Vector3(-w / 2.0 + 0.25, 3.2, 3.0), Vector3.RIGHT, Vector2(1.0, 1.4), "VIEW", "Look down: %s" % _planet_name(), 22, 20)
 
 
 ## For tests and screenshots: stand somewhere in a compartment's space, looking at a point in it.
@@ -781,6 +802,8 @@ func _location() -> String:
 
 func _on_state(_s: Dictionary) -> void:
 	_planet = Net.planet(planet_id)
+	if not _war.is_empty():
+		_war = WarInfo.planet(planet_id)
 	_refresh_boards()
 
 
@@ -822,63 +845,68 @@ func _refresh_boards() -> void:
 		return
 	var owner: String = str(_planet.get("owner", "nobody")) if _planet.get("owner") != null else "nobody"
 	var sites := _sites()
-	# Terminal Hall: every site, its security and whether it's under raid; the globe's markers.
-	var status := ["%s's home base   %s   %s" % [owner, _lat_lon(planet_id), "SPACEPORT OPEN" if Net.has_building("spaceport", planet_id) else "NO SPACEPORT"]]
+	var mine := WarInfo.my_faction()
+	# Terminal Hall: the planet (its base, or who holds it in the war), every site, its security
+	# and whether it's under raid; the globe's markers.
+	var status := []
+	if _war.is_empty():
+		status.append("%s's home base   %s   %s" % [owner, _lat_lon(planet_id), "SPACEPORT OPEN" if Net.has_building("spaceport", planet_id) else "NO SPACEPORT"])
+	else:
+		var lock := WarInfo.lock_left(_war)
+		status.append("%s   held by %s, %d of %d sectors   %s%s" % [_war.name.to_upper(), WarInfo.faction_name(_war.owner) if _war.owner != null else "nobody",
+			WarInfo.held(_war, _war.owner), _war.sectors.size(), WarInfo.contention(_war).to_upper(), ("   LOCKED %s" % lock.to_upper()) if lock != "" else ""])
 	var ops := []
 	for f in sites:
+		var site := Net.planet(f.planet)
 		var raided := not Net.raid_on(f.planet, f.slot).is_empty()
-		status.append("%s   %s   tier %d   %s" % [_site_name(f), _lat_lon(f.planet), int(f.building.security), "UNDER RAID" if raided else "SECURE"])
+		var side = site.get("faction")
+		var state := "UNDER RAID" if raided else ("DORMANT" if site.get("dormant", false) else "SECURE")
+		status.append("%s   %s%s   %s   tier %d   %s" % [_site_name(f), site.get("owner", "?"), (" · " + WarInfo.faction_name(side)) if side != null else "", _lat_lon(f.planet), int(f.building.security), state])
 		if raided:
 			var r := Net.raid_on(f.planet, f.slot)
 			ops.append("%s   UNDER RAID   heat %d" % [_site_name(f), int(r.get("heat", 0))])
+	if sites.is_empty() and not _war.is_empty():
+		status.append("No outposts on %s yet." % _war.name)
 	if ops.is_empty():
 		ops.append("No raids in progress.")
 	_boards.hall_status.text = "\n".join(status)
 	_boards.hall_ops.text = "\n".join(ops)
-	_boards.hall_sector.text = "Station integrity  100%%\nThreat level  %s\nSites on %s  %d" % ["HIGH" if ops[0] != "No raids in progress." else "MODERATE", _planet.get("name", "?"), sites.size()]
+	# The war front: the contested worlds of the system.
+	var front := []
+	for wp in WarInfo.planets_in(str(Net.state.get("system", {}).get("id", "teal-prime"))):
+		front.append("%-9s %-18s %-10s%s" % [wp.name, WarInfo.faction_name(wp.owner), WarInfo.contention(wp), "  LOCKED" if WarInfo.lock_left(wp) != "" else ""])
+	# The fleets over the system, a Coma armada as plainly as any Builder's fleet.
+	var orbit := []
+	for fl in WarInfo.fleets_at(str(Net.state.get("system", {}).get("id", "teal-prime"))):
+		orbit.append("%s%s" % [WarInfo.fleet_name(fl), "" if fl.status == "stationed" else " (inbound)"])
+	front.append("In orbit: " + (", ".join(orbit.slice(0, 3)) + (" and %d more" % (orbit.size() - 3) if orbit.size() > 3 else "") if not orbit.is_empty() else "no fleets"))
+	front.append("Your side: %s   Threat level: %s" % [WarInfo.faction_name(mine) if mine != "" else "none yet", "HIGH" if ops[0] != "No raids in progress." else "MODERATE"])
+	_boards.hall_sector.text = "\n".join(front)
 	for key in _boards:
 		if str(key).begins_with("monitor_"):
 			_boards[key].text = "\n".join(status.slice(1, 4)) if status.size() > 1 else "No sites yet"
-	for child in _globe_markers.get_children():
-		child.queue_free()
-	var markers := [{"name": "%s's base" % owner, "id": planet_id, "raided": false}]
-	for f in sites:
-		markers.append({"name": _site_name(f), "id": f.planet, "raided": not Net.raid_on(f.planet, f.slot).is_empty()})
-	for m in markers:
-		var spot := _surface_spot(m.id)
-		var lat := deg_to_rad(spot.x)
-		var lon := deg_to_rad(spot.y)
-		var p := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)) * 2.95
-		var dot := MeshInstance3D.new()
-		var mesh := SphereMesh.new()
-		mesh.radius = 0.22
-		mesh.height = 0.44
-		mesh.material = _mat(ALERT if m.raided else CYAN, 4.0)
-		dot.mesh = mesh
-		dot.position = p
-		_globe_markers.add_child(dot)
-		var tag := Label3D.new()
-		tag.text = m.name + ("\nUNDER RAID" if m.raided else "")
-		tag.position = p * 1.18
-		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		tag.pixel_size = 0.004
-		tag.font_size = 96
-		tag.modulate = ALERT if m.raided else SCREEN_TEXT
-		_globe_markers.add_child(tag)
+	_refresh_globe(owner, sites)
 
-	# Job board: this planet's jobs, posted by its Builder.
+	# Job board: this planet's jobs, posted by its Builder, then supply contracts of your side.
 	var jobs := []
 	for j in Net.state.get("jobs", []):
 		if j.get("planet", "aster") == planet_id:
 			jobs.append(j)
 	jobs.reverse()
-	var lines := ["Posted by: %s   LIVE" % owner, ""]
+	var lines := ["Posted by: %s   LIVE" % owner, ""] if _war.is_empty() else ["No Builder lives on %s: supply contracts only." % _war.name, ""]
 	for j in jobs.slice(0, 6):
 		lines.append("JOB #%d // %s   reward %d CR   %d/%d   %s" % [j.id, str(j.resource).to_upper(), int(j.reward), int(j.delivered), int(j.amount), str(j.status).to_upper()])
-	if jobs.is_empty():
+	if jobs.is_empty() and _war.is_empty():
 		lines.append("No jobs posted yet.")
+	var open: Array = Net.state.get("contracts", []).filter(func(c): return c.status == "open" and c.faction == mine)
+	lines.append("")
+	lines.append("SUPPLY CONTRACTS · %s" % (WarInfo.faction_name(mine).to_upper() if mine != "" else "CHOOSE A FACTION TO SEE YOUR SIDE'S"))
+	for c in open.slice(0, 4):
+		lines.append("#%d  %s wants %s   %d/%d   %d CR" % [int(c.id), c.pilot, WarInfo.amount_of(c.item, int(c.amount)), int(c.filled), int(c.amount), int(c.reward)])
+	if open.is_empty() and mine != "":
+		lines.append("None open. Post one at the console.")
 	_boards.jobs.text = "\n".join(lines)
-	_boards.transmission.text = "%s\n%s" % [owner, "Open job waiting" if not Net.open_job(planet_id).is_empty() else "No open jobs"]
+	_boards.transmission.text = "%s\n%s" % [owner, "Open job waiting" if not Net.open_job(planet_id).is_empty() else "No open jobs"] if _war.is_empty() else "Sector Command\n%d contract(s) open" % open.size()
 
 	# Security: the raid log, newest first, scored by what was taken.
 	var wanted := []
@@ -898,6 +926,79 @@ func _refresh_boards() -> void:
 	if not _boards.has("chat_init"):
 		_boards.chat_init = true
 		_boards.chat.text = "No one's said anything yet.\nPress %s to say something." % _chat_key()
+
+
+## The hologram's markers: the Builder's base at a High Port, or at an orbital station every sector
+## of the contested world as a small dot in its owner's colour (the capital sector bigger). Then
+## every outpost, tinted by its faction (red while raided, dim while dormant), with one label per
+## sector listing the outposts standing in it.
+func _refresh_globe(owner: String, sites: Array) -> void:
+	for child in _globe_markers.get_children():
+		child.queue_free()
+	if _war.is_empty():
+		var home := _globe_dot(_surface_spot(planet_id), CYAN, 0.22, 4.0)
+		_globe_tag(home * 1.18, "%s's base" % owner, SCREEN_TEXT, 96)
+	else:
+		for sec in _war.get("sectors", []):
+			_globe_dot(Vector2(float(sec.lat), float(sec.lon)), WarInfo.faction_color(sec.owner), 0.17 if sec.get("capital", false) else 0.11, 1.0)
+	var groups := {} # sector id (or site id) -> {"at": Vector3, "lines": [[text, colour]]}
+	for f in sites:
+		var site := Net.planet(f.planet)
+		var raided := not Net.raid_on(f.planet, f.slot).is_empty()
+		var dormant: bool = site.get("dormant", false)
+		var col: Color = WarInfo.faction_color(site.faction) if site.get("faction") != null else CYAN
+		var text_col := col.lightened(0.25)
+		if raided:
+			col = ALERT
+			text_col = ALERT
+		elif dormant:
+			col = col.darkened(0.6)
+			text_col = Color(text_col, 0.5)
+		var p := _globe_dot(_surface_spot(f.planet), col, 0.15, 0.3 if dormant else 1.6)
+		var key: String = str(site.get("sector", f.planet))
+		if not groups.has(key):
+			groups[key] = {"at": p, "lines": []}
+			var sec := WarInfo.sector(_war, key)
+			if not sec.is_empty():
+				groups[key].lines.append([str(sec.name).to_upper(), WarInfo.faction_color(sec.owner).lightened(0.3)])
+		var line := "%s · %s" % [WarInfo.short_site_name(site) if site.has("sector") else _site_name(f), site.get("owner", "?")]
+		if raided:
+			line += "  UNDER RAID"
+		elif dormant:
+			line += "  DORMANT"
+		groups[key].lines.append([line, text_col])
+	for key in groups:
+		var lines: Array = groups[key].lines
+		var base: Vector3 = groups[key].at * 1.2
+		for i in lines.size():
+			_globe_tag(base + Vector3(0, (lines.size() - 1 - i) * 0.32, 0), lines[i][0], lines[i][1], 80)
+
+
+## A marker on the hologram at [lat, lon]; returns where it is in the globe's space.
+func _globe_dot(spot: Vector2, colour: Color, radius: float, glow: float) -> Vector3:
+	var lat := deg_to_rad(spot.x)
+	var lon := deg_to_rad(spot.y)
+	var p := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)) * 2.95
+	var dot := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.material = _mat(colour, glow)
+	dot.mesh = mesh
+	dot.position = p
+	_globe_markers.add_child(dot)
+	return p
+
+
+func _globe_tag(at: Vector3, text: String, colour: Color, size := 96) -> void:
+	var tag := Label3D.new()
+	tag.text = text
+	tag.position = at
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.pixel_size = 0.004
+	tag.font_size = size
+	tag.modulate = colour
+	_globe_markers.add_child(tag)
 
 
 ## The exchange board: prices drift a little every couple of seconds.
@@ -928,7 +1029,7 @@ func _stash_value() -> int:
 func _jobs_prompt() -> String:
 	var job := Net.open_job(planet_id)
 	if job.is_empty():
-		return "No open jobs on %s right now" % _planet.get("name", "this planet")
+		return "No open jobs on %s right now" % _planet_name()
 	var have := int(_me().get("cargo", {}).get(job.resource, 0))
 	if have <= 0:
 		return "Job #%d wants %s. You have none." % [job.id, job.resource]

@@ -6,6 +6,8 @@ extends "res://place.gd"
 ##
 ## You arrive seated in your ship (see place.gd); the ship's menu has the Spaceport's services.
 ## Walk down the ramp to look around the base on foot; the base plate's edge keeps you on it.
+## Once the Builder's Carrier Dock is finished, a console in front of it opens the dock market
+## (trade_panel.gd), for pilots of the Builder's faction.
 
 const BaseModels := preload("res://base_models.gd")
 const Terrain := preload("res://terrain.gd")
@@ -18,6 +20,7 @@ const LANDING_RADIUS := 18.0 # your ship's pad, between the command centre and t
 var _owner := ""
 var _base: Node3D
 var _pads := [] # {"root", "key", "model", "label"}
+var _dock_console := false
 
 
 func _build() -> void:
@@ -199,3 +202,37 @@ func _refresh_buildings() -> void:
 		p.solid.visible = false
 		var name: String = Net.catalog.get("buildings", {}).get(b.type, {}).get("name", str(b.type).capitalize())
 		p.label.text = "%s\n%s" % [name, "Under construction" if building else "Level %d" % int(b.get("level", 1))]
+		if b.type == "dock" and not building:
+			_add_dock_console(i)
+
+
+## The Carrier Dock's market console: on the walk in from the dock's pad, beside the path, on the
+## side away from your ship.
+func _add_dock_console(slot: int) -> void:
+	if _dock_console:
+		return
+	_dock_console = true
+	var ang := deg_to_rad(-90.0 + 60.0 * slot)
+	var out := Vector3(cos(ang), 0, sin(ang))
+	var side := out.cross(Vector3.UP)
+	var port_slot := 0
+	for b in _planet.get("buildings", []):
+		if b.type == "spaceport":
+			port_slot = int(b.slot)
+	var land_ang := deg_to_rad(-90.0 + 60.0 * port_slot + 30.0)
+	if Vector3(cos(land_ang), 0, sin(land_ang)).dot(side) > 0.0:
+		side = -side
+	var pos := out * (PAD_RING - PAD_RADIUS - 2.5) + side * 3.2
+	_console(self, pos, -out, "CARRIER DOCK", "%s's dock market\nPress F." % _owner, 1.8)
+	_light(self, pos + Vector3(0, 3.0, 0) - out, Color(0.85, 0.92, 1.0), 0.8, 6.0)
+	_use(self, pos - out * 0.7 + Vector3(0, 1.0, 0), _dock_prompt, func():
+		var why := WarInfo.dock_problem(_owner)
+		if why == "":
+			service.emit("dock_market")
+		else:
+			_say(why))
+
+
+func _dock_prompt() -> String:
+	var why := WarInfo.dock_problem(_owner)
+	return "Press %s to trade at %s's Carrier Dock" % [_key(), _owner] if why == "" else why

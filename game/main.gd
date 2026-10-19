@@ -10,6 +10,7 @@ const ExplorerMode := preload("res://explorer.gd")
 
 var _name_edit: LineEdit
 var _server_edit: LineEdit
+var _key_edit: LineEdit
 
 
 func _ready() -> void:
@@ -56,6 +57,14 @@ func _show_menu(server: String) -> void:
 	_server_edit = LineEdit.new()
 	_server_edit.text = server
 	box.add_child(_server_edit)
+	# The galaxy's admins only (the same key as in Settings on PC): saved for the server above,
+	# and it never goes to any other.
+	_key_edit = LineEdit.new()
+	_key_edit.placeholder_text = "Admin key (only if you run this galaxy)"
+	_key_edit.secret = true
+	_key_edit.text = Net.saved_admin_key(server)
+	box.add_child(_key_edit)
+	_server_edit.text_changed.connect(func(t): _key_edit.text = Net.saved_admin_key(t))
 
 	var builder := Button.new()
 	builder.text = "Builder (phone)"
@@ -69,7 +78,9 @@ func _show_menu(server: String) -> void:
 
 func _start_from_menu(mode: String) -> void:
 	var n := _name_edit.text.strip_edges()
-	_start(mode, n if n != "" else _default_name(mode), _server_edit.text.strip_edges())
+	var server := _server_edit.text.strip_edges()
+	Net.save_admin_key(server, _key_edit.text) # an empty box forgets the key for that server
+	_start(mode, n if n != "" else _default_name(mode), server)
 
 
 func _start(mode: String, player_name: String, server: String) -> void:

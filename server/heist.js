@@ -23,6 +23,19 @@ const ITEMS = {
   drive: { name: 'Design drive', cat: 'plan', size: [1, 1], stack: 1, value: 1100, rarity: 'rare' },
   blueprint: { name: 'Blueprint case', cat: 'plan', size: [2, 3], stack: 1, value: 2600, rarity: 'epic', secure: false },
   keycard: { name: 'Access keycard', cat: 'access', size: [1, 1], stack: 1, value: 150, rarity: 'uncommon' },
+  // War supplies from the outposts. Shipped home they go in stock like materials; Builders sell
+  // them at the Carrier Dock, fill pilots' contracts with them, or donate them to the war.
+  fuel: { name: 'Fuel cell', cat: 'supply', size: [1, 1], stack: 10, value: 12, rarity: 'common' },
+  slugs: { name: 'Slug crate', cat: 'supply', size: [1, 1], stack: 5, value: 20, rarity: 'common' },
+  shells: { name: 'Shell crate', cat: 'supply', size: [1, 2], stack: 2, value: 45, rarity: 'common' },
+  missile: { name: 'Missile', cat: 'supply', size: [1, 2], stack: 2, value: 90, rarity: 'uncommon' },
+  torpedo: { name: 'Torpedo', cat: 'supply', size: [1, 3], stack: 1, value: 160, rarity: 'uncommon' },
+  warhead: { name: 'Strategic warhead', cat: 'supply', size: [2, 2], stack: 1, value: 1500, rarity: 'epic' },
+  weapon: { name: 'Weapon system', cat: 'supply', size: [2, 2], stack: 1, value: 180, rarity: 'uncommon' },
+  sensor: { name: 'Sensor module', cat: 'supply', size: [1, 1], stack: 2, value: 120, rarity: 'uncommon' },
+  drone_frame: { name: 'Drone chassis', cat: 'supply', size: [2, 2], stack: 1, value: 260, rarity: 'rare' },
+  lander_frame: { name: 'Lander chassis', cat: 'supply', size: [2, 3], stack: 1, value: 320, rarity: 'rare' },
+  hauler: { name: 'Hauler hull', cat: 'supply', size: [3, 3], stack: 1, value: 600, rarity: 'rare' },
   // Healing goes in the pouch, not the backpack. pouch: the most it holds, how long one takes to
   // use, and what it restores (100 is a full bar).
   syringe: { name: 'Syringe', cat: 'medical', size: [1, 1], stack: 4, value: 30, rarity: 'common', pouch: { cap: 4, seconds: 5, health: 25 } },
@@ -48,9 +61,11 @@ const RARITY_BOOST = { common: 0, uncommon: 0.25, rare: 0.6, epic: 1.0, legendar
 // --- Facilities --------------------------------------------------------------------------
 
 // What each facility makes into its vault, every `every` galaxy ticks (5 s), up to `cap`.
+// Every facility is an outpost (sites.js); `bias` doubles the odds of its kind of loot in a raid.
+// The first three keep their old keys (refinery, lab, spire) so saves still load.
 const FACILITIES = {
   refinery: {
-    name: 'Mining Refinery',
+    name: 'Extractor',
     bias: 'material',
     makes: [
       { item: 'alloy', every: 1, cap: 40 },
@@ -59,21 +74,44 @@ const FACILITIES = {
     ],
   },
   lab: {
-    name: 'Research Outpost',
+    name: 'Armoury',
     bias: 'plan',
     makes: [
+      { item: 'weapon', every: 6, cap: 8 },
       { item: 'drive', every: 12, cap: 4 },
       { item: 'blueprint', every: 36, cap: 2 },
     ],
   },
   spire: {
-    name: 'Data Spire',
+    name: 'Sensor Works',
     bias: 'intel',
     makes: [
+      { item: 'sensor', every: 8, cap: 8 },
       { item: 'shard', every: 6, cap: 10 },
       { item: 'dossier', every: 24, cap: 4 },
     ],
   },
+  fuel: { name: 'Fuel Depot', bias: 'supply', makes: [{ item: 'fuel', every: 1, cap: 60 }] },
+  munitions: {
+    name: 'Light Munitions Works',
+    bias: 'supply',
+    makes: [
+      { item: 'slugs', every: 1, cap: 50 },
+      { item: 'shells', every: 3, cap: 20 },
+    ],
+  },
+  ordnance: {
+    name: 'Heavy Munitions Works',
+    bias: 'supply',
+    makes: [
+      { item: 'missile', every: 6, cap: 12 },
+      { item: 'torpedo', every: 12, cap: 6 },
+      { item: 'warhead', every: 60, cap: 1 },
+    ],
+  },
+  drones: { name: 'Drone Yard', bias: 'supply', makes: [{ item: 'drone_frame', every: 12, cap: 6 }] },
+  landers: { name: 'Lander Yard', bias: 'supply', makes: [{ item: 'lander_frame', every: 15, cap: 5 }] },
+  haulers: { name: 'Hauler Yard', bias: 'supply', makes: [{ item: 'hauler', every: 30, cap: 3 }] },
 };
 
 // Security tiers the Builder buys. Tier sets guards, turrets, loot rarity and the run timer.
@@ -122,9 +160,9 @@ const FENCE_RATE = 0.5;
 // Loot tables per container. [item, weight, qtyMin, qtyMax]
 const TABLES = {
   locker: { rolls: [1, 3], none: 2, entries: [['scrap', 6, 1, 6], ['syringe', 1.5, 1, 2], ['cell', 1.5, 1, 2], ['circuit', 3, 1, 1], ['wafer', 1, 1, 1]] },
-  crate: { rolls: [2, 4], none: 1, entries: [['scrap', 5, 2, 10], ['alloy', 4, 1, 4], ['circuit', 3, 1, 1], ['isotope', 1, 1, 2], ['medkit', 0.5, 1, 1], ['battery', 0.5, 1, 1]] },
+  crate: { rolls: [2, 4], none: 1, entries: [['scrap', 5, 2, 10], ['alloy', 4, 1, 4], ['circuit', 3, 1, 1], ['isotope', 1, 1, 2], ['medkit', 0.5, 1, 1], ['battery', 0.5, 1, 1], ['fuel', 1, 2, 8], ['slugs', 0.8, 1, 4], ['shells', 0.4, 1, 2]] },
   desk: { rolls: [1, 3], none: 2, entries: [['wafer', 3, 1, 2], ['shard', 2, 1, 1], ['circuit', 2, 1, 1], ['art', 0.6, 1, 1]] },
-  rack: { rolls: [1, 3], none: 1, entries: [['shard', 4, 1, 1], ['circuit', 4, 1, 1], ['dossier', 1, 1, 1], ['drive', 0.5, 1, 1]] },
+  rack: { rolls: [1, 3], none: 1, entries: [['shard', 4, 1, 1], ['circuit', 4, 1, 1], ['dossier', 1, 1, 1], ['drive', 0.5, 1, 1], ['sensor', 0.6, 1, 1]] },
   vault: { rolls: [1, 2], none: 0, entries: [['wafer', 3, 1, 3], ['art', 2, 1, 1], ['exotic', 0.6, 1, 1], ['drive', 0.6, 1, 1]] },
   // The wall med cabinet. Vests are rare and epic, so they turn up mostly on the deeper levels.
   medcab: { rolls: [2, 4], none: 0.5, entries: [['syringe', 4, 1, 2], ['cell', 4, 1, 2], ['medkit', 2, 1, 1], ['battery', 2, 1, 1], ['vest75', 0.5, 1, 1], ['vest100', 0.15, 1, 1]] },
@@ -257,18 +295,19 @@ class Grid {
 // The whole raid map: the site outside (from the Builder's grid) and the levels below the core.
 // Positions are in metres: x east, z south, with the core at the origin; level n sits at
 // y = -FLOOR_DEPTH * n. `site` is the satellite site record, or null for a facility without one.
-function generateLayout(seed, tier, type, { floors = tier, site = null, now = 0 } = {}) {
+// `hpScale` multiplies the outside defences' hit points (a Terran Compact outpost's are tougher).
+function generateLayout(seed, tier, type, { floors = tier, site = null, now = 0, hpScale = 1 } = {}) {
   floors = Math.max(1, Math.min(MAX_FLOORS, floors));
   for (let attempt = 0; attempt < 50; attempt++) {
-    const layout = tryLayout((seed + attempt * 7919) >>> 0, tier, type, floors, site, now);
+    const layout = tryLayout((seed + attempt * 7919) >>> 0, tier, type, floors, site, now, hpScale);
     if (layout) return layout;
   }
   throw new Error('no valid layout');
 }
 
-function tryLayout(seed, tier, type, floorCount, site, now) {
+function tryLayout(seed, tier, type, floorCount, site, now, hpScale) {
   const r = rng(seed);
-  const outside = siteLayout(site, tier, r, now);
+  const outside = siteLayout(site, tier, r, now, hpScale);
 
   // Each level is a grid of rooms. Its lift up sits directly under the lift down of the level
   // above (level 1's under the lobby in the core); its lift down is the room furthest from there.
@@ -432,7 +471,7 @@ function tryFloor(r, W, H, entrance, last) {
 // The outside: the site's grid and what stands on it, in metres around the core.
 // A satellite site is mirrored as the Builder laid it out (defences still being built aren't
 // there yet); anything else gets defences set out from its security tier.
-function siteLayout(site, tier, r, now) {
+function siteLayout(site, tier, r, now, hpScale = 1) {
   const grid = site?.grid || SITE_GRID;
   const half = (grid * TILE) / 2;
   const coreAt = (grid - CORE_TILES) / 2;
@@ -447,14 +486,14 @@ function siteLayout(site, tier, r, now) {
       type: p.type,
       size: [def.w * TILE, def.h * TILE],
       pos: [(p.x + def.w / 2) * TILE - half, (p.y + def.h / 2) * TILE - half],
-      hp: def.hp,
+      hp: Math.round(def.hp * hpScale),
     };
   });
   // The turrets the security tier mounts round the core, where the Builder's view draws them.
   const ring = SECURITY[tier].turrets;
   for (let t = 0; t < ring; t++) {
     const ang = (2 * Math.PI * (t + 0.5)) / ring + 0.6;
-    pieces.push({ id: `ct${t}`, type: 'turret', ring: true, size: [2, 2], pos: [Math.cos(ang) * 6.6, Math.sin(ang) * 6.6], hp: SITE_PIECES.turret.hp });
+    pieces.push({ id: `ct${t}`, type: 'turret', ring: true, size: [2, 2], pos: [Math.cos(ang) * 6.6, Math.sin(ang) * 6.6], hp: Math.round(SITE_PIECES.turret.hp * hpScale) });
   }
   const core = CORE_TILES * TILE;
   return {
@@ -581,11 +620,12 @@ function selfDestructSeconds(floors) {
 
 // Starts a raid on a facility. `facility` is the building object in galaxy state, `site` the
 // satellite site it stands on (if any); the exposed part of its vault moves into escrow so the
-// Builder can't ship what raiders are stealing.
-function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = null, pouch = null }) {
+// Builder can't ship what raiders are stealing. `hpScale` and `heatScale` are the outpost
+// faction's bonuses: tougher defences, and Heat that builds faster.
+function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = null, pouch = null, hpScale = 1, heatScale = 1 }) {
   const tier = facility.security || 1;
   const floors = floorsOf(facility);
-  const layout = generateLayout(seed, tier, facility.type, { floors, site, now });
+  const layout = generateLayout(seed, tier, facility.type, { floors, site, now, hpScale });
   const def = FACILITIES[facility.type];
   const r = rng(lootSeed >>> 0);
 
@@ -600,8 +640,6 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
   const lootTier = (c) => tier + c.floor - 1;
   for (const c of layout.containers) contents[c.id] = c.type === 'vault' ? [] : rollTable(TABLES[c.type], lootTier(c), def.bias, r).flatMap((s) => stacks(s.item, s.qty));
   const vaultBoxes = layout.containers.filter((c) => c.type === 'vault');
-  let i = 0;
-  for (const [item, qty] of Object.entries(escrow)) for (const s of stacks(item, qty)) contents[vaultBoxes[i++ % vaultBoxes.length].id].push({ ...s, vaultQty: s.qty });
   for (const c of vaultBoxes) contents[c.id].push(...rollTable(TABLES.vault, lootTier(c), def.bias, r).flatMap((s) => stacks(s.item, s.qty)));
   // One keycard for the safe room, somewhere else on the deepest level.
   const plain = layout.containers.filter((c) => c.type !== 'vault' && c.type !== 'medcab');
@@ -609,26 +647,40 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
   const keyBox = r.pick(deep.length ? deep : plain);
   contents[keyBox.id].push({ item: 'keycard', qty: 1 });
 
-  // Lay each container's items into its grid; anything that doesn't fit isn't there.
   let uid = 1;
   const boxes = {};
-  for (const c of layout.containers) {
-    const grid = new Grid(c.grid[0], c.grid[1]);
-    const items = [];
-    const sorted = contents[c.id].sort((a, b) => ITEMS[b.item].size[0] * ITEMS[b.item].size[1] - ITEMS[a.item].size[0] * ITEMS[a.item].size[1]);
-    for (const s of sorted) {
-      const rect = grid.findFree(ITEMS[s.item].size);
-      if (!rect) {
-        if (s.vaultQty) escrow[s.item] -= s.vaultQty; // stays in deep storage
-        continue;
-      }
-      // vaultQty: how many of these came from the Builder's vault (the rest is ordinary loot).
-      const it = { uid: `i${uid++}`, item: s.item, qty: s.qty, vaultQty: s.vaultQty || 0 };
-      if (ITEMS[s.item].vest) it.armor = ITEMS[s.item].vest;
-      grid.place(it.uid, rect);
-      items.push(it);
+  for (const c of layout.containers) boxes[c.id] = { grid: new Grid(c.grid[0], c.grid[1]), items: [], searchedAt: null, revealAt: {} };
+  const area = (item) => ITEMS[item].size[0] * ITEMS[item].size[1];
+  const put = (box, s, rect) => {
+    // vaultQty: how many of these came from the Builder's vault (the rest is ordinary loot).
+    const it = { uid: `i${uid++}`, item: s.item, qty: s.qty, vaultQty: s.vaultQty || 0 };
+    if (ITEMS[s.item].vest) it.armor = ITEMS[s.item].vest;
+    box.grid.place(it.uid, rect);
+    box.items.push(it);
+  };
+  // Vault goods go in the safe room's boxes first: one stack of each kind in turn (the biggest kind
+  // first), each in the next box with room, so every kind the facility makes is there to find.
+  // What doesn't fit stays in deep storage.
+  const piles = Object.keys(escrow).sort((a, b) => area(b) - area(a)).map((item) => stacks(item, escrow[item]));
+  let next = 0;
+  for (let round = 0; piles.some((p) => p.length > round); round++) {
+    for (const pile of piles) {
+      const s = pile[round];
+      if (!s) continue;
+      const box = [...vaultBoxes.keys()].map((k) => boxes[vaultBoxes[(next + k) % vaultBoxes.length].id]).find((b) => b.grid.findFree(ITEMS[s.item].size));
+      next++;
+      if (box) put(box, { ...s, vaultQty: s.qty }, box.grid.findFree(ITEMS[s.item].size));
+      else escrow[s.item] -= s.qty;
     }
-    boxes[c.id] = { grid, items, searchedAt: null, revealAt: {} };
+  }
+  // Then everything else: the keycard, then the biggest first. Anything that doesn't fit isn't there.
+  const order = (s) => (s.item === 'keycard' ? Infinity : area(s.item));
+  for (const c of layout.containers) {
+    const box = boxes[c.id];
+    for (const s of contents[c.id].sort((a, b) => order(b) - order(a))) {
+      const rect = box.grid.findFree(ITEMS[s.item].size);
+      if (rect) put(box, s, rect);
+    }
   }
   for (const [item, qty] of Object.entries(escrow)) {
     if (qty <= 0) delete escrow[item];
@@ -649,6 +701,7 @@ function startRun({ facility, facilityName, pilot, seed, now, lootSeed, site = n
     startedAt: now,
     endsAt: now + (SECURITY[tier].minutes + 4 * floors) * 60_000,
     heat: 0,
+    heatScale, // every Heat gain is multiplied by this
     heatFrom: {}, // event -> last ms counted
     heatClock: now,
     drill: null,
@@ -725,7 +778,7 @@ function looseView(run) {
 
 function addHeat(run, amount) {
   const before = heatLevel(run.heat);
-  run.heat = Math.min(100, run.heat + amount);
+  run.heat = Math.min(100, run.heat + amount * (run.heatScale || 1));
   return heatLevel(run.heat) !== before;
 }
 

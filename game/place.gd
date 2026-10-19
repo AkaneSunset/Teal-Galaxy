@@ -10,13 +10,16 @@ extends Node3D
 ## Subclasses build their world in `_build()`, may add per-frame work in `_tick()`, and name where
 ## the player is in `_location()`. Building blocks (boxes, screens, signs, consoles, lights, things
 ## to use with F, landed ships with ramps) are shared from here.
+## `planet_id` is a Builder's home planet, or a contested world of the war (its orbital station),
+## which has no record in the system's planets: `_planet` is empty there.
 
 const System := preload("res://teal_prime.gd")
 const Models := preload("res://models.gd")
 const ChatBox := preload("res://chat_box.gd")
+const WarInfo := preload("res://war_info.gd")
 
 signal seated_down # walked up your own ship's ramp and sat down
-signal service(kind: String) # "repair"
+signal service(kind: String) # "repair", "war" (a War terminal), "contracts", "dock_market"
 signal wants_menu # used a console that opens the ship's menu (the transit terminal)
 
 const WALK := 4.2
@@ -692,3 +695,10 @@ func _key() -> String:
 
 func _me() -> Dictionary:
 	return Net.state.get("pilots", {}).get(Net.my_name, {}) if not Net.state.is_empty() else {}
+
+
+## The planet's name: a Builder's home, or a contested world of the war.
+func _planet_name() -> String:
+	if _planet.has("name"):
+		return str(_planet.name)
+	return str(WarInfo.planet(planet_id).get("name", planet_id.capitalize()))

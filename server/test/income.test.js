@@ -4,6 +4,14 @@ const test = require('node:test');
 const assert = require('node:assert');
 const G = require('../galaxy');
 
+// `owner`'s outpost on Cinder, which their faction (the Terran Compact) holds. Each sector takes 3.
+function outpost(g, owner, type, sector = 'cinder-1') {
+  if (!g.bases[owner].faction) G.chooseFaction(g, 'builder', owner, 'compact');
+  const r = G.foundSite(g, owner, type, 'cinder', sector);
+  assert.ok(r.ok, r.reason);
+  return r;
+}
+
 test('mines, extractors, habitats and hydroponics produce every tick', () => {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
@@ -31,7 +39,7 @@ test('a facility sends its vault home on its own every few minutes', () => {
   g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
-  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const { site } = outpost(g, 'Akane', 'refinery');
   const t = 1_000_000;
   G.tick(g, t);
   const b = G.facility(g, site.id, 0);
@@ -54,7 +62,8 @@ test('demo mode gives each base enough to build everything, once', () => {
   assert.ok(!G.demoTopUp(e), 'only once, so spending sticks');
   let slot = 0;
   for (const type of ['mine', 'extractor', 'habitat', 'spaceport', 'hydroponics', 'foundry']) assert.ok(G.build(g, 'aster', slot++, type).ok, type);
-  for (const type of ['refinery', 'lab', 'spire']) assert.ok(G.foundSite(g, 'Akane', type).ok, type);
+  for (const type of ['refinery', 'lab', 'spire']) outpost(g, 'Akane', type);
+  for (const type of ['ordnance', 'haulers']) outpost(g, 'Akane', type, 'cinder-2');
   const site = g.system.planets.find((p) => p.owner === 'Akane' && p.kind === 'satellite');
   assert.ok(G.secure(g, site.id, 0).ok, 'security tier 2');
   assert.ok(G.secure(g, site.id, 0).ok, 'security tier 3');

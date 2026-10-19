@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const G = require('../galaxy');
 const N = require('../navy');
+const W = require('../war');
 
 function base() {
   const g = G.newGalaxy();
@@ -63,6 +64,25 @@ test('costs, queue and hangar limits, and cancelling refunds', () => {
 
   g.navy.corvette = N.HANGAR - 4; // 4 still queued fills the hangar
   assert.match(G.queueShip(g, 'aster', 1, 'corvette', 0).reason, /hangar is full/);
+});
+
+test('ships out with fleets keep their berths in the hangar', () => {
+  const g = base();
+  G.claimBase(g, 'Akane'); // takes over Aster and its economy
+  G.chooseFaction(g, 'builder', 'Akane', 'compact');
+  G.build(g, 'aster', 0, 'spaceport');
+  G.build(g, 'aster', 1, 'foundry');
+  const e = g.bases.Akane;
+  e.navy.corvette = N.HANGAR;
+  assert.ok(W.sendFleet(g, 'Akane', 'teal-prime', { corvette: 6 }, 0).ok);
+  assert.strictEqual(G.queueShip(g, 'aster', 1, 'corvette', 0).reason, 'the hangar is full: 6 of its ships are out with your fleets');
+  W.warTick(g, 10_000);
+  assert.strictEqual(G.queueShip(g, 'aster', 1, 'corvette', 10_000).reason, 'the hangar is full: 6 of its ships are out with your fleets', 'in orbit too');
+  e.navy.corvette = 3;
+  assert.ok(G.queueShip(g, 'aster', 1, 'corvette', 10_000).ok, '3 home, 6 out, 1 building');
+  assert.strictEqual(G.queueShip(g, 'aster', 1, 'corvette', 10_000).reason, 'the hangar is full: 6 of its ships are out with your fleets');
+  g.war.fleets = []; // lost in battle: their berths are free again
+  assert.ok(G.queueShip(g, 'aster', 1, 'corvette', 10_000).ok);
 });
 
 test('old saves get a navy', () => {

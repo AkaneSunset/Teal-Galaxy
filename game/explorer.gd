@@ -4,6 +4,10 @@ extends Node3D
 ## Every Builder planet has a High Port in orbit. Docking there opens the transit menu, which
 ## shuttles the pilot down to the planet's Spaceport (jobs and the Fence) or into one of its
 ## facilities to raid it.
+## The faction war: a pilot picks a side once (faction_picker.gd). The contested worlds (Cinder,
+## Vesper, Halcyon, Morrow) have orbital stations instead, over the Builders' outposts in their
+## sectors; outposts of other factions are raided from there. The War terminal (war_panel.gd)
+## shows the front, the Carrier Dock market and supply contracts are in trade_panel.gd.
 ## Everything is built from simple shapes in code, so there are no art assets yet.
 ##
 ## The ship always sits at the scene origin and the system is drawn around it (a floating
@@ -21,6 +25,10 @@ const Models := preload("res://models.gd")
 const Raid := preload("res://raid.gd")
 const Station := preload("res://station.gd")
 const Surface := preload("res://surface.gd")
+const WarInfo := preload("res://war_info.gd")
+const FactionPicker := preload("res://faction_picker.gd")
+const WarPanel := preload("res://war_panel.gd")
+const TradePanel := preload("res://trade_panel.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
@@ -49,7 +57,7 @@ var _cockpit_screens: Array[Label3D] = []
 var _accent: StandardMaterial3D
 var _sun: DirectionalLight3D
 var _sky: SubViewport
-var _stations := {} # planet id -> {"node", "pos", "name", "planet"}: the High Port over each Builder planet
+var _stations := {} # planet id -> {"node", "pos", "name", "planet", "orbital"}: High Ports and orbital stations
 var _docked := "" # the planet whose High Port (or base) we're landed at, or ""
 var _at_spaceport := false # landed at the planet's base, on its surface, rather than in its High Port
 var _dock_panel: PanelContainer
@@ -62,7 +70,7 @@ var _dust_points := PackedVector3Array()
 var _others := {} # id -> {"node": Node3D, "pos": Array, "shown": Array}
 var _waypoints := [] # {"id", "name", "pos"}
 var _raid: Node3D # the on-foot raid while one is running
-var _raid_from := "" # the High Port (planet id) the raid left from, to return to
+var _raid_from := "" # the station (a High Port or an orbital, by planet id) the raid left from, to return to
 var _station: Node3D # where the ship is landed: the High Port's hangar (station.gd) or a base (surface.gd)
 var _menu_standing := false # the ship's menu is up over the place while you stand (the transit terminal)
 var _world_env: WorldEnvironment
@@ -78,6 +86,12 @@ var _hint: Label
 var _phase_tint: ColorRect
 var _nav: Control
 var _settings: Control
+var _picker: Control # the faction choice, for a pilot with no side yet
+var _picker_dismissed := false # "Not now": the ship's menu offers it again
+var _war_panel: Control
+var _trade: Control # the Carrier Dock market and supply contracts
+var _refusal: PanelContainer # why the server turned this pilot away (a Coma character without the admin key)
+var _refusal_text: Label
 var _chat: VBoxContainer
 var _message := ""
 var _message_time := 0.0
@@ -99,7 +113,11 @@ func _ready() -> void:
 	Net.state_changed.connect(_on_state)
 	Net.ship_moved.connect(_on_ship_moved)
 	Net.ship_left.connect(_on_ship_left)
-	Net.server_error.connect(func(reason): _say("Server: " + reason))
+	Net.server_error.connect(func(reason):
+		_refresh_refusal()
+		if Net.refused == "":
+			_say("Server: " + reason))
+	Net.connection_changed.connect(func(_on): _refresh_refusal())
 	Net.raid_event.connect(_on_raid_event)
 	controls.capture_mouse()
 
@@ -178,7 +196,8 @@ func _build_local_space() -> void:
 
 
 ## A High Port: the orbital station over a Builder planet, where pilots dock to go down to the surface.
-func _add_station(planet_id: String, station_name: String, pos: Array) -> void:
+## `orbital`: a contested world's station (Cinder Orbital), the same build, with no base below it.
+func _add_station(planet_id: String, station_name: String, pos: Array, orbital := false) -> void:
 	var port := Node3D.new()
 	var hub := _mesh(CylinderMesh.new(), Color(0.55, 0.58, 0.62))
 	hub.mesh.top_radius = 60
@@ -215,10 +234,11 @@ func _add_station(planet_id: String, station_name: String, pos: Array) -> void:
 	tag.no_depth_test = true
 	port.add_child(tag)
 	add_child(port)
-	_stations[planet_id] = {"node": port, "pos": pos, "name": station_name, "planet": planet_id}
+	_stations[planet_id] = {"node": port, "pos": pos, "name": station_name, "planet": planet_id, "orbital": orbital}
 
 
 ## Every Builder home planet gets a High Port; planets beyond Aster are added to the sky as they appear.
+## Every contested world of the system gets its orbital station once the war map arrives.
 func _sync_stations() -> void:
 	var index := 0
 	for p in Net.state.system.planets:
@@ -231,6 +251,9 @@ func _sync_stations() -> void:
 		index += 1
 		if not _stations.has(p.id):
 			_add_station(p.id, System.station_name(p.name), System.station_pos(p.id))
+	for wp in WarInfo.planets_in(str(Net.state.system.get("id", "teal-prime"))):
+		if not _stations.has(wp.id) and not System.builder_planet(wp.id).is_empty():
+			_add_station(wp.id, System.orbital_name(wp.name), System.orbital_pos(wp.id), true)
 
 
 func _mesh(mesh: Mesh, color: Color, glow := false) -> MeshInstance3D:
@@ -359,11 +382,33 @@ func _build_hud() -> void:
 	_nav.route_changed.connect(func(r): _route = r.duplicate())
 	_nav.waypoint_added.connect(_add_waypoint)
 	_nav.waypoint_removed.connect(_remove_waypoint)
+	_nav.war_planet_picked.connect(func(id): _nav.visible = false; _open_war(id))
 
 	var dock_layer := CanvasLayer.new()
 	dock_layer.layer = 5
 	add_child(dock_layer)
 	_build_dock_panel(dock_layer)
+
+	# The war's screens, over everything else (the ship's menu included).
+	var war_layer := CanvasLayer.new()
+	war_layer.layer = 6
+	add_child(war_layer)
+	_war_panel = WarPanel.new()
+	_war_panel.visible = false
+	war_layer.add_child(_war_panel)
+	_war_panel.closed.connect(_close_panel)
+	_war_panel.wants_faction.connect(_show_picker)
+	_trade = TradePanel.new()
+	_trade.visible = false
+	war_layer.add_child(_trade)
+	_trade.closed.connect(_close_panel)
+	_trade.wants_faction.connect(_show_picker)
+	_picker = FactionPicker.new()
+	_picker.visible = false
+	war_layer.add_child(_picker)
+	_picker.dismissed.connect(func(): _picker_dismissed = true; _close_panel())
+
+	_build_refusal(layer)
 
 	_settings = SettingsMenu.new()
 	_settings.controls = controls
@@ -375,6 +420,14 @@ func _build_hud() -> void:
 # --- Input -------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _panel_open() and (event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel")):
+		if _picker.visible:
+			_picker_dismissed = true
+		_close_panel()
+		get_viewport().set_input_as_handled()
+		return
+	if _panel_open():
+		return
 	if _station and _menu_standing and (event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel")):
 		_close_standing_menu()
 		get_viewport().set_input_as_handled()
@@ -422,7 +475,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _refresh_focus() -> void:
-	var overlay: bool = _settings.visible or _nav.visible or _dock_panel.visible
+	if _station or _raid:
+		return # on foot the place looks after the mouse, and the ship's menu frees it
+	var overlay: bool = _settings.visible or _nav.visible or _dock_panel.visible or _panel_open()
 	controls.enabled = not overlay and not _chat.is_typing()
 	if overlay:
 		controls.release_mouse()
@@ -457,7 +512,7 @@ func _process(delta: float) -> void:
 	_check_arrival()
 
 	_send_timer -= delta
-	if _send_timer <= 0:
+	if _send_timer <= 0 and Net.refused == "": # a pilot the server turned away has nobody to tell
 		_send_timer = SEND_EVERY
 		var r := flight.basis.get_euler()
 		Net.send({"type": "ship", "pos": _pos, "rot": [r.x, r.y, r.z]})
@@ -567,7 +622,7 @@ func _nav_items() -> Array:
 			"radius": body.radius, "standoff": body.radius + 300_000.0})
 	for id in _stations:
 		var st: Dictionary = _stations[id]
-		items.append({"id": "port-" + id, "name": st.name, "kind": "landmark", "pos": st.pos, "standoff": 5_500.0, "local": id == "aster"})
+		items.append({"id": "port-" + id, "name": st.name, "kind": "landmark", "pos": st.pos, "standoff": 5_500.0, "local": id == "aster", "near": id})
 	items.append({"id": "field", "name": System.FIELD_NAME, "kind": "landmark", "pos": System.FIELD_POS, "standoff": 2_500.0, "local": true})
 	for w in _waypoints:
 		items.append({"id": w.id, "name": w.name, "kind": "waypoint", "pos": w.pos, "standoff": 0.0})
@@ -680,9 +735,7 @@ func _land_in(place: Node3D, at_base: bool) -> void:
 	_station.controls = controls
 	_station.seated_down.connect(_show_ship_menu)
 	_station.wants_menu.connect(_open_standing_menu)
-	_station.service.connect(func(kind):
-		if kind == "repair":
-			flight.repair())
+	_station.service.connect(_on_service)
 	add_child(_station)
 	_show_ship_menu()
 
@@ -705,8 +758,23 @@ func _show_ship_menu() -> void:
 
 ## Leave the pilot's seat and walk down the ramp.
 func _leave_seat() -> void:
+	_hide_panels()
 	_dock_panel.visible = false
 	_station.stand()
+
+
+## Something used on foot in a place: Ship Services, a War terminal, the Job Board's contracts
+## console, a base's Carrier Dock.
+func _on_service(kind: String) -> void:
+	match kind:
+		"repair":
+			flight.repair()
+		"war":
+			_open_war()
+		"contracts":
+			_open_trade("contracts")
+		"dock_market":
+			_open_trade("market", str(Net.planet(_docked).get("owner", "")))
 
 
 ## The transit terminal in the station: the same trips, while you stand at the console.
@@ -752,7 +820,8 @@ func undock() -> void:
 	_say("Launched from %s. Fly safe." % (_stations[from].name if _stations.has(from) else "the High Port"))
 
 
-## Facilities on a planet's satellite sites (and any still on its own pads).
+## Facilities on the outposts standing on a planet: a contested world's sectors (for its orbital
+## station), or a Builder's home for sites from before the war (and any still on its own pads).
 func facilities_on(planet_id: String) -> Array:
 	return Net.facilities().filter(func(f): return f.planet == planet_id or Net.planet(f.planet).get("parent", "") == planet_id)
 
@@ -764,6 +833,7 @@ func _refresh_dock() -> void:
 		child.queue_free()
 	var p := Net.planet(_docked)
 	var owner: String = str(p.get("owner", "nobody")) if p.get("owner") != null else "nobody"
+	var orbital: bool = _stations.get(_docked, {}).get("orbital", false)
 	if _at_spaceport:
 		_dock_title.text = "Landed at %s's base on %s" % [owner, p.get("name", _docked)]
 		var job := Net.open_job(_docked)
@@ -780,6 +850,8 @@ func _refresh_dock() -> void:
 		else:
 			_dock_button("Sell %d raided items to the Fence for %d credits" % [stash.size(), _stash_value() / 2],
 				func(): Net.send({"type": "sell"}))
+		_dock_market_entry(owner)
+		_war_row()
 		_dock_button("Leave your seat and walk around the base", _leave_seat)
 		_dock_button("Fly back up to %s" % _stations[_docked].name, _fly_to_station)
 	else:
@@ -788,28 +860,21 @@ func _refresh_dock() -> void:
 		else:
 			_dock_title.text = "In your ship on pad 06, %s" % _stations[_docked].name
 			_dock_button("Leave your seat and walk into the station", _leave_seat)
-		if Net.has_building("spaceport", _docked):
+		var where: String = p.get("name", _docked)
+		if orbital:
+			var wp := WarInfo.planet(_docked)
+			where = wp.get("name", _docked)
+			_dock_note(_front_note(wp), WarInfo.faction_color(wp.get("owner")).lightened(0.2))
+		elif Net.has_building("spaceport", _docked):
 			_dock_button("Fly down to %s's base and land at the Spaceport" % owner, _fly_to_base)
 		else:
-			_dock_note("%s has no Spaceport yet." % p.get("name", _docked))
+			_dock_note("%s has no Spaceport yet." % where)
 		var facs := facilities_on(_docked)
 		if facs.is_empty():
-			_dock_note("No facilities to raid on %s." % p.get("name", _docked))
+			_dock_note("No outposts to raid on %s." % where)
 		for f in facs:
-			var b: Dictionary = f.building
-			var vault := 0
-			for id in b.vault:
-				vault += int(b.vault[id])
-			var cool := (float(b.get("cooldownUntil", 0)) - Net.now_ms()) / 1000.0
-			var site := Net.planet(f.planet)
-			var fac_name: String = site.name if site.get("kind", "") == "satellite" else f.name
-			var label := "Raid %s (%s's): security tier %d, %d items in the vault" % [fac_name, owner, int(b.security), vault]
-			if not Net.raid_on(f.planet, f.slot).is_empty():
-				_dock_note("%s: someone is already inside" % fac_name)
-			elif cool > 0:
-				_dock_note("%s: security on alert after a raid (%d s)" % [fac_name, ceili(cool)])
-			else:
-				_dock_button(label, board.bind(f.planet, f.slot))
+			_raid_entry(f)
+		_war_row()
 		if _menu_standing:
 			_dock_button("Close", _close_standing_menu)
 		else:
@@ -817,6 +882,82 @@ func _refresh_dock() -> void:
 	var first := _dock_list.get_children().filter(func(c): return c is Button and not c.is_queued_for_deletion())
 	if not first.is_empty():
 		first[0].grab_focus.call_deferred()
+
+
+## One outpost in the ship's menu: a button that flies you there to raid it, or why you can't.
+## Outposts of the war are raided only by pilots of another faction; your own side's are
+## friendly. A dormant outpost (its faction lost the planet) can still be raided.
+func _raid_entry(f: Dictionary) -> void:
+	var b: Dictionary = f.building
+	var site := Net.planet(f.planet)
+	var fac_name: String = site.name if site.get("kind", "") == "satellite" else f.name
+	var builder: String = str(site.get("owner")) if site.get("owner") != null else "nobody"
+	var side = site.get("faction")
+	var mine := WarInfo.my_faction()
+	var whose := "%s's" % builder + (", %s" % WarInfo.faction_name(side) if side != null else "")
+	var dormant: bool = site.get("dormant", false)
+	if side != null and mine == str(side):
+		_dock_note("%s (%s): friendly, your own side's outpost, so it can't be raided" % [fac_name, whose], WarInfo.faction_color(side).lightened(0.2))
+		return
+	if side != null and mine == "":
+		_dock_note("%s (%s): choose a faction to raid outposts of the war" % [fac_name, whose])
+		return
+	if side != null and builder == Net.my_name:
+		_dock_note("%s: your own outpost, you can't raid it" % fac_name)
+		return
+	var vault := 0
+	for id in b.vault:
+		vault += int(b.vault[id])
+	var cool := (float(b.get("cooldownUntil", 0)) - Net.now_ms()) / 1000.0
+	var label := "Raid %s (%s%s): security tier %d, %d items in the vault" % [fac_name, whose, ", dormant" if dormant else "", int(b.security), vault]
+	if not Net.raid_on(f.planet, f.slot).is_empty():
+		_dock_note("%s: someone is already inside" % fac_name)
+	elif cool > 0:
+		_dock_note("%s: security on alert after a raid (%d s)" % [fac_name, ceili(cool)])
+	else:
+		_dock_button(label, board.bind(f.planet, f.slot))
+
+
+## A contested world from its orbital station: who holds it and how hard it's fought over.
+func _front_note(wp: Dictionary) -> String:
+	if wp.is_empty():
+		return "A contested world of the war."
+	var held := "held by %s (%d of %d sectors)" % [WarInfo.the(wp.owner), WarInfo.held(wp, wp.owner), wp.sectors.size()] if wp.owner != null else "held by nobody"
+	var lock := WarInfo.lock_left(wp)
+	return "%s is a contested world, %s: %s%s. No Builder lives here; their outposts stand in its sectors." % [
+		wp.name, held, WarInfo.contention(wp), (", locked for " + lock) if lock != "" else ""]
+
+
+## At a Builder's base: their Carrier Dock market, if it's finished and trades with your side.
+func _dock_market_entry(builder: String) -> void:
+	var dock := WarInfo.dock_of(builder)
+	if dock.is_empty():
+		return
+	if not WarInfo.dock_finished(builder):
+		_dock_note("%s's Carrier Dock is still being built." % builder)
+		return
+	var why := WarInfo.dock_problem(builder)
+	if why != "":
+		_dock_note(why)
+		return
+	var listed: int = Net.state.get("bases", {}).get(builder, {}).get("market", {}).size()
+	_dock_button("Carrier Dock market: %d goods listed by %s" % [listed, builder], _open_trade.bind("market", builder))
+
+
+## The war, from the ship's menu: the War terminal, supply contracts, and a side if you have none.
+func _war_row() -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	var entries := [["War terminal", _open_war.bind("")], ["Supply contracts", _open_trade.bind("contracts", "")]]
+	if WarInfo.my_faction() == "":
+		entries.append(["Choose your faction", _show_picker])
+	for e in entries:
+		var b := Button.new()
+		b.text = e[0]
+		b.add_theme_font_size_override("font_size", 18)
+		b.pressed.connect(e[1])
+		row.add_child(b)
+	_dock_list.add_child(row)
 
 
 func _dock_button(text: String, action: Callable) -> void:
@@ -828,10 +969,12 @@ func _dock_button(text: String, action: Callable) -> void:
 	_dock_list.add_child(b)
 
 
-func _dock_note(text: String) -> void:
+func _dock_note(text: String, colour := Color(1, 1, 1, 0.6)) -> void:
 	var l := Label.new()
 	l.text = text
-	l.modulate = Color(1, 1, 1, 0.6)
+	l.modulate = colour
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size = Vector2(580, 0)
 	_dock_list.add_child(l)
 
 
@@ -858,6 +1001,124 @@ func _build_dock_panel(layer: CanvasLayer) -> void:
 	_dock_list = VBoxContainer.new()
 	_dock_list.add_theme_constant_override("separation", 8)
 	col.add_child(_dock_list)
+
+
+## The server's answer when it turns a pilot away (a character of an admins-only faction, from an
+## app without the admin key): shown in the middle of the screen until a hello is welcomed.
+func _build_refusal(layer: CanvasLayer) -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(center)
+	_refusal = PanelContainer.new()
+	_refusal.visible = false
+	_refusal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_refusal.custom_minimum_size = Vector2(640, 0)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.03, 0.06, 0.09, 0.95)
+	style.border_color = Color(0.95, 0.4, 0.35)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(20)
+	_refusal.add_theme_stylebox_override("panel", style)
+	center.add_child(_refusal)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	_refusal.add_child(col)
+	var title := Label.new()
+	title.text = "The galaxy server turned you away"
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.95, 0.5, 0.45))
+	col.add_child(title)
+	_refusal_text = Label.new()
+	_refusal_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_refusal_text.add_theme_font_size_override("font_size", 18)
+	col.add_child(_refusal_text)
+	var hint := Label.new()
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.modulate = Color(1, 1, 1, 0.65)
+	hint.text = "If you're an admin, put your admin key in Settings (%s) and press Enter there to try again. Otherwise, start the game again under another name." % controls.binding_text("menu", false)
+	col.add_child(hint)
+
+
+func _refresh_refusal() -> void:
+	if _refusal == null:
+		return
+	_refusal.visible = Net.refused != ""
+	if _refusal.visible:
+		_refusal_text.text = Net.refused.substr(0, 1).to_upper() + Net.refused.substr(1) + "."
+
+
+# --- The war's screens ------------------------------------------------------------------------
+
+func _panel_open() -> bool:
+	return _picker.visible or _war_panel.visible or _trade.visible
+
+
+## Opens one of the war's screens (the faction choice, the War terminal, the dock market or
+## contracts) over what you're doing: flying, seated in your ship, or standing at a console.
+func _open_panel(panel: Control) -> void:
+	for p in [_picker, _war_panel, _trade]:
+		p.visible = p == panel
+	if "colour" in panel:
+		panel.colour = controls.hud_color()
+	if _station:
+		_dock_panel.visible = false
+		if not _station.seated:
+			_station.set_menu_open(true)
+		controls.release_mouse()
+	else:
+		_nav.visible = false
+		_refresh_focus()
+
+
+## Back to where the screen was opened from: the ship's menu, the transit menu, or walking.
+func _close_panel() -> void:
+	_hide_panels()
+	if _station:
+		if _station.seated:
+			_show_ship_menu()
+		elif _menu_standing:
+			_open_standing_menu()
+		else:
+			_station.set_menu_open(false)
+	elif _raid == null:
+		_refresh_focus()
+
+
+func _hide_panels() -> void:
+	for p in [_picker, _war_panel, _trade]:
+		p.visible = false
+
+
+func _show_picker() -> void:
+	_picker_dismissed = false
+	_picker.refresh()
+	_open_panel(_picker)
+
+
+## The War terminal, on a planet: the one you're at if it's contested, else the first of the system.
+func _open_war(planet_id := "") -> void:
+	if planet_id == "":
+		planet_id = _docked if not WarInfo.planet(_docked).is_empty() else ""
+	if planet_id == "":
+		var here := WarInfo.planets_in(str(Net.state.get("system", {}).get("id", "teal-prime")))
+		planet_id = here[0].id if not here.is_empty() else "cinder"
+	_war_panel.open(planet_id)
+	_open_panel(_war_panel)
+
+
+## The dock market of a Builder's Carrier Dock, or supply contracts.
+func _open_trade(page: String, builder := "") -> void:
+	if page == "market":
+		var why := WarInfo.dock_problem(builder) if WarInfo.dock_finished(builder) else "%s has no Carrier Dock open." % builder
+		if why != "":
+			_say(why)
+			if _station:
+				_station._say(why)
+			return
+	_trade.open(page, builder)
+	_open_panel(_trade)
 
 
 ## Asks the server to start a raid on a facility; the raid begins when it answers.
@@ -924,13 +1185,18 @@ func _update_hud(delta: float) -> void:
 	var me := _me()
 	var job := Net.open_job()
 	var stash: Array = me.get("stash", [])
-	_info.text = "%s\nIce in cargo %d\nCredits %d   Reputation %d\n%s%s" % [
+	var side := WarInfo.my_faction()
+	var hold: Dictionary = me.get("hold", {})
+	_info.text = "%s · %s%s\nIce in cargo %d\nCredits %d   Reputation %d\n%s%s%s" % [
 		Net.my_name,
+		WarInfo.faction_name(side) if side != "" else "no faction yet",
+		" · admin" if Net.admin else "",
 		_cargo("ice"),
 		int(me.get("credits", 0)),
 		int(me.get("reputation", 0)),
 		("Job #%d: deliver %s %d/%d to %s's Spaceport" % [job.id, job.resource, job.delivered, job.amount, Net.planet(job.get("planet", "aster")).get("name", "Aster")]) if not job.is_empty() else "No open jobs",
 		("\nRaided loot: %d items, about %d credits at the Fence" % [stash.size(), _stash_value() / 2]) if not stash.is_empty() else "",
+		("\nWar goods hold: %s" % WarInfo.goods_list(hold)) if WarInfo.goods_list(hold, "") != "" else "",
 	]
 
 	var lines := []
@@ -1094,7 +1360,20 @@ func _draw_hud() -> void:
 # --- Server events ----------------------------------------------------------------
 
 func _on_state(_state: Dictionary) -> void:
+	_refresh_refusal()
 	_sync_stations()
+	# A pilot with no side is asked to pick one, once a session ("Not now" leaves it to the ship's menu).
+	var side := WarInfo.my_faction()
+	if _picker.visible and side != "":
+		_close_panel()
+		_say("You joined %s." % WarInfo.the(side))
+	elif side == "" and not _picker_dismissed and not _panel_open() and _raid == null and not WarInfo.factions().is_empty():
+		_show_picker()
+	_picker.refresh()
+	if _war_panel.visible:
+		_war_panel.refresh()
+	if _trade.visible:
+		_trade.refresh()
 	if _docked != "" and _raid == null and _station and _dock_panel.visible:
 		_refresh_dock()
 
@@ -1110,6 +1389,7 @@ func _enter_raid(briefing: Dictionary) -> void:
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
 	controls.enabled = false
+	_hide_panels()
 	_leave_place()
 	_set_space_visible(false)
 	_raid = Raid.new(briefing)

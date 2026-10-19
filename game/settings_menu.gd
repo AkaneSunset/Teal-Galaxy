@@ -1,5 +1,5 @@
 extends Control
-## Settings: drift default, mouse, HUD colour, and rebinding every control for
+## Settings: drift default, mouse, HUD colour, the admin key, and rebinding every control for
 ## keyboard and mouse or for gamepad and HOTAS. Changes save straight away.
 
 signal closed
@@ -87,11 +87,36 @@ func _ready() -> void:
 	hud_row.add_child(hud)
 	col.add_child(hud_row)
 
+	# Only the galaxy's admins have a key: it lets this app run the Coma Conglomerate.
+	var admin_row := HBoxContainer.new()
+	var admin_label := Label.new()
+	admin_label.text = "Admin key"
+	admin_label.custom_minimum_size = Vector2(180, 0)
+	admin_row.add_child(admin_label)
+	var admin_key := LineEdit.new()
+	admin_key.text = Net.saved_admin_key(Net.server_url())
+	admin_key.secret = true
+	admin_key.placeholder_text = "Leave empty unless you run this galaxy"
+	admin_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Saved for this server only: it never goes to another one.
+	admin_key.text_changed.connect(func(t): Net.save_admin_key(Net.server_url(), t))
+	admin_key.text_submitted.connect(func(_t): admin_key.release_focus(); Net.reconnect())
+	admin_row.add_child(admin_key)
+	col.add_child(admin_row)
+	var admin_note := Label.new()
+	admin_note.modulate = Color(1, 1, 1, 0.6)
+	col.add_child(admin_note)
+	var note_admin := func():
+		admin_note.text = ("The server knows you as an admin. " if Net.admin else "") + "The key is kept for %s only. Press Enter in the key box to reconnect with it." % Net.server_url()
+	note_admin.call()
+	visibility_changed.connect(note_admin)
+
 	var keys_title := Label.new()
 	keys_title.text = "Controls (click a binding, then press the new key, button or axis)"
 	col.add_child(keys_title)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 340)
+	scroll.custom_minimum_size = Vector2(0, 270) # short enough that the whole menu fits a 720-high window
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED # the column widens to fit the bindings
 	col.add_child(scroll)
 	_list = GridContainer.new()
 	_list.columns = 3

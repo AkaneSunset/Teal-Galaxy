@@ -2,12 +2,15 @@ extends Control
 ## Builder mode (phone): a base-builder view of the home planet, like Clash of Clans.
 ## The base is a 3D scene seen from above at an angle: drag to pan, pinch or scroll to zoom,
 ## tap a pad to select it. Buildings sit on fixed pads around the command centre.
-## The HUD sits around the edges: system and resources at the top, Jobs / Raids / Chat drawers
-## bottom left, the Build shop bottom right, and the selected building's actions bottom centre.
-## Facilities fill vaults with goods to ship home; Explorers can raid them, and the Builder
-## watches the raid live and can sound the alarm.
+## The HUD sits around the edges: system, faction and resources at the top, Jobs / Raids / Chat /
+## Sites / War buttons bottom left, the Build shop bottom right, and the selected building's actions
+## bottom centre. Outposts stand on sectors the Builder's faction holds and fill vaults with goods
+## to ship home; Explorers of other factions can raid them, and the Builder watches the raid live
+## and can sound the alarm. The War screen (builder_war.gd) holds the war map, fleets and supply,
+## and for server admins the Coma Conglomerate's AI director.
 
 const BaseModels := preload("res://base_models.gd")
+const BuilderWar := preload("res://builder_war.gd")
 const SiteView := preload("res://site_view.gd")
 const Terrain := preload("res://terrain.gd")
 const ICONS := "res://ui/icons/"
@@ -18,12 +21,23 @@ const BUILDING_INFO := {
 	"habitat": {"name": "Habitat", "cost": {"metal": 20}, "about": "Houses 50 people, who pay 12 credits a minute in rent."},
 	"spaceport": {"name": "Spaceport", "cost": {"metal": 30}, "about": "Pilots land here. Post jobs for them to fly."},
 	"hydroponics": {"name": "Hydroponics", "cost": {"metal": 20, "ice": 10}, "about": "Grows food and sells it: 24 credits a minute."},
-	"refinery": {"name": "Mining Refinery", "cost": {"metal": 40}, "about": "Makes alloy, isotopes and exotics. A freighter brings them home every 5 minutes; pilots can raid the vault before then."},
-	"lab": {"name": "Research Outpost", "cost": {"metal": 30, "ice": 10}, "about": "Makes plans and drives. A freighter brings them home every 5 minutes; pilots can raid the vault before then."},
-	"spire": {"name": "Data Spire", "cost": {"metal": 50, "credits": 150}, "about": "Makes intel, sold for credits when the freighter brings it home every 5 minutes. Pilots can raid it."},
 	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport", "limit": 1,
 		"about": "Builds warships for your navy. Open the Shipyard to queue them."},
+	"dock": {"name": "Carrier Dock", "cost": {"metal": 80, "alloy": 10}, "needs": "spaceport", "limit": 1,
+		"about": "Where your faction's carriers will dock. Its Dock market sells goods from your stock to pilots of your faction, at your prices."},
+	# Outposts: each stands on its own site in a sector your faction holds.
+	"refinery": {"name": "Extractor", "cost": {"metal": 40}, "about": "An outpost that extracts alloy plates, isotope cells and rare exotic matter."},
+	"lab": {"name": "Armoury", "cost": {"metal": 30, "ice": 10}, "about": "An outpost that makes weapon systems, design drives and blueprint cases."},
+	"spire": {"name": "Sensor Works", "cost": {"metal": 50, "credits": 150}, "about": "An outpost that makes sensor modules, plus data shards and security dossiers, sold for credits when they get home."},
+	"fuel": {"name": "Fuel Depot", "cost": {"metal": 30, "ice": 10}, "about": "An outpost that makes fuel cells, which keep your fleets supplied in orbit."},
+	"munitions": {"name": "Light Munitions Works", "cost": {"metal": 40}, "about": "An outpost that makes slug crates and shell crates."},
+	"ordnance": {"name": "Heavy Munitions Works", "cost": {"metal": 50, "alloy": 10}, "about": "An outpost that makes missiles, torpedoes and now and then a strategic warhead."},
+	"drones": {"name": "Drone Yard", "cost": {"metal": 50, "alloy": 15}, "about": "An outpost that makes drone chassis."},
+	"landers": {"name": "Lander Yard", "cost": {"metal": 60, "alloy": 15}, "about": "An outpost that makes lander chassis."},
+	"haulers": {"name": "Hauler Yard", "cost": {"metal": 70, "alloy": 20}, "about": "An outpost that makes hauler hulls."},
 }
+## Said of every outpost on its Info page.
+const OUTPOST_ABOUT := "A freighter brings the goods home every 5 minutes; until then pilots of other factions can raid the vault."
 ## What each level adds, for the Info page.
 const LEVEL_EFFECT := {
 	"mine": "Each level digs another 12 metal a minute.",
@@ -32,12 +46,14 @@ const LEVEL_EFFECT := {
 	"hydroponics": "Each level sells another 24 credits of food a minute.",
 	"spaceport": "Each level makes your facilities' freighters come sooner (every 5 minutes divided by the level).",
 	"foundry": "Each level builds warships 25% faster.",
-	"refinery": "Each level makes more per batch and holds more in the vault.",
-	"lab": "Each level makes more per batch and holds more in the vault.",
-	"spire": "Each level makes more per batch and holds more in the vault.",
 }
-const CARD_ICON := {"foundry": "ship_emblem", "extractor": "ice"} # shop icons for buildings without their own
+const OUTPOST_LEVEL := "Each level makes more per batch and holds more in the vault."
+## Shop icons for buildings without their own.
+const CARD_ICON := {"foundry": "ship_emblem", "extractor": "ice", "dock": "economy", "refinery": "crystal", "lab": "rank",
+	"spire": "notifications", "fuel": "launch", "munitions": "metal", "ordnance": "alarm", "drones": "pilot_arrow",
+	"landers": "send", "haulers": "phase"}
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
+const ALERTS_SEEN := "user://builder_alerts.cfg" # the last alert each Builder on this phone has seen
 
 const PAD_RING := 34.0 # metres from the command centre to each pad
 const PAD_RADIUS := 9.5
@@ -64,11 +80,9 @@ var _sel_is_obstacle := false
 var _sites_btn: Button
 var _jobs_btn: Button
 var _home_btn: Button
+var _left_row: HBoxContainer # the Jobs ... War buttons bottom left
+var _build_btn: Button
 var _sites_list: VBoxContainer
-var _fleet_status: Label
-var _fleet_targets: VBoxContainer
-var _fleet_log: Label
-var _fleet_key := ""
 var _sites_key := ""
 var _site_count := -1 # this Builder's sites at the last refresh, to follow a newly founded one
 var _focus := Vector3(0, 0, 4)
@@ -84,9 +98,12 @@ var _clock := 0.0
 # --- HUD ---
 var _title: Label
 var _subtitle: Label
+var _badge_name: Label # the Builder's faction, in its colour
+var _badge_rank: Label # and War Merit rank
 var _stock := {} # resource -> Label
 var _goods: Label
 var _banner: Button
+var _notice: Label # why the outpost on screen is dormant
 var _terrain: Node3D
 var _toasts: VBoxContainer
 var _top_mid: VBoxContainer # banner and toasts; moves right while the drawer is open
@@ -99,10 +116,18 @@ var _place_bar: PanelContainer
 var _place_label: Label
 var _drawer: PanelContainer
 var _drawer_title: Label
+var _drawer_scroll: ScrollContainer
 var _pages := {} # page name -> Control
 var _page := ""
 var _jobs: Label
 var _post_job: Button
+var _contracts: VBoxContainer # pilots' supply contracts, in the Jobs page
+var _contracts_key := ""
+var _found: VBoxContainer # the sector picker for a new outpost
+var _found_key := ""
+var _founding := "" # the outpost type being founded
+var _market: VBoxContainer # the Carrier Dock's market
+var _market_key := ""
 var _raids: Label
 var _info: Label
 var _yard_fleet: Label
@@ -115,6 +140,16 @@ var _chat_lines := []
 var _shop: PanelContainer
 var _shop_hint: Label
 var _shop_cards: HBoxContainer
+var _war: Control # the War screen (builder_war.gd)
+var _war_btn: Button
+var _faction_overlay: PanelContainer
+var _faction_cards := {} # faction id -> its Join button
+var _refused: Control # why the server turned this character away (at hello, or later: Net.refused)
+var _refused_text: Label
+var _refused_key: HBoxContainer # an admin key to try, when the character is admins only
+var _faction_armed := "" # the faction whose Join was tapped once; a second tap joins
+var _faction_armed_at := 0.0
+var _last_alert_at := -1.0
 
 # --- What the player is doing ---
 var _selected := -1 # pad index, or -1
@@ -132,7 +167,7 @@ func _ready() -> void:
 
 	Net.state_changed.connect(_refresh)
 	Net.chat_received.connect(_on_chat)
-	Net.server_error.connect(func(reason): toast("Server: " + reason, C_RED))
+	Net.server_error.connect(_on_server_error)
 	Net.connection_changed.connect(func(online): toast("Connected" if online else "Connection lost, retrying...", C_TEAL if online else C_RED))
 	_title.text = "Connecting..."
 
@@ -466,6 +501,27 @@ func _process(delta: float) -> void:
 			p.ring.scale = Vector3.ONE * (1.0 + 0.03 * pulse)
 		if p.plus.visible:
 			p.plus.position.y = 4.0 + 0.6 * sin(_clock * 2.0 + p.pos.x)
+	_fit_bottom(_select_box)
+	_fit_bottom(_place_bar)
+
+
+## Centres a bottom bar (the selection's actions, or what's being placed) between the buttons
+## bottom left and the Build button; on a narrow screen where it doesn't fit there, it sits
+## centred above them instead.
+func _fit_bottom(bar: Control) -> void:
+	if not bar.visible:
+		return
+	var width := (bar.get_parent() as Control).size.x
+	var lo := _left_row.position.x + _left_row.size.x + 8.0
+	var hi := _build_btn.position.x - 8.0
+	var fits := bar.size.x <= hi - lo
+	var shift := ((lo + hi) / 2.0 if fits else width / 2.0) - width / 2.0
+	var lift := 0.0 if fits else -(_left_row.size.y + 10.0)
+	if bar.offset_left != shift or bar.offset_bottom != lift:
+		bar.offset_left = shift
+		bar.offset_right = shift
+		bar.offset_top = lift
+		bar.offset_bottom = lift
 
 
 # --- HUD layout --------------------------------------------------------------------------
@@ -519,7 +575,16 @@ func _build_hud() -> void:
 	var where_col := VBoxContainer.new()
 	where_col.add_theme_constant_override("separation", 0)
 	where.add_child(where_col)
-	_title = _label(where_col, 22)
+	# The system, then the faction badge: its name in its colour and the War Merit rank.
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 10)
+	where_col.add_child(title_row)
+	_title = _label(title_row, 22)
+	_badge_name = _label(title_row, 15)
+	_badge_name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_badge_rank = _label(title_row, 14)
+	_badge_rank.modulate = Color(0.8, 0.88, 0.95)
+	_badge_rank.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_subtitle = _label(where_col, 14)
 	_subtitle.modulate = Color(0.7, 0.9, 0.95)
 	_subtitle.text = "Planet Aster"
@@ -538,15 +603,15 @@ func _build_hud() -> void:
 		_stock[r[0]] = _pill(res_row, r[1])
 	var navy_pill: Control = _stock.navy.get_parent().get_parent()
 	navy_pill.mouse_filter = Control.MOUSE_FILTER_STOP
-	navy_pill.tooltip_text = "Your navy: tap for the fleet"
-	navy_pill.gui_input.connect(func(ev): if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT: _toggle_page("fleet"))
+	navy_pill.tooltip_text = "Your navy: tap for the Shipyard"
+	navy_pill.gui_input.connect(func(ev): if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT: _toggle_page("shipyard"))
 	_goods = _label(res_col, 14)
 	_goods.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_goods.modulate = Color(0.85, 0.95, 1.0)
 	_goods.add_theme_constant_override("outline_size", 6) # readable over bright snow
 	_goods.add_theme_color_override("font_outline_color", Color(0.04, 0.06, 0.12))
 
-	# Top centre: raid banner, then toasts.
+	# Top centre: why an outpost is dormant, the raid banner, then toasts.
 	var top_mid := VBoxContainer.new()
 	_top_mid = top_mid
 	_pin(top_mid, Control.PRESET_CENTER_TOP)
@@ -554,6 +619,12 @@ func _build_hud() -> void:
 	top_mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top_mid.add_theme_constant_override("separation", 6)
 	layer.add_child(top_mid)
+	_notice = _label(top_mid, 15)
+	_notice.add_theme_stylebox_override("normal", _box(Color(0.08, 0.1, 0.16, 0.92), Color(0.55, 0.62, 0.75), 14, 6))
+	_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_notice.custom_minimum_size = Vector2(440, 0)
+	_notice.visible = false
 	_banner = Button.new()
 	_banner.add_theme_stylebox_override("normal", _box(C_RED.darkened(0.15), Color(1, 0.6, 0.5), 18))
 	_banner.add_theme_stylebox_override("hover", _box(C_RED, Color(1, 0.7, 0.6), 18))
@@ -567,15 +638,17 @@ func _build_hud() -> void:
 	_toasts.alignment = BoxContainer.ALIGNMENT_BEGIN
 	top_mid.add_child(_toasts)
 
-	# Bottom left: Jobs, Raids, Chat.
+	# Bottom left: Jobs, Raids, Chat, Sites, War.
 	var left := HBoxContainer.new()
 	_pin(left, Control.PRESET_BOTTOM_LEFT)
 	left.add_theme_constant_override("separation", 8)
 	layer.add_child(left)
+	_left_row = left
 	_jobs_btn = _round_button(left, "Jobs", "mission_complete", func(): _toggle_page("jobs"))
 	_raids_btn = _round_button(left, "Raids", "alarm", func(): _toggle_page("raids"))
 	_round_button(left, "Chat", "chat", func(): _toggle_page("chat"))
 	_sites_btn = _round_button(left, "Sites", "nav_map", func(): _toggle_page("sites"))
+	_war_btn = _round_button(left, "War", "ship_emblem", func(): open_war())
 	_home_btn = _round_button(left, "Home", "waypoint", func(): show_view(""))
 	_home_btn.visible = false
 
@@ -594,15 +667,14 @@ func _build_hud() -> void:
 	build.add_theme_stylebox_override("hover", _box(C_AMBER.lightened(0.15), Color(1, 0.9, 0.6), 18))
 	build.add_theme_stylebox_override("pressed", _box(C_AMBER.darkened(0.2), Color(1, 0.9, 0.6), 18))
 	build.custom_minimum_size = Vector2(96, 92)
+	_build_btn = build
 	_pin(build, Control.PRESET_BOTTOM_RIGHT)
 	build.pressed.connect(func(): open_shop())
 	layer.add_child(build)
 
 	# Bottom centre: the selected pad's name and actions.
 	_select_box = VBoxContainer.new()
-	_pin(_select_box, Control.PRESET_CENTER_BOTTOM)
-	_select_box.offset_left = 80 # clear of the buttons bottom left
-	_select_box.offset_right = 80
+	_pin(_select_box, Control.PRESET_CENTER_BOTTOM) # kept clear of the buttons either side by _fit_bottom()
 	_select_box.alignment = BoxContainer.ALIGNMENT_END
 	_select_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_select_box.visible = false
@@ -633,9 +705,16 @@ func _build_hud() -> void:
 
 	_build_drawer(layer)
 	_build_shop(layer)
+	_war = BuilderWar.new()
+	_war.ui = self
+	_war.visibility_changed.connect(func(): if not Net.state.is_empty(): _refresh(Net.state))
+	layer.add_child(_war)
+	_build_faction_overlay(layer)
+	_build_refused(layer)
+	top_mid.move_to_front() # toasts show over the War screen and the faction choice too
 
 
-## Left-hand drawer for Jobs, Raids, Chat and building info.
+## Left-hand drawer for Jobs, Raids, Chat, building info, the Shipyard, outposts and the Dock market.
 func _build_drawer(layer: Control) -> void:
 	_drawer = PanelContainer.new()
 	_drawer.anchor_top = 0.0
@@ -660,6 +739,7 @@ func _build_drawer(layer: Control) -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	col.add_child(scroll)
+	_drawer_scroll = scroll
 	var body := VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(body)
@@ -675,6 +755,12 @@ func _build_drawer(layer: Control) -> void:
 	jobs.add_child(_post_job)
 	_jobs = _label(jobs, 15)
 	_jobs.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var contracts_title := _label(jobs, 17)
+	contracts_title.text = "Supply contracts"
+	contracts_title.modulate = Color(0.6, 0.95, 0.95)
+	_contracts = VBoxContainer.new()
+	_contracts.add_theme_constant_override("separation", 6)
+	jobs.add_child(_contracts)
 	_pages["jobs"] = jobs
 
 	_raids = _label(body, 15)
@@ -696,37 +782,33 @@ func _build_drawer(layer: Control) -> void:
 	_yard_cancel.text = "Cancel last in queue (full refund)"
 	_yard_cancel.pressed.connect(func(): Net.send({"type": "cancel_ship", "planet": _pid(), "slot": _foundry_slot()}))
 	yard.add_child(_yard_cancel)
-	var to_fleet := Button.new()
-	to_fleet.text = "Fleet and attacks"
-	to_fleet.icon = load(ICONS + "launch.png")
-	to_fleet.pressed.connect(func(): _show_page("fleet"))
-	yard.add_child(to_fleet)
+	var to_war := Button.new()
+	to_war.text = "War map: send fleets"
+	to_war.icon = load(ICONS + "launch.png")
+	to_war.pressed.connect(func(): open_war())
+	yard.add_child(to_war)
 	_yard_ships = VBoxContainer.new()
 	_yard_ships.add_theme_constant_override("separation", 8)
 	yard.add_child(_yard_ships)
 	_pages["shipyard"] = yard
 
-	# Sites: home and each satellite site, plus how to found more.
+	# Sites: home and each outpost, plus how to found more.
 	_sites_list = VBoxContainer.new()
 	_sites_list.add_theme_constant_override("separation", 8)
 	body.add_child(_sites_list)
 	_pages["sites"] = _sites_list
 
-	# Fleet: ships out and coming home, fleets heading for your sites, and targets to attack.
-	var fleet := VBoxContainer.new()
-	fleet.add_theme_constant_override("separation", 10)
-	body.add_child(fleet)
-	_fleet_status = _label(fleet, 15)
-	_fleet_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	var targets_title := _label(fleet, 16)
-	targets_title.text = "Targets: other Builders' satellite sites"
-	_fleet_targets = VBoxContainer.new()
-	_fleet_targets.add_theme_constant_override("separation", 8)
-	fleet.add_child(_fleet_targets)
-	_fleet_log = _label(fleet, 14)
-	_fleet_log.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_fleet_log.modulate = Color(0.8, 0.9, 0.95)
-	_pages["fleet"] = fleet
+	# Found an outpost: the sectors your faction holds, and how full each is.
+	_found = VBoxContainer.new()
+	_found.add_theme_constant_override("separation", 8)
+	body.add_child(_found)
+	_pages["found"] = _found
+
+	# The Carrier Dock's market: a price for anything in stock.
+	_market = VBoxContainer.new()
+	_market.add_theme_constant_override("separation", 6)
+	body.add_child(_market)
+	_pages["market"] = _market
 
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -787,6 +869,180 @@ func _build_shop(layer: Control) -> void:
 	scroll.add_child(_shop_cards)
 
 
+## The faction choice: a full-screen card for each faction, shown while this Builder's base has
+## none. The cards are made once the catalog has arrived (_refresh_faction). The choice is for good,
+## so Join asks twice.
+func _build_faction_overlay(layer: Control) -> void:
+	_faction_overlay = PanelContainer.new()
+	_faction_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_faction_overlay.add_theme_stylebox_override("panel", _box(Color(0.03, 0.05, 0.11, 0.97), C_TEAL.darkened(0.3), 14, 14))
+	_faction_overlay.visible = false
+	layer.add_child(_faction_overlay)
+
+
+## Centre screen: why the server wouldn't let this character in (a Coma character without the
+## admin key), until a welcome arrives.
+func _build_refused(layer: Control) -> void:
+	_refused = CenterContainer.new()
+	_refused.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_refused.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_refused.visible = false
+	layer.add_child(_refused)
+	var panel := PanelContainer.new()
+	panel.add_theme_stylebox_override("panel", _box(Color(0.06, 0.08, 0.15, 0.97), C_RED, 14, 16))
+	panel.custom_minimum_size = Vector2(460, 0)
+	_refused.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	panel.add_child(col)
+	var title := _label(col, 22)
+	title.text = "Can't join the galaxy"
+	_refused_text = _label(col, 16)
+	_refused_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# The key can be typed here as well as on the start screen: it's saved for this server (only)
+	# and goes with every hello to it from now on (reconnects too).
+	_refused_key = HBoxContainer.new()
+	_refused_key.add_theme_constant_override("separation", 8)
+	col.add_child(_refused_key)
+	var key := LineEdit.new()
+	key.placeholder_text = "Admin key"
+	key.secret = true
+	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_refused_key.add_child(key)
+	var retry := Button.new()
+	retry.text = "Try again"
+	_refused_key.add_child(retry)
+	var try_key := func(_t = ""):
+		if key.text.strip_edges() == "":
+			return
+		Net.save_admin_key(Net.server_url(), key.text)
+		Net.send({"type": "hello", "role": "builder", "name": Net.my_name, "admin_key": Net.admin_key()})
+	retry.pressed.connect(try_key)
+	key.text_submitted.connect(try_key)
+
+
+## Errors show as toasts; one before the welcome means the server turned this character away,
+## so it stays on screen (as it does when the server turns it away later: Net.refused).
+func _on_server_error(reason: String) -> void:
+	if Net.state.is_empty() or Net.refused != "":
+		var why := Net.refused if Net.refused != "" else reason
+		var text := why.left(1).to_upper() + why.substr(1) + "."
+		var admins_only := why.contains("admins only")
+		if admins_only and Net.admin_key() != "":
+			text += "\n\nThat admin key didn't match. Type it again, or play under another name."
+		elif admins_only:
+			text += "\n\nOnly a server admin can play this character: type the admin key, or play under another name."
+		_refused_text.text = text
+		_refused_key.visible = admins_only
+		_refused.visible = true
+		_title.text = "Not connected"
+		_subtitle.text = "As %s" % Net.my_name
+		return
+	toast("Server: " + reason, C_RED)
+
+
+func _make_faction_cards() -> void:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	_faction_overlay.add_child(col)
+	var title := _label(col, 26)
+	title.text = "Choose your faction"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var sub := _label(col, 15)
+	sub.text = "Your base fights for one side of the war, for good. Your outposts stand on planets it holds, your fleets fight for it, and its pilots trade at your Carrier Dock."
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.modulate = Color(0.8, 0.9, 0.95)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(row)
+	var factions: Dictionary = Net.catalog.get("factions", {})
+	for f in factions:
+		var def: Dictionary = factions[f]
+		var playable: bool = def.get("playable", true)
+		if not playable and not _admin():
+			continue # the Coma Conglomerate: admins only
+		var colour := _faction_colour(f)
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", _box(Color(0.06, 0.09, 0.17, 0.95), colour, 14, 10))
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(card)
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 6)
+		card.add_child(box)
+		if not playable:
+			var tag := _label(box, 13)
+			tag.text = "Admins only"
+			tag.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			tag.add_theme_color_override("font_color", Color(0.1, 0.08, 0.02))
+			tag.add_theme_stylebox_override("normal", _box(C_AMBER, Color(1, 0.85, 0.5), 8, 1))
+		var name_l := _label(box, 20)
+		name_l.text = def.name
+		name_l.modulate = colour.lightened(0.15)
+		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var mirrors := _label(box, 13)
+		mirrors.text = "Mirrors Supreme Commander's %s" % def.mirrors
+		mirrors.modulate = Color(0.7, 0.78, 0.86)
+		mirrors.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var bar := ColorRect.new()
+		bar.color = colour
+		bar.custom_minimum_size = Vector2(0, 4)
+		box.add_child(bar)
+		var style := _label(box, 14)
+		style.text = def.style
+		style.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var bonus := _label(box, 14)
+		bonus.text = "Bonus: " + def.bonus
+		bonus.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bonus.modulate = Color(1.0, 0.85, 0.55)
+		var holds := _label(box, 13)
+		holds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		holds.modulate = Color(0.75, 0.85, 0.92)
+		var held: Array = Net.state.get("war", {}).get("planets", []).filter(func(p): return p.owner == f and p.system == Net.state.system.id).map(func(p): return p.name)
+		holds.text = ("Holds %s in %s" % [" and ".join(held), Net.state.system.name]) if held else "Holds no planet in %s" % Net.state.system.name
+		var gap := Control.new()
+		gap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		box.add_child(gap)
+		var join := Button.new()
+		join.text = "Join"
+		join.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		join.custom_minimum_size = Vector2(0, 64)
+		var id: String = f
+		join.pressed.connect(func(): _on_join(id))
+		box.add_child(join)
+		_faction_cards[f] = join
+
+
+## The first tap on Join arms it; a second within a few seconds joins for good.
+func _on_join(faction: String) -> void:
+	if _faction_armed == faction and _clock - _faction_armed_at < 4.0:
+		Net.send({"type": "choose_faction", "faction": faction})
+		_faction_armed = ""
+	else:
+		_faction_armed = faction
+		_faction_armed_at = _clock
+	_refresh_faction()
+
+
+func _refresh_faction() -> void:
+	var e := _econ()
+	var wanted: bool = Net.home != "" and not Net.catalog.get("factions", {}).is_empty() and e.get("faction") == null
+	if _faction_overlay.visible != wanted:
+		_faction_overlay.visible = wanted
+		_place_toasts()
+	if not wanted:
+		return
+	if _faction_cards.is_empty():
+		_make_faction_cards()
+	if _clock - _faction_armed_at >= 4.0:
+		_faction_armed = ""
+	for f in _faction_cards:
+		var b: Button = _faction_cards[f]
+		b.text = "Tap again: join for good" if f == _faction_armed else "Join the %s" % _faction_name(f)
+		b.modulate = C_AMBER.lightened(0.3) if f == _faction_armed else Color.WHITE
+
+
 ## Pins a control to a corner or edge of its parent; it grows away from that edge as it fills.
 func _pin(c: Control, preset: Control.LayoutPreset) -> void:
 	c.set_anchors_preset(preset)
@@ -830,6 +1086,47 @@ func _pill(parent: Node, icon: String) -> Label:
 	return l
 
 
+## An amount picked with - and + (or typed on the phone's number pad), from 1 up to what `most`
+## returns. `changed` hears each new amount. Read it with _qty().
+func _qty_picker(parent: Node, start: int, most: Callable, changed := Callable()) -> LineEdit:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	parent.add_child(row)
+	var edit := LineEdit.new()
+	edit.text = str(maxi(1, start))
+	edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	edit.custom_minimum_size = Vector2(64, 0)
+	edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	edit.select_all_on_focus = true
+	if changed.is_valid():
+		edit.text_changed.connect(func(_t): changed.call(_qty(edit)))
+	for step in [-1, 1]:
+		var b := Button.new()
+		b.text = "-" if step < 0 else "+"
+		b.custom_minimum_size = Vector2(44, 40)
+		b.pressed.connect(func():
+			edit.text = str(clampi(_qty(edit) + step, 1, maxi(1, int(most.call()))))
+			if changed.is_valid():
+				changed.call(_qty(edit)))
+		row.add_child(b)
+		if step < 0:
+			row.add_child(edit)
+	var all := Button.new()
+	all.text = "All"
+	all.pressed.connect(func():
+		edit.text = str(maxi(1, int(most.call())))
+		if changed.is_valid():
+			changed.call(_qty(edit)))
+	row.add_child(all)
+	return edit
+
+
+## The whole number in an amount box, or 0.
+func _qty(edit: LineEdit) -> int:
+	var t := edit.text.strip_edges()
+	return int(t) if t.is_valid_int() else 0
+
+
 func _round_button(parent: Node, text: String, icon: String, on_press: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
@@ -844,8 +1141,8 @@ func _round_button(parent: Node, text: String, icon: String, on_press: Callable)
 	return b
 
 
-## A short message near the top of the screen that fades away.
-func toast(text: String, color := Color.WHITE) -> void:
+## A short message near the top of the screen that fades away after `secs`.
+func toast(text: String, color := Color.WHITE, secs := 3.0) -> void:
 	var pill := PanelContainer.new()
 	pill.add_theme_stylebox_override("panel", _box(C_PANEL, color.darkened(0.2), 16, 5))
 	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -857,7 +1154,7 @@ func toast(text: String, color := Color.WHITE) -> void:
 	for i in live.size() - 3:
 		live[i].queue_free()
 	var tw := create_tween()
-	tw.tween_interval(3.0)
+	tw.tween_interval(secs)
 	tw.tween_property(pill, "modulate:a", 0.0, 0.6)
 	tw.tween_callback(pill.queue_free)
 
@@ -869,17 +1166,24 @@ func _toggle_page(page: String) -> void:
 
 
 func _show_page(page: String) -> void:
+	if page != _page:
+		_drawer_scroll.scroll_vertical = 0
 	_page = page
 	for p in _pages:
 		_pages[p].visible = p == page
 	_drawer.visible = page != ""
-	_top_mid.anchor_left = 0.68 if page != "" else 0.5
-	_top_mid.anchor_right = _top_mid.anchor_left
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your sites", "fleet": "Fleet"}.get(page, "")
+	_drawer.custom_minimum_size.x = 520 if page == "found" else 340 # room for a row of sectors
+	_place_toasts()
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your outposts", "market": "Dock market"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
 		_drawer_title.text = _pad_name(_selected)
+	if page == "found":
+		_drawer_title.text = "Found a %s" % BUILDING_INFO[_founding].name
+		_found_key = ""
+	if page == "market":
+		_market_key = ""
 	if not Net.state.is_empty():
 		_refresh(Net.state)
 
@@ -903,6 +1207,29 @@ func open_shop() -> void:
 		_refresh(Net.state)
 
 
+## Opens the War screen, on `system` if given.
+func open_war(system := "") -> void:
+	_set_placing("")
+	_show_page("")
+	_shop.visible = false
+	_war.open(system)
+
+
+## Toasts sit top centre (beside the drawer while it's open), and at the bottom while the War
+## screen or the faction choice covers the top.
+func _place_toasts() -> void:
+	var war: bool = _war != null and _war.visible
+	var low: bool = war or (_faction_overlay != null and _faction_overlay.visible)
+	var x := 0.62 if war else (0.5 if _page == "" or low else (0.74 if _page == "found" else 0.68))
+	_top_mid.anchor_left = x
+	_top_mid.anchor_right = x
+	_top_mid.anchor_top = 1.0 if low else 0.0
+	_top_mid.anchor_bottom = _top_mid.anchor_top
+	_top_mid.offset_top = -2.0 if low else 64.0 # low, they sit on the War screen's bottom edge
+	_top_mid.offset_bottom = -2.0 if low else 0.0
+	_top_mid.grow_vertical = Control.GROW_DIRECTION_BEGIN if low else Control.GROW_DIRECTION_END
+
+
 func _set_placing(type: String) -> void:
 	_placing = type
 	_place_bar.visible = type != ""
@@ -920,9 +1247,9 @@ func _set_placing(type: String) -> void:
 func _on_banner() -> void:
 	var raids := _my_raids()
 	if raids.is_empty():
-		var incoming := _incoming()
-		if not incoming.is_empty():
-			show_view(incoming[0].target)
+		var battle := _my_battle()
+		if not battle.is_empty():
+			open_war(battle.system)
 		return
 	var r: Dictionary = raids[0]
 	if Net.planet(r.planet).get("kind", "") == "satellite":
@@ -948,7 +1275,8 @@ func _shop_pick(type: String) -> void:
 		_set_placing(type) # a defence for this site
 		return
 	if _is_facility(type):
-		Net.send({"type": "found_site", "facility": type})
+		_founding = type # pick a sector for it next
+		_show_page("found")
 		return
 	if _selected >= 0 and _building_at(_selected).is_empty():
 		_build(_selected, type)
@@ -1069,6 +1397,7 @@ func _can_afford(cost: Dictionary) -> bool:
 
 
 func _refresh(state: Dictionary) -> void:
+	_refused.visible = Net.refused != "" # turned away after the welcome: it stays up
 	var e := _econ()
 	var stock: Dictionary = e.stock
 	_title.text = state.system.name
@@ -1091,7 +1420,12 @@ func _refresh(state: Dictionary) -> void:
 	if _view != "" and Net.planet(_view).is_empty():
 		show_view("") # the site is gone
 		return
-	_subtitle.text = ("Satellite site off %s" % Net.my_planet().get("name", "")) if _view != "" else _subtitle.text
+	if _view != "":
+		_subtitle.text = "Outpost: %s%s" % [_site_where(_planet()), "  (dormant)" if _planet().get("dormant", false) else ""]
+	var reason := _dormant_reason(_planet()) if _view != "" else ""
+	_notice.visible = reason != "" and not _war.visible
+	_notice.text = "Dormant. " + reason
+	_place_toasts()
 	if _view == "":
 		_refresh_pads(state)
 	else:
@@ -1099,8 +1433,10 @@ func _refresh(state: Dictionary) -> void:
 	_refresh_selection(state)
 	if _page == "sites":
 		_refresh_sites(state)
-	if _page == "fleet":
-		_refresh_fleet(state)
+	if _page == "found":
+		_refresh_found(state)
+	if _page == "market":
+		_refresh_market(state)
 	_refresh_raids(state)
 	_refresh_jobs(state)
 	if _page == "shipyard":
@@ -1109,7 +1445,11 @@ func _refresh(state: Dictionary) -> void:
 		_refresh_shop(state)
 	if _page == "info":
 		_refresh_info(state)
+	_refresh_badge(e)
+	_refresh_faction()
+	_war.refresh(state)
 	_toast_feed(state)
+	_toast_alerts(e)
 
 
 func _refresh_pads(state: Dictionary) -> void:
@@ -1177,6 +1517,7 @@ func _refresh_selection(state: Dictionary) -> void:
 	_select_box.visible = (_selected >= 0 or _sel_piece >= 0) and _placing == "" and not _shop.visible
 	if not _select_box.visible:
 		return
+	var dormant := bool(_planet().get("dormant", false)) # nothing on a dormant outpost works but Info
 	if _sel_piece >= 0:
 		var piece := _piece(_sel_piece)
 		if piece.is_empty():
@@ -1189,12 +1530,12 @@ func _refresh_selection(state: Dictionary) -> void:
 			for res in od.salvage:
 				salvage.append("%d %s" % [od.salvage[res], Net.item_name(res) if res not in ["metal", "ice"] else res])
 			_select_name.text = "%s  (clearing leaves %s)" % [od.name, ", ".join(salvage)]
-			_set_actions([{"id": "clear", "text": "Clear  %d" % int(od.clear), "icon": "credits"}])
+			_set_actions([{"id": "clear", "text": "Clear  %d" % int(od.clear), "icon": "credits", "disabled": dormant}])
 			return
 		_select_name.text = Net.catalog.sites.pieces[piece.type].name
 		if _work_left(piece) > 0:
 			_select_name.text += "  (building %s)" % _clock_text(_work_left(piece))
-		_set_actions([{"id": "remove", "text": "Remove", "icon": "economy"}])
+		_set_actions([{"id": "remove", "text": "Remove", "icon": "economy", "disabled": dormant}])
 		return
 	_select_name.text = _pad_name(_selected)
 	var b := _building_at(_selected)
@@ -1206,14 +1547,17 @@ func _refresh_selection(state: Dictionary) -> void:
 		var left := _work_left(b)
 		var level := int(b.get("level", 1))
 		if left > 0:
-			# Nothing else works while it's being built or upgraded.
+			# Nothing else works while it's being built or upgraded, but a Carrier Dock keeps trading
+			# through an upgrade (as the server has it), so its market stays open.
 			acts.append({"id": "", "icon": "phase", "disabled": true,
 				"text": ("Building %s" if level == 0 else "Upgrading %s") % _clock_text(left)})
+			if b.type == "dock" and level >= 1:
+				acts.append({"id": "market", "icon": "economy", "text": "Dock market"})
 			_set_actions(acts)
 			return
 		if level < int(Net.catalog.get("maxLevel", 5)):
 			var cost := _level_cost(b.type, level)
-			acts.append({"id": "level", "icon": "rank", "disabled": not _can_afford(cost),
+			acts.append({"id": "level", "icon": "rank", "disabled": dormant or not _can_afford(cost),
 				"text": "Level %d\n%s" % [level + 1, _cost_text(cost)]})
 		if b.type == "spaceport":
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
@@ -1222,6 +1566,8 @@ func _refresh_selection(state: Dictionary) -> void:
 			var building: Array = b.get("queue", [])
 			acts.append({"id": "shipyard", "icon": "ship_emblem",
 				"text": "Shipyard" if building.is_empty() else "Shipyard (%d)" % building.size()})
+		if b.type == "dock":
+			acts.append({"id": "market", "icon": "economy", "text": "Dock market"})
 		if _is_facility(b.type) and not state.is_empty():
 			var now := Net.now_ms()
 			var wait := (float(b.shipReadyAt) - now) / 1000.0
@@ -1229,12 +1575,12 @@ func _refresh_selection(state: Dictionary) -> void:
 			for id in b.vault:
 				if int(b.vault[id]) > 0:
 					vault_empty = false
-			acts.append({"id": "ship", "icon": "launch", "disabled": wait > 0 or vault_empty,
+			acts.append({"id": "ship", "icon": "launch", "disabled": dormant or wait > 0 or vault_empty,
 				"text": "Ship cargo" if wait <= 0 else "Freighter %ds" % ceili(wait)})
 			var next: Dictionary = Net.catalog.security.get(str(int(b.security) + 1), {})
 			if not next.is_empty():
 				acts.append({"id": "upgrade", "icon": "rank", "text": "Tier %d" % (int(b.security) + 1),
-					"disabled": not Net.raid_on(_pid(), _selected).is_empty() or not _can_afford(next.cost)})
+					"disabled": dormant or not Net.raid_on(_pid(), _selected).is_empty() or not _can_afford(next.cost)})
 			if not Net.raid_on(_pid(), _selected).is_empty():
 				var alarm_wait := (float(b.alarmReadyAt) - now) / 1000.0
 				acts.append({"id": "alarm", "icon": "alarm", "disabled": alarm_wait > 0, "danger": true,
@@ -1277,6 +1623,8 @@ func _on_action(id: String) -> void:
 			_send_job()
 		"shipyard":
 			_toggle_page("shipyard")
+		"market":
+			_toggle_page("market")
 		"level":
 			Net.send({"type": "upgrade_building", "planet": _pid(), "slot": _selected})
 		"remove":
@@ -1300,30 +1648,43 @@ func _refresh_shop(state: Dictionary) -> void:
 		_refresh_defence_shop()
 		return
 	var target := _selected >= 0 and _building_at(_selected).is_empty()
-	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad. Facilities get their own satellite site."
-	var sites_full := _my_sites().size() >= int(Net.catalog.get("sites", {}).get("max", 3))
+	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad. Outposts stand on a sector your faction holds."
+	var sites_full := _my_sites().size() >= int(Net.catalog.get("sites", {}).get("max", 5))
+	var faction = _econ().get("faction")
+	var held := _held_planets()
 	for type in BUILDING_INFO:
 		var info: Dictionary = BUILDING_INFO[type]
+		var outpost := _is_facility(type)
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(150, 166)
 		var icon: String = CARD_ICON.get(type, type)
 		card.icon = load(ICONS + icon + ".png") if ResourceLoader.exists(ICONS + icon + ".png") else load(ICONS + "vault.png")
 		card.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		card.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		card.add_theme_constant_override("icon_max_width", 72)
-		card.add_theme_font_size_override("font_size", 14)
+		card.add_theme_constant_override("icon_max_width", 48 if outpost else 72)
+		card.add_theme_font_size_override("font_size", 13 if outpost else 14)
 		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if outpost:
+			card.add_theme_stylebox_override("normal", _box(Color(0.1, 0.17, 0.3, 0.95), C_AMBER.darkened(0.35), 12))
 		var locked: bool = type not in _econ().unlocked
 		var why := "Locked: needs ice in stock" if locked else ""
 		if not locked and info.has("needs") and not Net.has_building(info.needs, _pid()):
 			why = "Needs a %s" % BUILDING_INFO[info.needs].name
 		if not locked and info.has("limit") and _count(type) >= int(info.limit):
 			why = "Already built"
-		if not locked and _is_facility(type) and sites_full:
-			why = "All satellite sites used"
+		if not locked and outpost:
+			if faction == null:
+				why = "Choose a faction first"
+			elif sites_full:
+				why = "All %d outposts used" % int(Net.catalog.get("sites", {}).get("max", 5))
+			elif held.is_empty():
+				why = "Your faction holds no planet in %s" % state.system.name
 		locked = locked or why != ""
 		var afford := _can_afford(info.cost)
-		card.text = "%s\n%s" % [info.name, why if locked else _cost_text(info.cost) + "  " + _clock_text(_level_secs(type, 0)) + ("\nNew satellite site" if _is_facility(type) else "")]
+		var text := "%s\n%s" % [info.name, why if locked else _cost_text(info.cost) + "  " + _clock_text(_level_secs(type, 0))]
+		if outpost:
+			text += "\nMakes " + _makes_text(type)
+		card.text = text
 		card.disabled = locked or not afford
 		if not locked and not afford:
 			card.add_theme_color_override("font_disabled_color", Color(1, 0.6, 0.55))
@@ -1331,9 +1692,18 @@ func _refresh_shop(state: Dictionary) -> void:
 		_shop_cards.add_child(card)
 
 
+## What an outpost fills its vault with: "Slug crates, Shell crates".
+func _makes_text(type: String) -> String:
+	var names := []
+	for m in Net.catalog.get("facilities", {}).get(type, {}).get("makes", []):
+		names.append(_amount_of(m.item, 2).trim_prefix("2 "))
+	return ", ".join(names)
+
+
 ## The site view's shop: defences to place on the grid.
 func _refresh_defence_shop() -> void:
-	_shop_hint.text = "  Defences for this site. Pick one, then tap the grid."
+	var dormant := bool(_planet().get("dormant", false))
+	_shop_hint.text = "  Dormant: nothing can be built here until it wakes up." if dormant else "  Defences for this outpost. Pick one, then tap the grid."
 	var pieces: Dictionary = Net.catalog.get("sites", {}).get("pieces", {})
 	var icons := {"turret": "rank", "wall": "vault", "guardpost": "pilot_arrow", "power": "crystal"}
 	for type in pieces:
@@ -1347,10 +1717,10 @@ func _refresh_defence_shop() -> void:
 		card.add_theme_font_size_override("font_size", 14)
 		card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		card.text = "%s  (%dx%d)\n%s\nAttack %d  Hull %d" % [def.name, def.w, def.h, _cost_text(def.cost), def.attack, def.hull]
-		card.disabled = not _can_afford(def.cost)
+		card.disabled = dormant or not _can_afford(def.cost)
 		if def.has("max"):
 			var have: int = _planet().get("pieces", []).filter(func(p): return p.type == type).size()
-			card.text += "\n%d per site" % int(def.max)
+			card.text += "\n%d per outpost" % int(def.max)
 			card.disabled = card.disabled or have >= int(def.max)
 		card.pressed.connect(_shop_pick.bind(type))
 		_shop_cards.add_child(card)
@@ -1377,7 +1747,7 @@ func _refresh_site(state: Dictionary) -> void:
 			label = "%s  L%d  T%d" % [site.name, int(b.get("level", 1)), tier]
 		if work > 0:
 			label += ("  building %s" if int(b.get("level", 1)) == 0 else "  upgrading %s") % _clock_text(work)
-	_site.show_site(site, label, raid, turrets, not b.is_empty() and int(b.get("level", 1)) == 0 and _work_left(b) > 0)
+	_site.show_site(site, label, raid, turrets, not b.is_empty() and int(b.get("level", 1)) == 0 and _work_left(b) > 0, site.get("dormant", false))
 	if _selected == 0:
 		_site.highlight(_site.core)
 	elif _sel_piece >= 0 and not _piece(_sel_piece).is_empty():
@@ -1405,13 +1775,15 @@ func _follow_new_site() -> void:
 	var before := _site_count
 	_site_count = sites.size() # before show_view, which refreshes and lands back here
 	if before >= 0 and sites.size() > before:
+		if _page == "found":
+			_show_page("")
 		show_view(sites[-1].id)
-		toast("New satellite site: tap Build to place defences", C_TEAL)
+		toast("New outpost: tap Build to place defences", C_TEAL)
 
 
 func _refresh_sites(state: Dictionary) -> void:
 	var sites := _my_sites()
-	var key := JSON.stringify([_view, sites.map(func(s): return [s.id, s.buildings[0].security if s.buildings else 0, s.get("pieces", []).size()]), _my_raids().size()])
+	var key := JSON.stringify([_view, sites.map(func(s): return [s.id, s.get("sector", ""), s.get("dormant", false), s.buildings[0].security if s.buildings else 0, s.get("pieces", []).size()]), _my_raids().size()])
 	if key == _sites_key:
 		return
 	_sites_key = key
@@ -1428,106 +1800,23 @@ func _refresh_sites(state: Dictionary) -> void:
 		var b: Dictionary = st.buildings[0] if st.buildings else {}
 		var btn := Button.new()
 		var raid := not Net.raid_on(st.id, 0).is_empty()
-		btn.text = "%s\nTier %d, %d defences%s" % [st.name, int(b.get("security", 1)), st.get("pieces", []).size(), ", RAID!" if raid else ""]
-		btn.icon = load(ICONS + ("alarm" if raid else "nav_map") + ".png")
+		var dormant: bool = st.get("dormant", false)
+		btn.text = "%s\n%s\nTier %d, %d defences%s%s" % [st.name, _site_where(st), int(b.get("security", 1)), st.get("pieces", []).size(),
+			", RAID!" if raid else "", "\nDORMANT" if dormant else ""]
+		btn.icon = load(ICONS + ("alarm" if raid else ("phase" if dormant else "nav_map")) + ".png")
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		btn.disabled = _view == st.id
+		if dormant:
+			btn.add_theme_stylebox_override("normal", _box(Color(0.1, 0.12, 0.18, 0.95), Color(0.5, 0.56, 0.68), 12))
+			btn.add_theme_color_override("font_color", Color(0.75, 0.8, 0.88))
 		var id: String = st.id
 		btn.pressed.connect(func(): show_view(id))
 		_sites_list.add_child(btn)
 	var hint := _label(_sites_list, 14)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.modulate = Color(0.75, 0.9, 0.95)
-	hint.text = "Found a satellite site by buying a facility in the Build shop (up to %d)." % int(Net.catalog.get("sites", {}).get("max", 3))
-
-
-## Fleets on their way to this Builder's sites.
-func _incoming() -> Array:
-	return Net.state.get("attacks", []).filter(func(a): return a.defender == Net.my_planet().get("owner") and a.status == "flying")
-
-
-## A site's whole defence, worked out the same way as the server's siteDefence().
-func _site_defence(site: Dictionary) -> Dictionary:
-	var pieces: Dictionary = Net.catalog.get("sites", {}).get("pieces", {})
-	var attack := 0
-	var hull := 0
-	for p in site.get("pieces", []):
-		attack += int(pieces[p.type].attack)
-		hull += int(pieces[p.type].hull)
-	var tier := int(site.buildings[0].security) if site.get("buildings", []) else 1
-	var s: Dictionary = Net.catalog.get("security", {}).get(str(tier), {"turrets": 0, "guards": 0})
-	attack += int(s.turrets) * int(pieces.get("turret", {"attack": 0}).attack) + int(s.guards)
-	hull += int(s.turrets) * int(pieces.get("turret", {"hull": 0}).hull) + 40 * tier
-	return {"attack": attack, "hull": hull}
-
-
-func _fleet_power() -> Dictionary:
-	var ships: Dictionary = Net.catalog.get("ships", {})
-	var navy: Dictionary = _econ().get("navy", {})
-	var attack := 0
-	var hull := 0
-	for id in navy:
-		attack += int(navy[id]) * int(ships.get(id, {"attack": 0}).attack)
-		hull += int(navy[id]) * int(ships.get(id, {"hull": 0}).hull)
-	return {"attack": attack, "hull": hull}
-
-
-func _refresh_fleet(state: Dictionary) -> void:
-	var me = Net.my_planet().get("owner")
-	var now := Net.now_ms()
-	var power := _fleet_power()
-	var lines := ["In the hangar: %d ships, attack %d, hull %d" % [_fleet_size(state), power.attack, power.hull]]
-	for a in state.get("attacks", []):
-		var t := 0.0
-		if a.status == "flying":
-			t = (float(a.arriveAt) - now) / 1000.0
-		else:
-			t = (float(a.returnAt) - now) / 1000.0
-		t = maxf(t, 0.0)
-		if a.attacker == me:
-			lines.append(("Your fleet reaches %s in %d:%02d" if a.status == "flying" else "Your fleet is flying home from %s, %d:%02d") % [a.siteName, int(t) / 60, int(t) % 60])
-		elif a.defender == me and a.status == "flying":
-			lines.append("INCOMING: %s's fleet reaches your %s in %d:%02d" % [a.attacker, a.siteName, int(t) / 60, int(t) % 60])
-	_fleet_status.text = "\n".join(lines)
-
-	var targets: Array = state.system.planets.filter(func(p): return p.get("kind", "") == "satellite" and p.get("owner") != null and p.owner != me)
-	var key := JSON.stringify([targets.map(func(p): return [p.id, p.get("shieldUntil", 0) > now, _site_defence(p)]), _fleet_size(state)])
-	if key != _fleet_key:
-		_fleet_key = key
-		for c in _fleet_targets.get_children():
-			c.queue_free()
-		if targets.is_empty():
-			_label(_fleet_targets, 14).text = "No other Builder has a satellite site yet."
-		for p in targets:
-			var d := _site_defence(p)
-			var shielded := float(p.get("shieldUntil", 0)) > now
-			var btn := Button.new()
-			btn.icon = load(ICONS + "launch.png")
-			btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			btn.text = "%s (%s)\nDefence: attack %d, hull %d%s" % [p.name, p.owner, d.attack, d.hull, "\nShielded after an attack" if shielded else ("\nTap to send every ship" if _fleet_size(state) > 0 else "\nNo ships in the hangar")]
-			btn.disabled = shielded or _fleet_size(state) == 0
-			var id: String = p.id
-			btn.pressed.connect(func(): Net.send({"type": "launch_attack", "target": id}))
-			_fleet_targets.add_child(btn)
-
-	var log_lines := []
-	var history: Array = state.get("attackLog", [])
-	for i in range(history.size() - 1, maxi(-1, history.size() - 6), -1):
-		var e: Dictionary = history[i]
-		if e.attacker != me and e.defender != me:
-			continue
-		var loot := []
-		for item in e.loot:
-			loot.append("%d %s" % [e.loot[item], Net.item_name(item)])
-		var lost := 0
-		for id in e.lost:
-			lost += int(e.lost[id])
-		if e.attacker == me:
-			log_lines.append("%s at %s: %s, %d ships lost%s" % ["Won" if e.won else "Driven off", e.site, "took " + ", ".join(loot) if loot else "no loot", lost, ""])
-		else:
-			log_lines.append("%s attacked your %s: %s" % [e.attacker, e.site, ("they took " + ", ".join(loot)) if e.won else "your defences held"])
-	_fleet_log.text = ("Recent battles\n" + "\n".join(log_lines)) if log_lines else ""
+	hint.text = "Found an outpost by buying one in the Build shop (up to %d). An outpost goes dormant while your faction doesn't hold its planet." % int(Net.catalog.get("sites", {}).get("max", 5))
 
 
 func _refresh_info(state: Dictionary) -> void:
@@ -1540,6 +1829,13 @@ func _refresh_info(state: Dictionary) -> void:
 		_info.text = "An empty pad. Tap Build to put something here."
 		return
 	var lines: Array = [BUILDING_INFO.get(b.type, {}).get("about", "")]
+	if _is_facility(b.type):
+		lines[0] += " " + OUTPOST_ABOUT
+		if _view != "":
+			lines.append("On %s." % _site_where(_planet()))
+			var reason := _dormant_reason(_planet())
+			if reason != "":
+				lines.append("DORMANT: it makes and ships nothing, and nothing can be built or upgraded here, though raiders can still break in. " + reason)
 	var level := int(b.get("level", 1))
 	var max_level := int(Net.catalog.get("maxLevel", 5))
 	if _work_left(b) > 0:
@@ -1548,7 +1844,7 @@ func _refresh_info(state: Dictionary) -> void:
 		else:
 			lines.append("Upgrading to level %d: ready in %s" % [level + 1, _clock_text(_work_left(b))])
 	if level >= 1:
-		lines.append("Level %d of %d. %s" % [level, max_level, LEVEL_EFFECT.get(b.type, "")])
+		lines.append("Level %d of %d. %s" % [level, max_level, LEVEL_EFFECT.get(b.type, OUTPOST_LEVEL if _is_facility(b.type) else "")])
 		if level < max_level:
 			lines.append("Level %d costs %s and takes %s" % [level + 1, _cost_text(_level_cost(b.type, level)), _clock_text(_level_secs(b.type, level))])
 	if _is_facility(b.type):
@@ -1612,6 +1908,16 @@ func _fleet_size(state: Dictionary) -> int:
 	return n
 
 
+## Ships out with this Builder's fleets: they keep their berths in the hangar (server: queueShip).
+func _ships_away() -> int:
+	var n := 0
+	for fl in Net.state.get("war", {}).get("fleets", []):
+		if fl.get("owner") == Net.my_name and not fl.get("ai", false):
+			for id in fl.ships:
+				n += int(fl.ships[id])
+	return n
+
+
 func _foundry_slot() -> int:
 	var planet := _planet()
 	if planet.is_empty():
@@ -1631,7 +1937,9 @@ func _refresh_shipyard(state: Dictionary) -> void:
 	for id in ships:
 		fleet.append("%d %s" % [int(navy.get(id, 0)), ships[id].name + ("s" if int(navy.get(id, 0)) != 1 else "")])
 	var hangar := int(Net.catalog.get("hangar", 10))
-	_yard_fleet.text = "Navy: %s\nHangar: %d of %d berths used" % [", ".join(fleet), _fleet_size(state) + queue.size(), hangar]
+	var away := _ships_away()
+	var berths := _fleet_size(state) + away + queue.size()
+	_yard_fleet.text = "Navy: %s\nHangar: %d of %d berths used" % [", ".join(fleet), berths, hangar] + (" (%d by ships with your fleets)" % away if away > 0 else "")
 	var lines := []
 	var now := Net.now_ms()
 	for i in queue.size():
@@ -1645,7 +1953,7 @@ func _refresh_shipyard(state: Dictionary) -> void:
 	_yard_queue.text = "\n".join(lines) if lines else "Nothing building. Pick a warship below."
 	_yard_cancel.visible = not queue.is_empty()
 
-	var full := queue.size() >= int(Net.catalog.get("shipQueueMax", 5)) or _fleet_size(state) + queue.size() >= hangar
+	var full := queue.size() >= int(Net.catalog.get("shipQueueMax", 5)) or berths >= hangar
 	for id in ships:
 		var def: Dictionary = ships[id]
 		if not _yard_buttons.has(id):
@@ -1668,6 +1976,60 @@ func _refresh_jobs(state: Dictionary) -> void:
 	for job in state.jobs.filter(func(j): return j.get("planet", "aster") == _pid()):
 		lines.append("#%d  %s %d/%d  (%d cr)  %s" % [job.id, job.resource, job.delivered, job.amount, job.reward, job.status])
 	_jobs.text = "\n".join(lines) if lines else "No jobs yet. Build a Spaceport, then post one."
+	_refresh_contracts(state)
+
+
+## Pilots' supply contracts for this Builder's faction: what they want, how much is filled and the
+## reward, and Fill from stock. Rows are rebuilt only when a contract changes, so an amount being
+## typed survives the refreshes.
+func _refresh_contracts(state: Dictionary) -> void:
+	var faction = _econ().get("faction")
+	var open: Array = state.get("contracts", []).filter(func(c): return c.status == "open" and faction != null and c.faction == faction)
+	var key := JSON.stringify([faction, open.map(func(c): return [c.id, c.filled])])
+	if key != _contracts_key:
+		_contracts_key = key
+		for c in _contracts.get_children():
+			_contracts.remove_child(c)
+			c.queue_free()
+		if faction == null:
+			_label(_contracts, 15).text = "Choose a faction to fill pilots' supply contracts."
+		elif open.is_empty():
+			var none := _label(_contracts, 15)
+			none.text = "No open contracts. Pilots of the %s post them for materials and war supplies." % _faction_name(faction)
+			none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		for c in open:
+			_contract_row(c)
+	for row in _contracts.get_children():
+		if row.has_meta("update"):
+			row.get_meta("update").call()
+
+
+func _contract_row(c: Dictionary) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_contracts.add_child(box)
+	var text := _label(box, 15)
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var item: String = c.item
+	var left := int(c.amount) - int(c.filled)
+	var have := func() -> int: return int(_econ().stock.get(item, 0))
+	var edit := _qty_picker(row, mini(left, maxi(1, have.call())), func(): return mini(left, have.call()))
+	var fill := Button.new()
+	fill.text = "Fill"
+	fill.icon = load(ICONS + "send.png")
+	var id := int(c.id)
+	fill.pressed.connect(func(): Net.send({"type": "fill_contract", "contract": id, "qty": _qty(edit)}))
+	box.add_child(fill)
+	var unpaid := int(c.reward) - int(c.paid)
+	box.set_meta("update", func():
+		var n := _qty(edit)
+		text.text = "%s wants %s: %d filled, %d of the %d credits still to pay. You have %d." % [c.pilot, _amount_of(item, int(c.amount)), int(c.filled), unpaid, int(c.reward), have.call()]
+		var pay := unpaid if n >= left else mini(unpaid, roundi(float(c.reward) * n / float(c.amount)))
+		fill.text = "Fill %d for %d credits" % [n, pay]
+		fill.disabled = n < 1 or n > left or n > have.call())
 
 
 func _refresh_raids(state: Dictionary) -> void:
@@ -1687,30 +2049,315 @@ func _refresh_raids(state: Dictionary) -> void:
 		lines.append("%s at %s: %s%s" % [e.pilot, e.facility, e.outcome, (", took " + ", ".join(stolen)) if stolen else ""])
 	_raids.text = "\n\n".join(lines) if lines else "No raids yet. Facilities you build can be raided by pilots."
 
-	var incoming := _incoming()
-	_banner.visible = not live.is_empty() or not incoming.is_empty()
+	var battle := _my_battle()
+	_banner.visible = (not live.is_empty() or not battle.is_empty()) and not _war.visible and not _faction_overlay.visible
 	_raids_btn.modulate = Color(1, 0.6, 0.55) if not live.is_empty() else Color.WHITE
 	if not live.is_empty():
 		var r: Dictionary = live[0]
 		var left := maxf(0.0, (float(r.endsAt) - Net.now_ms()) / 1000.0)
 		_banner.text = "Raid at %s  %d:%02d  Heat %d" % [r.facility, int(left) / 60, int(left) % 60, r.heat]
-	elif not incoming.is_empty():
-		var a: Dictionary = incoming[0]
-		var left := maxf(0.0, (float(a.arriveAt) - Net.now_ms()) / 1000.0)
-		_banner.text = "Incoming: %s's fleet reaches %s in %d:%02d" % [a.attacker, a.siteName, int(left) / 60, int(left) % 60]
+	elif not battle.is_empty():
+		_banner.text = "Battle over %s: next round in %s" % [battle.name, _clock_text(maxf(0.0, (battle.at - Net.now_ms()) / 1000.0))]
 
 
-## New activity-feed entries pop up as toasts. The backlog at connect time is skipped.
+## New activity-feed entries pop up as toasts. The backlog at connect time is skipped, and so is
+## the feed while the War screen is open (its Latest list has the war's news; alerts still show).
 func _toast_feed(state: Dictionary) -> void:
 	var feed: Array = state.feed
 	if _last_feed_at < 0.0:
 		_last_feed_at = float(feed[-1].at) if feed else 0.0
 		return
 	for e in feed:
-		if float(e.at) > _last_feed_at:
+		if float(e.at) > _last_feed_at and not _war.visible:
 			toast(e.text)
 	if feed:
 		_last_feed_at = maxf(_last_feed_at, float(feed[-1].at))
+
+
+## New alerts on this Builder's economy (a sector of theirs fell, a fleet came home short of
+## supplies, a sale at the dock, a new rank) pop up as toasts. Alerts that came in while the phone
+## was away show when it connects: the last one seen is remembered on the phone.
+func _toast_alerts(e: Dictionary) -> void:
+	if Net.home == "" or not e.has("alerts"):
+		return
+	var cfg := ConfigFile.new()
+	if _last_alert_at < 0.0:
+		cfg.load(ALERTS_SEEN)
+		_last_alert_at = float(cfg.get_value("alerts", Net.my_name, 0.0))
+	var fresh: Array = e.alerts.filter(func(a): return float(a.at) > _last_alert_at)
+	if fresh.is_empty():
+		return
+	for a in fresh.slice(-3):
+		toast(a.text, C_AMBER, 6.0)
+	_last_alert_at = float(fresh[-1].at)
+	cfg.load(ALERTS_SEEN)
+	cfg.set_value("alerts", Net.my_name, _last_alert_at)
+	cfg.save(ALERTS_SEEN)
+
+
+## The faction badge under the planet name: the faction in its colour, and the War Merit rank.
+func _refresh_badge(e: Dictionary) -> void:
+	var faction = e.get("faction")
+	_badge_name.text = _faction_name(faction) if faction != null else "No faction yet"
+	_badge_name.modulate = _faction_colour(faction).lightened(0.2) if faction != null else Color(0.75, 0.8, 0.88)
+	_badge_rank.text = _rank_of(float(e.get("merit", 0))).get("name", "") if faction != null else ""
+
+
+# --- Outposts on the war's planets, and the Carrier Dock ---------------------------------
+
+## The sector picker for a new outpost of type _founding: every contested planet of this system,
+## and on the ones the faction holds, a button per sector with how many outposts stand in it.
+## Sectors held by another faction, or full, can't be picked.
+func _refresh_found(state: Dictionary) -> void:
+	if _founding == "":
+		return
+	var e := _econ()
+	var faction = e.get("faction")
+	var per := int(Net.catalog.get("outposts", {}).get("perSector", 3))
+	var counts := {} # sector id -> outposts standing in it, everyone's
+	for p in state.system.planets:
+		if p.get("kind", "") == "satellite" and p.get("sector") != null:
+			counts[p.sector] = int(counts.get(p.sector, 0)) + 1
+	var planets: Array = state.get("war", {}).get("planets", []).filter(func(p): return p.system == state.system.id)
+	var info: Dictionary = BUILDING_INFO[_founding]
+	var afford := _can_afford(info.cost)
+	var mine := _my_sites().size()
+	var most := int(Net.catalog.get("outposts", {}).get("max", 5))
+	var key := JSON.stringify([_founding, faction, planets.map(func(p): return [p.owner, p.sectors.map(func(x): return x.owner)]), counts, afford, mine])
+	if key == _found_key:
+		return
+	_found_key = key
+	for c in _found.get_children():
+		_found.remove_child(c)
+		c.queue_free()
+	var head := _label(_found, 15)
+	head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	head.text = "%s, ready in %s. Makes %s. You have %d of %d outposts.\nTap a sector your faction holds: up to %d outposts (anyone's) stand in each." % [
+		_cost_text(info.cost), _clock_text(_level_secs(_founding, 0)), _makes_text(_founding), mine, most, per]
+	if not afford:
+		var short := _label(_found, 15)
+		short.text = "You can't afford it yet."
+		short.modulate = Color(1, 0.6, 0.55)
+	if faction == null:
+		_label(_found, 15).text = "Choose a faction first."
+		return
+	for wp in planets:
+		var title := HBoxContainer.new()
+		title.add_theme_constant_override("separation", 8)
+		_found.add_child(title)
+		var name_l := _label(title, 17)
+		name_l.text = wp.name
+		var owner := _label(title, 14)
+		owner.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		owner.text = _faction_name(wp.owner) if wp.owner != null else "No owner"
+		owner.modulate = _faction_colour(wp.owner).lightened(0.2)
+		if wp.owner != faction:
+			var why := _label(_found, 14)
+			why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			why.modulate = Color(0.75, 0.8, 0.88)
+			why.text = "Your faction doesn't hold %s, so you can't build there." % wp.name
+			continue
+		var grid := GridContainer.new()
+		grid.columns = 7
+		grid.add_theme_constant_override("h_separation", 6)
+		grid.add_theme_constant_override("v_separation", 6)
+		_found.add_child(grid)
+		for sec in wp.sectors:
+			var n := int(counts.get(sec.id, 0))
+			var num: String = str(sec.name).trim_prefix(str(wp.name) + " ")
+			var btn := Button.new()
+			btn.custom_minimum_size = Vector2(62, 52)
+			btn.add_theme_font_size_override("font_size", 14)
+			if sec.owner != faction:
+				btn.text = "%s\n%s" % [num, str(sec.owner).capitalize() if sec.owner != null else "unheld"]
+				btn.disabled = true
+			elif n >= per:
+				btn.text = "%s\nfull" % num
+				btn.disabled = true
+			else:
+				btn.text = "%s\n%d/%d" % [num, n, per]
+				btn.disabled = not afford or mine >= most
+			var planet_id: String = wp.id
+			var sector_id: String = sec.id
+			btn.pressed.connect(func(): Net.send({"type": "found_site", "facility": _founding, "planet": planet_id, "sector": sector_id}))
+			grid.add_child(btn)
+	var legend := _label(_found, 13)
+	legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	legend.modulate = Color(0.75, 0.85, 0.92)
+	legend.text = "Each button is a sector and its outposts out of %d. Greyed out: held by another faction (its name shows), or full." % per
+
+
+## The Carrier Dock's market: everything in stock with its price, set or taken off sale. Pilots of
+## the Builder's faction buy from it at the dock. Rows are rebuilt only when the listings or what's
+## stocked change, so a price being typed survives the refreshes.
+func _refresh_market(state: Dictionary) -> void:
+	var e := _econ()
+	var market: Dictionary = e.get("market", {})
+	var items := ["metal", "ice"]
+	for id in e.stock:
+		if id not in items and (int(e.stock[id]) > 0 or market.has(id)):
+			items.append(id)
+	for id in market:
+		if id not in items:
+			items.append(id)
+	var dock := _dock()
+	# Open once it's built, and through its upgrades too (the server's rule, and the PC's).
+	var ready := not dock.is_empty() and int(dock.get("level", 1)) >= 1
+	var key := JSON.stringify([items, market, e.get("faction"), ready])
+	if key != _market_key:
+		_market_key = key
+		for c in _market.get_children():
+			_market.remove_child(c)
+			c.queue_free()
+		var head := _label(_market, 14)
+		head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		head.modulate = Color(0.8, 0.9, 0.95)
+		if not ready:
+			head.text = "Build a Carrier Dock to open the market." if dock.is_empty() else "The market opens when the Carrier Dock is finished."
+			return
+		head.text = "Pilots of the %s buy from your stock here. Prices are credits each; goods go straight to the buyer." % _faction_name(e.faction) if e.get("faction") != null \
+			else "Pick a faction first: your dock only trades with pilots of your faction."
+		for id in items:
+			_market_row(id, int(market.get(id, 0)))
+	for row in _market.get_children():
+		if row.has_meta("update"):
+			row.get_meta("update").call()
+
+
+func _market_row(item: String, price: int) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_market.add_child(box)
+	var text := _label(box, 15)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var edit := LineEdit.new()
+	edit.placeholder_text = "price"
+	edit.text = str(price) if price > 0 else ""
+	edit.custom_minimum_size = Vector2(90, 0)
+	edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	edit.select_all_on_focus = true
+	row.add_child(edit)
+	var list := Button.new()
+	list.text = "Update" if price > 0 else "List"
+	row.add_child(list)
+	var unlist := Button.new()
+	unlist.text = "Unlist"
+	unlist.disabled = price == 0
+	unlist.pressed.connect(func(): Net.send({"type": "set_price", "item": item, "price": 0}))
+	row.add_child(unlist)
+	var send := func(_t = ""):
+		if _qty(edit) >= 1:
+			Net.send({"type": "set_price", "item": item, "price": _qty(edit)})
+	list.pressed.connect(send)
+	edit.text_submitted.connect(send)
+	box.set_meta("update", func():
+		var have := int(_econ().stock.get(item, 0))
+		text.text = "%s: %d in stock, %s" % [_stock_name(item).capitalize() if item in ["metal", "ice"] else _stock_name(item), have, ("%d credits each" % price) if price > 0 else "not for sale"]
+		text.modulate = Color(1, 1, 1) if price > 0 else Color(0.8, 0.85, 0.9)
+		list.disabled = _qty(edit) < 1)
+
+
+## The Carrier Dock on the home planet, or an empty Dictionary.
+func _dock() -> Dictionary:
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "dock":
+			return b
+	return {}
+
+
+# --- The war ------------------------------------------------------------------------------
+
+## Whether this connection is a server admin's (it may play the Coma Conglomerate and steer its
+## director).
+func _admin() -> bool:
+	return Net.admin
+
+
+## A faction's name ("Terran Compact"), or "" for none.
+func _faction_name(f) -> String:
+	return str(Net.catalog.get("factions", {}).get(str(f), {}).get("name", "")) if f != null else ""
+
+
+## A faction's colour; grey for none.
+func _faction_colour(f) -> Color:
+	var hex := str(Net.catalog.get("factions", {}).get(str(f), {}).get("color", "")) if f != null else ""
+	return Color.html(hex) if hex != "" else Color(0.55, 0.6, 0.68)
+
+
+## The War Merit rank for `merit` (catalog ranks: name, from, bonus).
+func _rank_of(merit: float) -> Dictionary:
+	var out: Dictionary = {}
+	for r in Net.catalog.get("ranks", []):
+		if out.is_empty() or merit >= float(r.from):
+			out = r
+	return out
+
+
+## A contested planet of the war map by id, or an empty Dictionary.
+func _war_planet(id) -> Dictionary:
+	for p in Net.state.get("war", {}).get("planets", []):
+		if p.id == id:
+			return p
+	return {}
+
+
+## The contested planets of this system that the Builder's faction holds.
+func _held_planets() -> Array:
+	var faction = _econ().get("faction")
+	if faction == null or Net.state.is_empty():
+		return []
+	return Net.state.get("war", {}).get("planets", []).filter(func(p): return p.system == Net.state.system.id and p.owner == faction)
+
+
+## Where an outpost stands: "Cinder, sector 7". One from before the war is off its home planet.
+func _site_where(site: Dictionary) -> String:
+	var wp := _war_planet(site.get("parent"))
+	if wp.is_empty() or site.get("sector") == null:
+		return "off %s, waiting for a sector" % Net.planet(str(site.get("parent", ""))).get("name", Net.my_planet().get("name", ""))
+	for sec in wp.sectors:
+		if sec.id == site.sector:
+			return "%s, sector %s" % [wp.name, str(sec.name).trim_prefix(str(wp.name) + " ")]
+	return wp.name
+
+
+## Why an outpost is dormant, or "" while it's awake.
+func _dormant_reason(site: Dictionary) -> String:
+	if not site.get("dormant", false):
+		return ""
+	var wp := _war_planet(site.get("parent"))
+	if wp.is_empty() or site.get("sector") == null:
+		return "Your faction holds no planet in %s yet. This outpost moves to one and wakes up when it does." % Net.state.system.name
+	if wp.owner != null:
+		return "%s fell to the %s. This outpost wakes up when your faction retakes it." % [wp.name, _faction_name(wp.owner)]
+	return "Your faction lost control of %s. This outpost wakes up when your faction retakes it." % wp.name
+
+
+## The next fleet battle where this Builder has a fleet in orbit: {"system", "name", "at"}, or {}.
+func _my_battle() -> Dictionary:
+	var war: Dictionary = Net.state.get("war", {})
+	var due: Dictionary = war.get("battleAt", {})
+	for fl in war.get("fleets", []):
+		if fl.owner == Net.my_name and fl.status == "stationed" and due.has(fl.system):
+			for s in war.systems:
+				if s.id == fl.system:
+					return {"system": s.id, "name": s.name, "at": float(due[fl.system])}
+	return {}
+
+
+## "metal", "ice" or an item's name.
+func _stock_name(id: String) -> String:
+	return id if id in ["metal", "ice"] else Net.item_name(id)
+
+
+## "20 Fuel cells", "1 Missile", "40 metal", as the server says it.
+func _amount_of(id: String, n: int) -> String:
+	var item_name := _stock_name(id)
+	if n == 1 or id in ["metal", "ice"] or item_name.ends_with("s") or item_name.ends_with("matter"):
+		return "%d %s" % [n, item_name]
+	return "%d %ss" % [n, item_name]
 
 
 func _on_chat(sender: String, _role: String, text: String) -> void:

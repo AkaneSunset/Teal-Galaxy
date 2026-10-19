@@ -240,11 +240,22 @@ func save_settings() -> void:
 	cfg.set_value("settings", "invert_mouse", invert_mouse)
 	cfg.set_value("settings", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("settings", "hud_colour", hud_colour)
+	cfg.set_value("settings", "admin_keys", Net.admin_keys) # Net reads them back itself
 	for a in ACTIONS:
 		var specs := []
 		for e in InputMap.action_get_events(a[0]):
 			specs.append(_spec(e))
 		cfg.set_value("bindings", a[0], specs)
+	cfg.save(SAVE_PATH)
+
+
+## Saves the admin keys (Net.admin_keys: server -> key) and leaves the rest of the settings file as
+## it is. Net calls it when a key is typed, on the start screen and the phone too, where there are
+## no controls to save.
+static func save_admin_keys(keys: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH) # no file yet is fine: it starts empty
+	cfg.set_value("settings", "admin_keys", keys)
 	cfg.save(SAVE_PATH)
 
 

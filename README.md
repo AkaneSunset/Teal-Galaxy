@@ -4,8 +4,9 @@ A galactic city builder you play on your phone, set in a galaxy you explore on P
 Phone players (Builders) grow star systems and planetary bases. PC players (Explorers)
 fly to those places, take the jobs builders post, and play together.
 
-This is an early playable prototype: one star system with a planet for every Builder, jobs, fleets,
-walkable space stations, and first-person raids on Builders' facilities.
+This is an early playable prototype: one star system with a planet for every Builder, jobs,
+walkable space stations, first-person raids on Builders' outposts, and a galactic war between
+factions, fought with navies across seven star systems.
 
 ## What's here
 
@@ -37,6 +38,11 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 **Demo mode:** start the server with `DEMO=1 npm start` and every Builder base gets 2000 metal, 200 ice,
 200 alloy, 40 isotope cells, a few plans and 5000 credits, enough to try every building, defence, warship and
 security tier, and everything builds 10 times faster. Each base is topped up once, the first time its Builder connects with demo mode on.
+Demo mode also lets pilots take sectors of the war by hand (see [Taking planets](#taking-planets)).
+
+**Admins:** start the server with `ADMIN_KEY=<any secret> npm start`, and apps that say hello with
+that key can play the Coma Conglomerate and steer its AI director (see
+[The Coma Conglomerate](#the-coma-conglomerate-admins-and-the-ai-director)).
 
 ## The Builder screen
 
@@ -44,97 +50,302 @@ The Builder is a base-builder view of your home planet, like Clash of Clans, pla
 Every Builder gets their own planet and economy: the first one to connect takes Aster, later ones found
 Brisa, Corvo and so on. Drag to pan, pinch (or scroll the mouse wheel) to zoom. Six build pads ring the command centre:
 tap a pad to select it, and its actions appear at the bottom (Info, Post job on the Spaceport,
-Ship cargo, security tier upgrades and the Alarm on facilities). **Build** (bottom right) opens the shop:
+Ship cargo, security tier upgrades and the Alarm on outposts). **Build** (bottom right) opens the shop:
 pick a building, then tap a free pad (or select an empty pad first and it builds there).
-Jobs, Raids and Chat open from the buttons bottom left, and activity pops up as short messages.
-During a raid the facility glows red and a banner shows the raid clock; tap it to jump there.
+Jobs, Raids, Chat, Sites (your outposts) and War open from the buttons bottom left, and activity and
+alerts pop up as short messages. The first time you connect, the faction choice covers the screen
+until you pick a side (see [The faction war](#the-faction-war)); the header then shows your faction
+and War Merit rank.
+During a raid the outpost glows red and a banner shows the raid clock; tap it to jump there.
 Buildings without a finished 3D model yet use the stand-ins in `game/base_models.gd`.
-The ground around every base and satellite site is an icy, faceted landscape generated from its id
+The ground around every base and outpost is an icy, faceted landscape generated from its id
 (`game/terrain.gd`): a flat clearing for the base, then snow, frost-covered slopes, bare rock cliffs, mesas
 and jagged peaks further out, with mist drifting in the valleys. Most bases also get a cliff (or a ledge dropping away) off one side,
 and many a winding canyon off another, so the high ground doesn't ring the base like a crater. No two bases look the same, and a base
 always looks the same each time you open it.
 
-**Build times and levels.** Every building takes time to build (Mine 20 s up to Data Spire 2.5 min) and
+**Build times and levels.** Every building takes time to build (Mine 20 s up to 3 min for a Hauler Yard or Carrier Dock) and
 does nothing until it's finished: its pad shows scaffolding and a countdown. Once built, select it and press
 *Level N* to upgrade it, up to level 5. Each level costs twice the one before and takes twice as long, and
 the building stops working while it upgrades. Higher levels produce more: Mines, Extractors, Habitats and
-Hydroponics add their base rate again per level, facilities make more per batch and hold more, the Ship
-Foundry builds warships 25% faster per level, and the Spaceport makes facility freighters come sooner.
+Hydroponics add their base rate again per level, outposts make more per batch and hold more, the Ship
+Foundry builds warships 25% faster per level, and the Spaceport makes outpost freighters come sooner.
 Defences placed on a site take a few seconds to build and don't fight until they're done.
 
 **Passive income.** Buildings produce on their own, so a Builder grows even with no pilots online:
 Mines dig 12 metal a minute, Ice Extractors (15 metal) melt 2 ice a minute, Habitats pay 12 credits a
 minute in rent and Hydroponics sells 24 credits of food a minute. The first ice unlocks Hydroponics, however
-it arrives. Facilities fill their vaults as before, and a freighter brings the goods home every 5 minutes
+it arrives. Outposts fill their vaults, and a freighter brings the goods home every 5 minutes
 on its own (*Ship cargo* sends one sooner); until then the vault is there for pilots to raid. Pilots' ice
 jobs are still the fast way to get ice: one delivery is 10.
 
-**Satellite sites.** Facilities (below) don't go on pads: buying one founds its own satellite site off your
-planet (up to 3), opened from **Sites**. A site is a free 12x12 grid with the facility in the middle;
-Build opens the defence shop there: Turrets (2x2, 20 metal, 5 alloy), Walls (1x1, 5 metal),
-Guard posts (2x2, 15 metal) and one Power plant (2x2, 25 metal), which powers the facility's main
-door for raids, placed on any free tiles. Tap a piece to remove it for half its cost back.
+**Outposts** (the nine types are under [Outposts](#outposts)) don't go on pads: buying one in the shop
+opens a sector picker, and the outpost is founded on its own site in the sector you tap, on a contested
+planet your faction holds. **Sites** lists your home and your outposts ("Cinder 7 Fuel Depot", "Cinder,
+sector 7"). A site is a free 12x12 grid with the outpost's core in the middle; Build opens the defence
+shop there: Turrets (2x2, 20 metal, 5 alloy), Walls (1x1, 5 metal), Guard posts (2x2, 15 metal) and one
+Power plant (2x2, 25 metal), which powers the core's main door for raids, placed on any free tiles.
+Tap a piece to remove it for half its cost back.
 A new site also comes scattered with obstacles that block building until you clear them for credits:
 Boulders (120 credits, leave 10 metal), Ice crystals (40 credits, leave 4 ice) and Old wreckage
 (200 credits, leave 25 metal and 2 alloy). Tap one and press *Clear*.
-Every base and site has its own place on its planet's surface, well apart from the others; the
-High Port's planet hologram marks each one there.
+Every base has its own place on its planet's surface, well apart from the others, and outposts stand in
+their sector, a little apart when it has more than one; the planet holograms in the High Ports and
+orbital stations mark each one.
 
 **Ship Foundry** (60 metal, 10 ice, needs a Spaceport, one per base) builds warships for your navy.
 Tap it and open the **Shipyard** to queue Corvettes (25 metal, 1 min), Frigates (50 metal, 10 alloy, 3 min)
 or Destroyers (100 metal, 25 alloy, 3 isotope cells, 8 min). Ships build one at a time, up to 5 in the
-queue and 10 in the hangar; cancelling the last one refunds it. Finished ships wait in the hangar
-(the navy count is in the top bar).
-
-**Fleet attacks.** Tap the navy count (or *Fleet and attacks* in the Shipyard) to open the Fleet page. It
-lists other Builders' satellite sites with their defence (placed pieces plus the security tier's turrets
-and guards); tap one to send every ship in the hangar. The fleet flies 2 minutes divided by its slowest
-ship's speed, and the defender sees a red *Incoming* banner meanwhile. The battle runs up to 6 rounds,
-lightest ships sinking first. If the fleet breaks the defences it takes 40% of each vault stack and the
-site gets a 10-minute shield; survivors fly home with the loot (intel sells for credits). Home planets
-can't be attacked.
+queue and 10 in the hangar, counting ships out with your fleets; cancelling the last one refunds it.
+Finished ships wait in the hangar (the navy count is in the top bar, and tapping it opens the Shipyard).
+*War map: send fleets* in the Shipyard opens the War screen, where your navy fights for orbits (see
+[Navies and orbital control](#navies-and-orbital-control)).
 
 ## The prototype loop
 
-1. **Builder:** build a Spaceport on planet Aster (costs 30 metal), then post the job
+1. **Builder:** pick a faction, build a Spaceport on planet Aster (costs 30 metal), then post the job
    "deliver 10 ice for 100 credits". Mines add metal over time.
-2. **Explorers:** you start in the pilot's seat 4 km from Aster High Port, which appears once it's built.
+2. **Explorers:** pick a side too (or *Not now*). You start in the pilot's seat 4 km from Aster High Port, which appears once it's built.
    Open the map (**M**), click Aster Ice Field, and fly there (about 15 km: a minute at cruise, less with
    boost). Hold **F** to mine ice, then fly back within 1.5 km of the port, slow down, and press **F** to deliver.
 3. **Builder:** the job completes, 10 ice lands in stock, and Hydroponics unlocks.
    Pilots are paid by how much each delivered.
 
-## Raids: facilities and the pilots who rob them
+## The faction war
 
-Based on the Facility Heist design doc. Builders buy **facilities** in the Build shop, and each one founds its own satellite site:
+Four factions are at war over Teal Prime and the systems around it, mirroring Supreme Commander's.
+Every character picks a side once, for good: each Builder base and each pilot picks its own (a Builder and
+a pilot with the same name are different characters, and neither can act for the other). Players choose
+from three; the fourth, the Coma Conglomerate, is played by the galaxy's admins and its AI director.
 
-| Facility | Cost | Fills its vault with |
+| Faction | Mirrors | Style | Bonus |
+| --- | --- | --- | --- |
+| Terran Compact | UEF | Durable and methodical: shields, artillery, heavy armour | Outpost defences are 25% tougher in raids |
+| Ashen Collective | Cybran | Fast and tricky: stealth, cloaking, hit and run | Raiders build Heat 25% faster inside your outposts |
+| Luminar Accord | Aeon | Hover units, precise and powerful strikes | Outposts produce 20% more |
+| Coma Conglomerate (admins only) | Seraphim | Alien tech, strong all-round units, the strategic missile | Outposts recover from raids twice as fast |
+
+The phone asks before anything else: tap *Join* on a card, then tap again to join for good. A pilot gets
+the same cards on PC and can put it off with *Not now* and choose later from the ship's menu. Your side
+shows in the phone's header and the PC HUD.
+
+### The war map
+
+Seven star systems joined by lanes. Teal Prime, the Builders' home system, is in the middle, each
+faction's capital system is next to it, and Marrow Reach and The Drift lie beyond, held by nobody at the start.
+
+| System | Lanes to | What it is | Contested planets (first owner) |
+| --- | --- | --- | --- |
+| Teal Prime | Fortitude, Umbra, Aurelia, Comae | the Builders' home system | Cinder (Compact), Vesper (Ashen), Halcyon (Luminar), Morrow (Coma) |
+| Fortitude | Teal Prime, Marrow Reach | Terran Compact capital | Bastion, Anvil |
+| Umbra | Teal Prime, Marrow Reach | Ashen Collective capital | Shade, Hollow |
+| Aurelia | Teal Prime, The Drift | Luminar Accord capital | Radiance, Glimmer |
+| Comae | Teal Prime, The Drift | Coma Conglomerate capital | Nadir, Zenith |
+| Marrow Reach | Fortitude, Umbra | neutral | Scar, Rift, Cairn |
+| The Drift | Aurelia, Comae | neutral | Eddy, Mire |
+
+Each planet of the war has 10 to 25 sectors, each linked to its nearest neighbours; the first is its
+capital sector. The planets of a capital system are **capital worlds**: their faction's for good. The
+Builders' own home planets (Aster, Brisa, ...) aren't part of the war at all and are always safe. A
+planet is *quiet* while one faction at most can fight over it, a *front line* with two and a *warzone*
+with three or more.
+
+On the phone, **War** opens the War screen: the map on the left, each contested planet a dot in its
+owner's colour (with a padlock while it's locked), a ring round each system for its orbital control,
+and markers for the fleets. Tap a system for its planets (owner, sectors each faction holds, lock time
+left, contention), its orbital control bars with the 25% line, the fleets there and *Send fleet*. On PC
+the nav map's Galactic level (**M**) is the war map, with each system's planets, orbital control and
+fleets written under it and your faction's systems lit up; the System level marks Teal Prime's
+contested planets. Click a planet there, use one of the **War terminals** in a station's Terminal
+Hall, or pick *War terminal* in the ship's menu, for the sector view: the planet as a globe you drag
+to turn, its sectors in their owners' colours, the links between them, the capital sector ringed and
+outposts as small squares. The Terminal Hall's boards show the war front and the fleets in orbit.
+
+### Outposts
+
+Every site a Builder founds is an **outpost**, one of nine types (the first three were the Mining
+Refinery, Research Outpost and Data Spire):
+
+| Outpost | Cost | Build | Fills its vault with |
+| --- | --- | --- | --- |
+| Extractor | 40 metal | 1.5 min | Alloy plates, isotope cells, rarely exotic matter |
+| Armoury | 30 metal, 10 ice | 2 min | Weapon systems, design drives and blueprint cases |
+| Sensor Works | 50 metal, 150 credits | 2.5 min | Sensor modules, data shards and security dossiers |
+| Fuel Depot | 30 metal, 10 ice | 1 min | Fuel cells |
+| Light Munitions Works | 40 metal | 1.5 min | Slug crates and shell crates |
+| Heavy Munitions Works | 50 metal, 10 alloy | 2 min | Missiles, torpedoes, rarely a strategic warhead |
+| Drone Yard | 50 metal, 15 alloy | 2.5 min | Drone chassis |
+| Lander Yard | 60 metal, 15 alloy | 2.5 min | Lander chassis |
+| Hauler Yard | 70 metal, 20 alloy | 3 min | Hauler hulls |
+
+Outposts go only on the contested planets of your own system (Cinder, Vesper, Halcyon and Morrow in
+Teal Prime), on a planet your faction holds, in a sector your faction holds. The sector picker lists
+each of those planets with a button per sector and the outposts already in it; another faction's
+sectors and full ones are greyed out. A Builder can have **5 outposts**, and a sector holds **3**
+(everyone's together). Each is named after its sector: "Cinder 7 Fuel Depot". War goods come home to
+stock like materials: sell them at your Carrier Dock, fill contracts with them or donate them. Sites
+from before the war move to a sector your faction holds when you pick your side.
+
+**Dormancy.** When your faction loses the planet an outpost stands on, the outpost goes **dormant**:
+it makes nothing, no freighter comes for its vault, and you can't build, place, clear or upgrade
+anything there or raise its security. Raiders can still break in. It wakes up exactly as it was when
+your faction retakes the planet. The phone marks it *Dormant* and says why, and the station holograms
+dim it.
+
+### Navies and orbital control
+
+Fleets don't take ground: they fight for **orbital control** of a system, and a faction needs at least
+**25%** of a system's orbital control before it can attack the planets there. Holding a system's orbit
+never secures it on its own; only its planets do.
+
+Builders send their ships: pick a system on the War screen, choose how many of each ship from the
+hangar and press *Send fleet*.
+A fleet can go to any system that isn't a capital: Teal Prime, Marrow Reach or The Drift. It flies a
+jump per lane from Teal Prime, passing through capital systems but never stopping in one. A jump takes
+2 minutes divided by the slowest ship's speed (Corvette 3, Frigate 2, Destroyer 1), and holding Teal
+Prime's own orbit is a quarter of a jump, so a fleet with a Destroyer in it is over Teal Prime in 30 s
+and over Marrow Reach or The Drift in 4 min. *Recall* turns a fleet round: one in orbit takes the whole
+way home, one still flying comes back as far as it came. Home, its ships rejoin the hangar.
+
+A faction's share of a system's orbit is its stationed fleets' power over everyone's (attack plus a
+fifth of hull per ship: Corvette 4, Frigate 11, Destroyer 26). When two or more factions have fleets
+in orbit together they fight a round every 2 minutes, the first one 2 minutes after they meet (time
+to call yours home): each side's attack is split across the others by their power, the lightest ships
+sink first, and every round goes in the war log. A fleet that arrives where another faction is in
+orbit has no say in orbital control until it has fought a round there (or the others have left), so
+a fleet called home before every round never wins any.
+
+**Upkeep.** A fleet uses fuel cells from your stock as it takes station and every 10 minutes it stays
+in orbit (Corvette 1, Frigate 2, Destroyer 4 a ship), or 20 credits for each cell you're short. With
+neither, it comes home and your phone tells you.
+
+### Taking planets
+
+A planet belongs to the faction holding its **capital sector and 75%** of its sectors. When it changes
+hands it **locks for a week**, and nobody can attack it until then. To attack a planet a faction needs
+25% of the orbital control of its system and a **foothold** near it: a sector of that planet, another
+planet it holds in the same system, or at least half the planets of a system one lane away (a capital
+system counts as wholly its faction's). Once it holds a sector of a planet, the next must be linked to
+one it holds. Capital worlds can't be attacked at all. Builders with outposts on a planet get an alert
+when one of their faction's sectors there falls.
+
+Sector battles, where pilots fight for sectors (32 to a battle), aren't built yet. Until they are, a
+server started with `DEMO=1` lets pilots take sectors by hand: in the War terminal's sector view a
+sector your side may take has *Take sector (demo)*, and every rule above applies.
+
+### Carrier Dock, contracts and war supply
+
+**Carrier Dock** (80 metal, 10 alloy, needs a Spaceport, one per base, 3 min) is where your faction's
+carriers will dock. For now it hosts your **dock market**: select it and open *Dock market* to put a
+price on anything in stock (1 to 100000 credits a unit) or take it off sale; it keeps trading while
+the dock upgrades. Pilots of your faction buy from it when they land at your base, from the ship's menu
+or the console in front of the dock; you're paid at once, and told. What they buy goes in their
+**war goods hold**, for the carriers to come.
+
+**Supply contracts.** A pilot posts a contract for metal, ice or a material or war supply (1 to 1000
+units, at most 5 open) from a station's Job Board or the ship's menu, and the reward is held from
+their credits. Builders of the same faction find it under **Jobs** and fill as much of it as they like
+from stock, paid their share of the reward as they go; the goods go in the pilot's hold. The pilot can
+cancel it and get back whatever hasn't been paid.
+
+**War supply and War Merit.** The War screen's **Supply** tab gives goods from stock to your faction's
+war supply in your system, which sector battles will spend. Each unit earns War Merit by its value
+(metal 2, ice 3, any other item what it's worth), and Merit ranks make your outposts produce more:
+
+| Rank | War Merit | Outposts produce |
 | --- | --- | --- |
-| Mining Refinery | 40 metal | Alloy plates, isotope cells, rarely exotic matter |
-| Research Outpost | 30 metal, 10 ice | Design drives and blueprint cases (plans) |
-| Data Spire | 50 metal, 150 credits | Data shards and security dossiers (intel) |
+| Recruit | 0 | as normal |
+| Supplier | 500 | 2% more |
+| Quartermaster | 2000 | 4% more |
+| Provisioner | 8000 | 6% more |
+| War Industrialist | 25000 | 8% more |
 
-**Builder (phone):** tap a facility and press Info to see its vault. *Ship cargo to HQ* brings the goods home
-(materials and plans go to stock, intel sells for credits; once a minute). Spend them on
+### The Coma Conglomerate: admins and the AI director
+
+Players can't join the Coma Conglomerate. The galaxy's admins play it, and the rest of the time an AI
+director does, steered by the admins to keep players busy: it pushes hardest on the strongest player
+faction and eases off weaker or quieter ones.
+
+**Admins.** Start the server with `ADMIN_KEY=<any secret>` (unset or empty: nobody is an admin). An
+app that says hello with the same key is an admin's. Type the key into *Admin key* on the start
+screen (phone and PC), or on PC into *Admin key* in Settings (Enter reconnects), or start the game with
+`-- --admin-key=<key>` (the argument wins). A typed key is saved with the settings for the server it
+was typed for, and the app only ever sends it to that server. The phone also asks for the key when the
+server turns away a Coma character. The server never sends the key back, logs it or saves it. The PC
+HUD says *admin* once the server knows you as one.
+
+Admins see the Coma Conglomerate on the faction cards, tagged *Admins only*, and can play characters
+for it. A Coma character is protected by the key: an app without it is turned away, and both apps
+show the server's reason. An app that was already playing the character without the key is turned
+away the moment an admin takes it into Coma.
+
+**What admins can do.** The **Director** tab of the phone's War screen and the *Coma director (admin)*
+page of the PC War terminal:
+
+- pause the director, and set its master scale from 0 to 2;
+- for each player faction, see its strength, its automatic intensity and the intensity in use, and
+  fix a level from 0 to 1 or leave it on *Auto*;
+- set each of Teal Prime, Marrow Reach and The Drift to **Push** (armadas match the strongest player
+  faction there), **Hold** (nothing new goes in, nothing is called home) or **Withdraw** (every armada
+  there comes home at once);
+- see Coma's armada power in each system against the strongest player faction's, send an armada of
+  their own (power 10 to 400) and recall any armada;
+- take sectors for Coma with *Take for Coma*, in the phone's Director tab or the PC sector view, with
+  every rule of the war (no demo mode needed).
+
+Any change takes effect at once, and the director takes its turn straight away unless it's paused.
+
+**How the director picks its intensity.** Every 5 minutes it scores each player faction: half its share
+of the war's sectors (capital worlds aside), three tenths its mean orbital share over Teal Prime,
+Marrow Reach and The Drift, and a fifth its share of the players active in the last day. The strongest
+faction gets intensity 1 and the others less in proportion, down to 0.15 (all 0.15 when nobody scores).
+An admin's fixed level replaces the automatic one. In each system on Push the director aims for the
+strongest player faction's fleet power there times that faction's intensity and the scale, or a patrol
+of 30 power (times the scale and the mean intensity) where no player fleet is. When it's short by more
+than a corvette it sends an armada from Comae (destroyers first, then frigates, then corvettes), and
+when it has more than 1.25 times what it needs it calls its smallest armadas home. All armadas together
+stay under 600 power times the scale; when that limit bites, the systems with the strongest factions
+come first.
+
+**What players see.** Armadas are ships in space: every war map shows them, as a *Coma armada* (a
+diamond on the maps) with its ships, and they fight, hold orbit and count for orbital control like any
+fleet. They need no supplies, and they stand down when they get home to Comae. The war log says what
+they do ("A Coma armada of 2 Destroyers and 3 Frigates is heading for Teal Prime") but never shows the
+director's numbers. Players are never sent the director's settings, or which armadas an admin sent.
+
+## Raids: outposts and the pilots who rob them
+
+Based on the Facility Heist design doc. Every [outpost](#outposts) fills a vault, and pilots of the
+other factions break in to rob it.
+
+**Builder (phone):** tap an outpost's core and press Info to see its vault. *Ship cargo to HQ* brings the goods home
+(materials, plans and war goods go to stock, intel sells for credits; once a minute). Spend them on
 **security tiers**: more guards, vault turrets, rarer loot and a longer raid clock. When a pilot
-boards, the facility turns red and the Raids list shows live where the intruder is (breaching,
+boards, the outpost turns red and the Raids list shows live where the intruder is (breaching,
 which level, or racing the self-destruct), their Heat and time left.
 *Sound the alarm* (50 credits) adds 25 Heat for them. A raid can reach 60% of each vault stack; the
 rest is in deep storage, and anything the raider doesn't carry out goes back in the vault.
 
-**Explorer (PC):** every Builder planet (Aster, Brisa, Corvo...) has a **High Port** in orbit, on the
-nav map. Fly within 1.5 km, slow down and press **F** to dock: your ship lands on pad 06 in the High
-Port's hangar and you're in the pilot's seat, with the ship's menu up. From the seat you can leave it
-and walk down the ramp into the station, fly down to the planet's base (your ship lands beside the
-Builder's Spaceport, in the base the Builder sees on their phone, where you deliver jobs, sell to the
-Fence or walk around), raid one of the planet's facilities, or launch back into space. After a raid
-you're back in your seat in the hangar. Walking back up your ship's ramp sits you down again; Esc
-only pauses, since the way out of a place is your ship.
+**Explorer (PC):** every Builder planet (Aster, Brisa, Corvo...) has a **High Port** in orbit, and each
+contested planet of Teal Prime (Cinder, Vesper, Halcyon, Morrow) has an **orbital station** (Cinder
+Orbital, ...) over its outposts; all of them are on the nav map. Fly within 1.5 km, slow down and press
+**F** to dock: your ship lands on pad 06 in the station's hangar and you're in the pilot's seat, with
+the ship's menu up. From the seat you can leave it and walk down the ramp into the station, fly down to
+the planet's base from a High Port (your ship lands beside the Builder's Spaceport, in the base the
+Builder sees on their phone, where you deliver jobs, sell to the Fence, trade at a Carrier Dock or
+walk around), raid one of the planet's outposts from an orbital station, or launch back into space.
+After a raid you're back in your seat in the hangar. Walking back up your ship's ramp sits you down
+again; Esc only pauses, since the way out of a place is your ship.
+
+You raid only the outposts of other factions, so pick a side first. The ship's menu lists your own
+side's outposts as friendly (they can't be picked) and marks dormant ones, which can still be raided.
+Faction bonuses count inside: a Terran Compact outpost's defences have 25% more hit points, Heat builds
+25% faster in an Ashen Collective one, and a Coma Conglomerate outpost is ready for the next raid in
+half the time (2.5 minutes, not 5).
 
 ### How a raid plays
 
-Picking a facility in the ship's menu flies you to it. Everything after that is on foot, in first
+Picking an outpost in the ship's menu flies you to it. Everything after that is on foot, in first
 person:
 
 1. **Pick where to land.** The raid opens on an overhead map of the site and the ground around it.
@@ -149,7 +360,7 @@ person:
    silent). Your ship comes back, to a pad beside the blast door, **only once every outside defence
    is destroyed**: turrets (the core's too), guard posts and power plants. Sneaking in through a vent
    doesn't change that. The HUD shows how many are left.
-3. **Clear down to the vault.** The facility has one level below ground for each level of its core
+3. **Clear down to the vault.** The outpost has one level below ground for each level of its core
    building, up to five. Deeper levels are bigger, with more guards and turrets and rarer loot. Each
    level's lift down is in the room furthest from where you arrived, and every minute inside brings a
    bigger wave of guards. The **safe room** on the deepest level holds the vault behind amber doors:
@@ -157,7 +368,7 @@ person:
    Vault Warden may be waiting there.
 4. **Escape the self-destruct.** Opening the vault starts the **self-destruct** (70 s plus 30 s per
    level). Ride the lifts back up and board your ship at the blast door (stand on its pad for 3 s)
-   before it ends, or you die with the facility, lose your ship and keep only your Secure Case.
+   before it ends, or you die with the outpost, lose your ship and keep only your Secure Case.
 
 - **Search** containers with **F**: items show as dark placeholders and reveal one at a time.
   Left-click takes into the backpack, right-click into the **Secure Case**, which you keep if you die.
@@ -212,15 +423,18 @@ person:
 | Pause (recall your ship and bail out in the first 2 minutes) | Esc | Start |
 
 **Inside the High Port.** *Leave your seat* takes you down your ship's ramp into the station
-(`game/station.gd`), built from Akane's concept art. Every ship has an exit ramp: a landed ship that's
+(`game/station.gd`), built from Akane's concept art; orbital stations are built the same way. Every ship has an exit ramp: a landed ship that's
 open has its ramp down and walking up it boards the ship (yours sits you back in the pilot's seat); a
 locked ship keeps its ramp up. A Concourse Ring lined with windows circles the Planetary Terminal Hall,
-where a hologram of the planet marks every base and site (red while under raid) and the Surface Transit
-consoles open the same trips as the ship's menu. Off the ring: Ship Services (repairs your ship), the
-Supply Shop, the Commodity Exchange, the Job Board (deliver cargo), the Cantina (live chat on its
+where a hologram of the planet marks every base and outpost (outposts in their faction's colour, dimmed
+while dormant, red while under raid), the Surface Transit consoles open the same trips as the ship's
+menu, and two War terminals open the [war map's](#the-war-map) sector view. Off the ring: Ship Services
+(repairs your ship), the Supply Shop, the Commodity Exchange, the Job Board (deliver cargo, and supply
+contracts), the Cantina (live chat on its
 screen, and the black market terminal in its back corner, where the Fence buys raided loot), the Security Office (the raid log as a wanted
 board), the Crew Cabins and the Observation Lounge. The mouse looks around, F uses things, Enter chats
-and Esc pauses. A Builder's base on the surface (`game/surface.gd`) works the same way on foot.
+and Esc pauses. A Builder's base on the surface (`game/surface.gd`) works the same way on foot, with a
+console in front of a finished Carrier Dock for its market.
 `game/tests/station_interior_shots.tscn` saves a picture of every room and of a base.
 
 ## Flying (Explorer)
@@ -250,34 +464,64 @@ destination, dropping you out about 2 km short of it.
 
 Every control can be rebound in Settings, which is also how a HOTAS is set up: click a binding and
 move the stick axis or press the button you want. Settings also hold drift on or off by default,
-hold-to-drift, mouse invert and sensitivity, and the HUD colour. They save to Godot's user folder.
+hold-to-drift, mouse invert and sensitivity, the HUD colour and the admin key for the server you're
+on (for the galaxy's [admins](#the-coma-conglomerate-admins-and-the-ai-director) only). They save to
+Godot's user folder.
 
 Power works as in Elite: six pips shared across systems (shield recharge), engines (top speed,
 turn rate, boost recharge) and weapons (the mining laser). The map has Local, System and Galactic
-levels, filters for landmarks, waypoints and other pilots, and a route queue (shift-click).
+levels (the Galactic level is the [war map](#the-war-map)), filters for landmarks, waypoints and other
+pilots, and a route queue (shift-click).
 Chat works from both the cockpit and the phone; the ship keeps flying while you type.
 
 ## Play the Builder on your real phone
 
 Run the server on your computer, then export the game to Android from Godot
-(Project > Export, add an Android preset). On the phone's start screen choose Builder and
-set the server to `ws://<your computer's Wi-Fi address>:8080`. Both devices must be on the same Wi-Fi.
+(Project > Export, add an Android preset). On the phone's start screen set the server to
+`ws://<your computer's Wi-Fi address>:8080` (and, if you run the galaxy, type its admin key) and
+choose Builder. Both devices must be on the same Wi-Fi.
 
 ## Tests
 
 ```bash
-cd server && npm test     # the ice job, raid rules, and a full raid over real WebSockets
+cd server && npm test     # every server rule (jobs, raids, the war, the director, admin keys) and games over real WebSockets
 ```
 
-`game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
-Builder lays out a site and upgrades it to level 3, then the pilot picks a landing spot from overhead,
-is dropped off, checks the site matches, blows up the power plant, checks armour, healing, the heal
-wheel, the grenade launcher and supplies on level 1, rides the lifts to the deepest level, finds the
-keycard, opens the vault, gets back up, destroys the remaining defences so the ship returns, and
-boards it (instructions at the top of `game/tests/raid_test.gd`).
+The game tests play against a running server, each on a **fresh galaxy**: give the server a save file
+that doesn't exist yet, and a port of its own if you run several at once.
 
-`game/tests/flight_test.gd` checks the flight model on its own:
+`game/tests/smoke.tscn` is a headless check of both modes against a server started with `BUILD_SPEED=0`
+(instant buildings). Run the two roles at the same time: the Builder joins the Terran Compact, posts the
+ice job, founds a Fuel Depot on a sector of Cinder with the ice and opens the War screen; the pilot
+joins the Ashen Collective, mines and delivers the ice, and opens the war map and the War terminal.
+
+```bash
+cd server && rm -f /tmp/smoke.json && SAVE_FILE=/tmp/smoke.json PORT=9000 BUILD_SPEED=0 npm start
+godot --headless --path game res://tests/smoke.tscn -- --role=builder --server=ws://127.0.0.1:9000    # second terminal
+godot --headless --path game res://tests/smoke.tscn -- --role=explorer --server=ws://127.0.0.1:9000   # third, together
+```
+
+For the admin check, start the server with `ADMIN_KEY=letmein` as well and add `--admin-key=letmein`
+to both: they check that the Coma Conglomerate is on the faction cards and the Director opens. Run
+them without the key against the same kind of server and they check that neither shows. Each run
+prints PASS or FAIL (instructions at the top of `game/tests/smoke.gd`).
+
+`game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
+Luminar Accord Builder founds an Extractor on a sector of Halcyon, lays it out and upgrades it to
+level 3, then an Ashen Collective pilot docks at Halcyon Orbital, picks the outpost and a landing spot
+from overhead, is dropped off, checks the site matches, blows up the power plant, checks armour,
+healing, the heal wheel, the grenade launcher and supplies on level 1, rides the lifts to the deepest
+level, finds the keycard, opens the vault, gets back up, destroys the remaining defences so the ship
+returns, and boards it (instructions at the top of `game/tests/raid_test.gd`).
+
+```bash
+cd server && rm -f /tmp/raid.json && SAVE_FILE=/tmp/raid.json PORT=9001 DEMO=1 BUILD_SPEED=0 npm start
+godot --headless --path game res://tests/raid.tscn -- --server=ws://127.0.0.1:9001
+```
+
+`game/tests/flight_test.gd` checks the flight model on its own, with no server:
 `godot --headless --path game --script res://tests/flight_test.gd`
 
-`game/tests/smoke.tscn` is a headless check of both modes against a server started with `BUILD_SPEED=0` (instant buildings)
-(instructions at the top of `game/tests/smoke.gd`).
+`game/tests/station_interior_shots.tscn` and `game/tests/station_shots.tscn` save screenshots of a
+High Port. They need a display and a running server where Builders have built Spaceports on Aster (and
+on Brisa, for `station_shots`); instructions at the top of each.
