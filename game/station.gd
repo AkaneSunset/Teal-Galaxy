@@ -21,6 +21,13 @@ extends "res://place.gd"
 ## owners' colours and the outposts in them, tinted by faction (dim when dormant), and its Surface
 ## Transit consoles fly you to those outposts. Every station's Terminal Hall has two War
 ## terminals, and its Job Board a console for supply contracts.
+##
+## Stations are hubs: everyone in the same copy of a station (its 32 pads, see server/spaces.js)
+## walks around in it together (walkers.gd). Pilots who fly fleet carriers (the demo) dock at
+## berths outside the station instead of landing in the hangar: the hangar is then the Carrier Berth
+## hall, with an airlock gate for your own carrier and boarding doors for the carriers docked in
+## your copy ("Board Akane's carrier"), nine at a time (DOCK CONTROL shows the next nine). You
+## arrive through your own gate and leave by it.
 
 const R_IN := 21.6 # inner wall of the concourse ring (the Terminal Hall is inside it)
 const R_OUT := 30.0 # outer wall of the ring, where compartments open
@@ -50,6 +57,19 @@ var _globe_markers: Node3D
 var _boards := {} # name -> Label3D, refreshed from the server state
 var _chat_lines: Array[String] = []
 var _price_time := 0.0
+
+# Carrier berths (set by the explorer before the station is added).
+var carrier_mode := false # pilots fly carriers: the hangar holds berth gates, not landed ships
+var berth := {} # your own carrier's berth here: {"station", "copy", "pad"}, or {}
+var gates_provider: Callable # returns the carriers docked in your copy: [{"name", "pad"}]
+var arrive_from := "" # whose carrier you came off (its gate is where you arrive); "" is your own
+const GATE_Z := [16.0, 22.0, 28.0, 34.0, 40.0]
+var _gates := [] # {"root", "title", "body", "panel", "x", "z", "target", "name"}
+var _gate_page := -1 # which of the docked carriers the boarding doors show, a gate's worth at a time (-1: the one you came off's)
+var _gate_pages := 1
+var _gate_console: Label3D
+var _gate_time := 0.0
+var _gate_wait := 0.0
 
 
 func _build() -> void:
@@ -495,6 +515,9 @@ func _far_wall(room: Node3D, w: float, d: float, h: float, ww := 0.0, wx := 0.0,
 
 
 func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
+	if carrier_mode:
+		_build_berth_hall(room, w, d, h)
+		return
 	# The far end is open to space behind a faint blue pressure shield.
 	_box(room, Vector3(w, h, 0.05), Vector3(0, h / 2.0, d + 0.2), Color(0.3, 0.6, 1.0), true, 0.6, 0.06)
 	_box(room, Vector3(w, 0.6, 1.0), Vector3(0, h - 0.3, d), TRIM, false)
@@ -536,6 +559,174 @@ func _build_hangar(room: Node3D, w: float, d: float, h: float) -> void:
 	_light(room, Vector3(-10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
 	_light(room, Vector3(10, h - 1, 32), Color(0.85, 0.92, 1.0), 1.2, 20.0)
 
+
+# --- The Carrier Berth hall (the hangar, for carriers) -----------------------------------------
+
+## The hangar for pilots who fly fleet carriers: their ships are clamped at berths outside, so the
+## hall holds the airlock gates along both side walls: yours first, then one per carrier docked in
+## your copy. The far end still looks out through the pressure shield.
+func _build_berth_hall(room: Node3D, w: float, d: float, h: float) -> void:
+	_box(room, Vector3(w, h, 0.05), Vector3(0, h / 2.0, d + 0.2), Color(0.3, 0.6, 1.0), true, 0.6, 0.06)
+	_box(room, Vector3(w, 0.6, 1.0), Vector3(0, h - 0.3, d), TRIM, false)
+	_box(room, Vector3(w, 0.3, 1.0), Vector3(0, 0.15, d), TRIM)
+	_box(room, Vector3(w - 1.0, 0.05, 0.05), Vector3(0, h - 0.65, d - 0.5), CYAN, false, 3.0)
+	# A walkway down the middle, lit, with benches and crates either side.
+	_box(room, Vector3(6.0, 0.02, d - 4.0), Vector3(0, 0.012, d / 2.0 + 1.0), Color(0.2, 0.3, 0.34), false, 0.2)
+	for x in [-3.0, 3.0]:
+		_box(room, Vector3(0.1, 0.025, d - 4.0), Vector3(x, 0.016, d / 2.0 + 1.0), CYAN, false, 2.0)
+	for z in [14.0, 26.0, 38.0]:
+		_bench(room, Vector3(-6.5, 0, z), Vector3.RIGHT, 3.0)
+		_bench(room, Vector3(6.5, 0, z), Vector3.LEFT, 3.0)
+	_crate(room, Vector3(1.6, 1.2, 1.2), Vector3(-8.0, 0, 20.0), "CARGO")
+	_crate(room, Vector3(1.4, 1.0, 1.2), Vector3(8.2, 0, 32.0))
+	_planter(room, Vector3(-8.0, 0, 31.5))
+	_planter(room, Vector3(8.0, 0, 19.5))
+	_sign(room, "CARRIER BERTHS · 01-32", Vector3(0, 6.0, 0.5), Vector3.BACK, 80)
+	_sign(room, "PRESSURIZED", Vector3(-6.5, 5.2, 0.5), Vector3.BACK, 44, Color(0.4, 1.0, 0.55))
+	_boards.berths = _screen(room, Vector3(-w / 2.0 + 0.3, 4.8, 9.0), Vector3.RIGHT, Vector2(7.0, 3.2), "BERTH ASSIGNMENTS", "", 70, 40)
+	_gate_console = _console(room, Vector3(-w / 2.0 + 1.2, 0, 3.0), Vector3.RIGHT, "DOCK CONTROL", "Berth ring: holding
+Clamps: secure", 2.2)
+	_use(room, Vector3(-w / 2.0 + 1.9, 1.0, 3.0), _page_prompt, _next_gate_page)
+	for s in [-1, 1]:
+		for z in GATE_Z:
+			_gate(room, s, z)
+	for x in [-10.0, 10.0]:
+		for z in [12.0, 24.0, 36.0]:
+			_box(room, Vector3(2.4, 0.04, 0.3), Vector3(x, h - 0.02, z), Color(0.95, 0.97, 1.0), false, 2.0)
+		_light(room, Vector3(x, h - 1, 18), Color(0.85, 0.92, 1.0), 1.3, 20.0)
+		_light(room, Vector3(x, h - 1, 34), Color(0.85, 0.92, 1.0), 1.2, 20.0)
+	_refresh_gates()
+
+
+## One airlock gate on a side wall (`side` -1 port, 1 starboard): a frame, a door that lights up
+## when a carrier is clamped behind it, and a sign over it saying whose it is.
+func _gate(room: Node3D, side: int, z: float) -> void:
+	var g := Node3D.new()
+	var x := side * 18.8
+	g.position = Vector3(x, 0, z)
+	g.basis = _facing_basis(Vector3(-side, 0, 0))
+	room.add_child(g)
+	for s in [-1, 1]:
+		_box(g, Vector3(0.45, 3.8, 0.5), Vector3(s * 1.75, 1.9, 0.0), TRIM, false)
+		_box(g, Vector3(0.06, 3.4, 0.06), Vector3(s * 1.5, 1.8, 0.27), HAZARD, false, 2.0)
+	_box(g, Vector3(4.0, 0.45, 0.5), Vector3(0, 3.95, 0), TRIM, false)
+	var panel := _box(g, Vector3(3.0, 3.4, 0.08), Vector3(0, 1.7, -0.05), Color(0.12, 0.13, 0.15), false)
+	_box(g, Vector3(3.0, 0.05, 0.1), Vector3(0, 1.7, 0.0), Color(0.05, 0.05, 0.06), false)
+	var plate := Node3D.new()
+	plate.position = Vector3(0, 4.85, 0.1)
+	g.add_child(plate)
+	_box(plate, Vector3(3.8, 1.1, 0.1), Vector3(0, 0, -0.05), Color(0.16, 0.18, 0.2), false)
+	var title := _text(plate, "", Vector3(0, 0.22, 0.02), Vector3.BACK, 56, SCREEN_TEXT)
+	var body := _text(plate, "", Vector3(0, -0.22, 0.02), Vector3.BACK, 34, SCREEN_TEXT)
+	var spot := Marker3D.new()
+	spot.position = Vector3(0, 0.05, 1.6)
+	g.add_child(spot) # +Z: facing out into the hall
+	var gate := {"root": g, "title": title, "body": body, "panel": panel, "side": side, "z": z, "target": "", "name": "", "spot": spot}
+	_gates.append(gate)
+	_use(g, Vector3(0, 1.0, 0.9), _gate_prompt.bind(gate), _through_gate.bind(gate))
+
+
+## Who's behind each gate: your carrier first (or the shuttle to it when it's berthed elsewhere),
+## then the carriers docked in your copy, by berth: one page of them (DOCK CONTROL turns it).
+func _refresh_gates() -> void:
+	var docked: Array = gates_provider.call() if gates_provider.is_valid() else []
+	docked = docked.filter(func(c): return c.name != Net.my_name)
+	docked.sort_custom(func(a, b): return int(a.pad) < int(b.pad))
+	var per := maxi(1, _gates.size() - 1)
+	_gate_pages = maxi(1, ceili(docked.size() / float(per)))
+	if _gate_page < 0:
+		var came := docked.map(func(c): return c.name).find(arrive_from)
+		_gate_page = floori(came / float(per)) if came >= 0 else 0
+	_gate_page %= _gate_pages
+	if _gate_console:
+		var first := _gate_page * per
+		_gate_console.text = "Gates: %d of %d carriers\nPage %d of %d · %s: next" % [mini(per, docked.size() - first), docked.size(), _gate_page + 1, _gate_pages, _key()] if _gate_pages > 1 else "Berth ring: holding\nClamps: secure"
+	docked = docked.slice(_gate_page * per)
+	var mine_here: bool = berth.get("station", "") == planet_id
+	var lines := []
+	for i in _gates.size():
+		var g: Dictionary = _gates[i]
+		var panel: MeshInstance3D = (g.panel as StaticBody3D).get_child(1) if g.panel is StaticBody3D else g.panel
+		if i == 0:
+			g.target = "ship:" + Net.my_name
+			g.name = Net.my_name
+			g.title.text = "BERTH %02d" % int(berth.pad) if mine_here else "SHUTTLE"
+			g.body.text = "YOUR CARRIER" if mine_here else "TO YOUR CARRIER"
+			g.title.modulate = Color(0.45, 1.0, 0.6)
+			panel.mesh.material = _mat(Color(0.25, 0.75, 0.5), 0.8)
+		elif i - 1 < docked.size():
+			var c: Dictionary = docked[i - 1]
+			g.target = "ship:" + str(c.name)
+			g.name = str(c.name)
+			g.title.text = "BERTH %02d" % int(c.pad)
+			g.body.text = "BOARD %s'S CARRIER" % str(c.name).to_upper()
+			g.title.modulate = SCREEN_TEXT
+			panel.mesh.material = _mat(Color(0.25, 0.6, 0.75), 0.6)
+		else:
+			g.target = ""
+			g.name = ""
+			g.title.text = "BERTH --"
+			g.body.text = "NO CARRIER"
+			g.title.modulate = Color(0.6, 0.62, 0.65)
+			panel.mesh.material = _mat(Color(0.12, 0.13, 0.15))
+		if g.target != "":
+			lines.append("%s  %s" % [g.title.text, g.body.text])
+		if g.name == (arrive_from if arrive_from != "" else Net.my_name):
+			_arrival = g.spot
+	if _boards.has("berths"):
+		_boards.berths.text = "\n".join(lines.slice(0, 7)) if not lines.is_empty() else "No carriers docked in this copy."
+	if _arrival == null and not _gates.is_empty():
+		_arrival = _gates[0].spot
+
+
+func _page_prompt() -> String:
+	if _gate_pages <= 1:
+		return "Dock Control: every carrier docked in this copy has a gate"
+	return "Press %s to show the next carriers' gates (page %d of %d)" % [_key(), _gate_page + 1, _gate_pages]
+
+
+func _next_gate_page() -> void:
+	if _gate_pages <= 1:
+		return
+	_gate_page = (_gate_page + 1) % _gate_pages
+	_refresh_gates()
+	_say("The boarding gates now show page %d of %d." % [_gate_page + 1, _gate_pages], 3.0)
+
+
+func _gate_prompt(g: Dictionary) -> String:
+	if g.target == "":
+		return "Nobody's carrier is clamped behind this gate"
+	if g.name == Net.my_name:
+		return "Your carrier's airlock: walk through (or press %s) to go aboard" % _key()
+	return "Press %s (or walk through) to board %s's carrier" % [_key(), g.name]
+
+
+func _through_gate(g: Dictionary) -> void:
+	if g.target != "" and _gate_wait <= 0.0:
+		_gate_wait = 2.5
+		wants_space.emit(g.target)
+
+
+## Walking into a gate's doorway takes you through it.
+func _check_gates(delta: float) -> void:
+	_gate_wait -= delta
+	_gate_time -= delta
+	if _gate_time <= 0.0:
+		_gate_time = 1.5
+		_refresh_gates()
+	if seated or _gate_wait > 0.0 or not _rooms.has(0):
+		return
+	var p: Vector3 = _rooms[0].to_local(_player.global_position)
+	for g in _gates:
+		if g.target != "" and absf(p.x) > 18.2 and signf(p.x) == g.side and absf(p.z - g.z) < 1.3:
+			_through_gate(g)
+			return
+
+
+func _leave_hint() -> String:
+	if carrier_mode:
+		return "To leave, walk back through your carrier's airlock gate in the Carrier Berths."
+	return super()
 
 
 func _build_services(room: Node3D, w: float, d: float, h: float) -> void:
@@ -779,6 +970,8 @@ func view(slot: int, at: Vector3, look: Vector3) -> void:
 func _tick(delta: float) -> void:
 	if _globe:
 		_globe.rotate_y(0.12 * delta)
+	if carrier_mode:
+		_check_gates(delta)
 	_price_time -= delta
 	if _price_time <= 0.0:
 		_price_time = 2.0
@@ -788,6 +981,10 @@ func _tick(delta: float) -> void:
 ## Which compartment the player is in, from where they stand on the station's plan.
 func _location() -> String:
 	var p := _player.global_position
+	if _rooms.has(0):
+		var h: Vector3 = _rooms[0].to_local(p)
+		if h.z > 0.0 and h.z < ROOMS[0][2] and absf(h.x) < ROOMS[0][1] / 2.0:
+			return "Carrier Berths" if carrier_mode else ROOMS[0][0]
 	var r := Vector2(p.x, p.z).length()
 	if r < R_IN:
 		return "Planetary Terminal Hall"

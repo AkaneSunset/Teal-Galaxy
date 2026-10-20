@@ -9,6 +9,8 @@ extends Control
 ## neighbours, the capital sector ringed, outposts as small squares. Click a sector for its
 ## details. On a demo server (the catalog's `demo`), a sector your side can take has a
 ## "Take sector (demo)" button, which sends `demo_capture`.
+## On a server with sector battles (game/battle/ in the build), "Sector Battles" opens that screen
+## for the planet shown (`wants_battles`): attack a sector or join a battle running there.
 ## For the galaxy's admins (Net.admin) it has two more things: "Take for Coma" on sectors the Coma
 ## Conglomerate can take (`admin_capture`, every rule applies), and the Coma director page
 ## (director_panel.gd), swapped in for the sectors with the buttons at the top.
@@ -18,6 +20,7 @@ const DirectorPanel := preload("res://director_panel.gd")
 
 signal closed
 signal wants_faction # the pilot has no side yet and asked to pick one
+signal wants_battles(planet_id: String) # the Sector Battles screen for this planet
 
 var colour := Color(0.35, 0.95, 0.88)
 var planet_id := "cinder"
@@ -43,6 +46,7 @@ var _status: Label
 var _taking := "" # the sector a demo capture was sent for, until the state shows it taken
 var _taking_for := "" # and for which faction
 var _take_coma: Button
+var _battles: Button
 var _fleets: Label
 var _pages: HBoxContainer # admins: Sectors | Coma director
 var _sectors_page: Button
@@ -177,6 +181,11 @@ func _ready() -> void:
 	_take.text = "Take sector (demo)"
 	_take.pressed.connect(_take_sector)
 	takes.add_child(_take)
+	_battles = Button.new()
+	_battles.text = "Sector Battles"
+	_battles.tooltip_text = "Attack a sector from a carrier in this orbit, or join a battle running here"
+	_battles.pressed.connect(func(): wants_battles.emit(planet_id))
+	takes.add_child(_battles)
 	_take_coma = Button.new()
 	_take_coma.text = "Take for Coma"
 	_take_coma.add_theme_color_override("font_color", WarInfo.faction_color("coma").lightened(0.3))
@@ -293,6 +302,7 @@ func _refresh_info(wp: Dictionary) -> void:
 	var sec := WarInfo.sector(wp, _selected)
 	_take.visible = false
 	_take_coma.visible = false
+	_battles.visible = ResourceLoader.exists("res://battle/battle_menu.gd") and not wp.is_empty()
 	if sec.is_empty():
 		_info.text = "Click a sector for its details. Drag the globe to turn it."
 		return
@@ -316,7 +326,7 @@ func _refresh_info(wp: Dictionary) -> void:
 		if why != "" and (mine == "" or sec.owner != mine):
 			lines.append("Can't take it: " + why)
 	elif not Net.admin:
-		lines.append("Sectors change hands in sector battles, which are coming. A demo server lets pilots take them here by hand.")
+		lines.append("Sectors change hands in sector battles: Sector Battles, from a carrier in this planet's orbit.")
 	if Net.admin and not (Net.catalog.get("demo", false) and mine == "coma"):
 		# An admin plays the Coma Conglomerate by hand: every rule of a capture applies.
 		var why := WarInfo.take_problem("coma", wp, sec)

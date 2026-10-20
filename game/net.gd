@@ -10,6 +10,8 @@ signal server_error(reason: String)
 signal connection_changed(online: bool)
 ## Raid events for the raider: begin, container, reveal, inventory, heat, extracting, end, ...
 signal raid_event(msg: Dictionary)
+## Every message from the server, after the handling below (battles, walkers, docking...).
+signal message(msg: Dictionary)
 
 var state: Dictionary = {}
 ## Items, facilities and security tiers, from the server.
@@ -185,6 +187,7 @@ func _handle(msg: Dictionary) -> void:
 				_welcomed = false
 				refused = reason
 			server_error.emit(msg.reason)
+	message.emit(msg)
 
 
 ## True when any planet in the system (or just `planet_id`) has a building of this type.

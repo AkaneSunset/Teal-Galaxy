@@ -13,6 +13,18 @@ extends Node3D
 ## The ship always sits at the scene origin and the system is drawn around it (a floating
 ## origin), because positions out here are far too large for 32-bit coordinates.
 ## See controls.gd for the bindings; Esc opens settings to change them.
+##
+## The fleet carrier (DEMO: the server's catalog says `carrier`): every pilot flies a 260 m carrier
+## instead of the small ship. Leave seat (G) holds it still and walks you around inside it
+## (carrier.gd), with space drawn around it through the windows: everything in space hangs off
+## `_space`, which is turned to the ship while you're aboard so the interior can stay level.
+## Docking is automated: ask for a berth (dock_request), and on dock_granted the carrier flies itself
+## to its numbered berth on the station's berth ring, where the clamps take it. Aboard, the airlock
+## leads into the station, where every carrier docked in your copy has a boarding door.
+## Shared spaces (server/spaces.js): `_sync_space()` keeps the server told which space you're in
+## (your carrier, someone else's, a station's copy, a base), and walkers.gd shows who else is there.
+## Sector battles (game/battle/): while its RTS view is up (BattleView.active) everything here is
+## hidden and ignores input; when it closes, the view and the controls come back.
 
 const System := preload("res://teal_prime.gd")
 const Flight := preload("res://flight.gd")
@@ -29,6 +41,8 @@ const WarInfo := preload("res://war_info.gd")
 const FactionPicker := preload("res://faction_picker.gd")
 const WarPanel := preload("res://war_panel.gd")
 const TradePanel := preload("res://trade_panel.gd")
+const Carrier := preload("res://carrier.gd")
+const Place := preload("res://place.gd")
 
 const SEND_EVERY := 0.1
 const MINE_EVERY := 0.4
@@ -46,6 +60,14 @@ const LOCAL_RANGE := 150_000.0 # local objects further than this aren't drawn
 const ARRIVE_DISTANCE := 1_000.0
 const PLANET_FLOOR := 80_000.0 # landing isn't in yet; ships are held this high
 const SHIP_RADIUS := 6.0
+const CARRIER_RADIUS := 60.0
+const CARRIER_DOCK_RANGE := 4_000.0 # metres from a station to ask for a berth
+const CARRIER_DOCK_SPEED := 150.0
+const OVER_RANGE := 30_000.0 # within this of a contested world's orbital station, you're over it
+const BERTHS := 32 # one copy of a station holds this many ships (server/spaces.js PADS)
+const BERTH_RING := 780.0 # metres from a station's axis to a berthed carrier's middle
+const BERTH_TIER := 80.0 # berths 1-16 above the station's ring, 17-32 below
+const CHAIR_POSE := {"pos": [0.0, 0.45, -55.1], "yaw": 0.0, "anim": "sit"} # the pilot's chair, in carrier.gd
 const WAYPOINTS_PATH := "user://waypoints.cfg"
 
 var flight := Flight.new()
@@ -77,6 +99,26 @@ var _world_env: WorldEnvironment
 var _sky_layer: CanvasLayer
 var _hud_layer: CanvasLayer
 var _route: Array = []
+var _space: Node3D # everything out in space: stations, the field, dust, the sun, other ships
+var _cockpit: Node3D # the pilot's seat: dash, struts and monitors around the camera
+var _hull: Node3D # your fleet carrier, seen from its bridge (the demo's ship)
+var _hull_side := "-" # the faction it's painted for
+var _chase: Camera3D # the outside view (V), and the docking approach
+var _outside := false
+var _carrier := false # flying a fleet carrier (Net.catalog.carrier, the demo)
+var _berth := {} # the pad the server gave us: {"station", "copy", "pad"}, "local" when it didn't answer
+var _dock_wait := "" # the station we asked to dock at, waiting for dock_granted
+var _dock_wait_time := 0.0
+var _approach := {} # the automated docking approach while it flies: {"station", "t", "legs"}
+var _hold_rate := 0.0 # m/s² the carrier sheds its speed at while you're out of the chair
+var _space_id := "" # the shared space the server has us in ("ship:Akane", "station:cinder", ...)
+var _boarding := "" # whose carrier we asked to board, until the server answers
+var _boarding_time := 0.0
+var _crew := {} # aboard someone else's carrier: {"owner", "pos", "basis"} (your own ship's, to go back to)
+var _at_station := "" # the station you're walking in, off a carrier (maybe not where yours is docked), or ""
+var _battle := false # a sector battle's RTS view is up
+var _battle_env: Array = [] # [node, parent] of world environments taken out for it
+var _seat_button: Button
 
 var _hud: Control
 var _info: Label
@@ -104,6 +146,9 @@ func _ready() -> void:
 	controls = Controls.new()
 	add_child(controls)
 	flight.drift = controls.drift_default
+	_space = Node3D.new()
+	_space.name = "Space"
+	add_child(_space)
 	_build_sky()
 	_build_local_space()
 	_build_ship()
@@ -119,6 +164,7 @@ func _ready() -> void:
 			_say("Server: " + reason))
 	Net.connection_changed.connect(func(_on): _refresh_refusal())
 	Net.raid_event.connect(_on_raid_event)
+	Net.message.connect(_on_net_message)
 	controls.capture_mouse()
 
 
@@ -153,7 +199,8 @@ func _build_sky() -> void:
 
 	_sun = DirectionalLight3D.new()
 	_sun.light_energy = 1.2
-	add_child(_sun)
+	_sun.directional_shadow_max_distance = 160.0
+	_space.add_child(_sun)
 
 
 func _build_local_space() -> void:
@@ -173,7 +220,7 @@ func _build_local_space() -> void:
 	field_beacon.scale = Vector3.ONE * 4.0
 	field_beacon.position = Vector3(0, -30, 0)
 	_field.add_child(field_beacon)
-	add_child(_field)
+	_space.add_child(_field)
 
 	# Dust drifting past the canopy, so speed can be felt with nothing else nearby.
 	var mm := MultiMesh.new()
@@ -192,7 +239,7 @@ func _build_local_space() -> void:
 		_dust_points.append(Vector3(rng.randf_range(-200, 200), rng.randf_range(-200, 200), rng.randf_range(-200, 200)))
 	_dust = MultiMeshInstance3D.new()
 	_dust.multimesh = mm
-	add_child(_dust)
+	_space.add_child(_dust)
 
 
 ## A High Port: the orbital station over a Builder planet, where pilots dock to go down to the surface.
@@ -232,9 +279,82 @@ func _add_station(planet_id: String, station_name: String, pos: Array, orbital :
 	tag.pixel_size = 0.0006
 	tag.font_size = 48
 	tag.no_depth_test = true
+	tag.name = "Tag"
 	port.add_child(tag)
-	add_child(port)
+	_space.add_child(port)
 	_stations[planet_id] = {"node": port, "pos": pos, "name": station_name, "planet": planet_id, "orbital": orbital}
+	if _carrier:
+		_add_berths(port)
+
+
+## The berth ring round a station, for fleet carriers: 32 docking arms reaching out from its ring,
+## 16 above it and 16 below, each ending in a numbered clamp cradle a carrier lies alongside.
+func _add_berths(port: Node3D) -> void:
+	if port.has_node("Berths"):
+		return
+	var ring := Node3D.new()
+	ring.name = "Berths"
+	port.add_child(ring)
+	for tier in 2:
+		var y := BERTH_TIER if tier == 0 else -BERTH_TIER
+		var torus := _mesh(TorusMesh.new(), Color(0.45, 0.48, 0.52))
+		torus.mesh.inner_radius = BERTH_RING - 52.0
+		torus.mesh.outer_radius = BERTH_RING - 44.0
+		torus.mesh.rings = 96
+		torus.position.y = y
+		ring.add_child(torus)
+	for pad in range(1, BERTHS + 1):
+		var b := _berth_frame(pad)
+		var out: Vector3 = b.out
+		var arm_from := 280.0
+		var arm_to := BERTH_RING - 40.0
+		var arm := _mesh(BoxMesh.new(), Color(0.5, 0.52, 0.56))
+		arm.mesh.size = Vector3(arm_to - arm_from, 8, 8)
+		arm.position = out * (arm_from + arm_to) / 2.0 + Vector3(0, b.hull.y, 0)
+		arm.rotation.y = -atan2(out.z, out.x)
+		ring.add_child(arm)
+		var strut := _mesh(BoxMesh.new(), Color(0.4, 0.42, 0.46))
+		strut.mesh.size = Vector3(10, absf(b.hull.y) + 4.0, 10)
+		strut.position = out * arm_from + Vector3(0, b.hull.y / 2.0, 0)
+		ring.add_child(strut)
+		# The cradle: a collar where the arm meets the carrier's port airlock, with lights.
+		var cradle := _mesh(BoxMesh.new(), Color(0.32, 0.34, 0.38))
+		cradle.mesh.size = Vector3(6, 22, 40)
+		cradle.position = b.hull + out * -40.0 + Vector3(0, -2, 0)
+		cradle.basis = b.basis
+		ring.add_child(cradle)
+		var lamp := _mesh(BoxMesh.new(), Color(1.0, 0.6, 0.2), true)
+		lamp.mesh.size = Vector3(6.4, 1.6, 42)
+		lamp.position = cradle.position + Vector3(0, 11.5, 0)
+		lamp.basis = b.basis
+		ring.add_child(lamp)
+		var tag := Label3D.new()
+		tag.text = "%02d" % pad
+		tag.position = b.hull + out * -40.0 + Vector3(0, 34 if b.hull.y > 0 else -30, 0)
+		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		tag.pixel_size = 0.25
+		tag.font_size = 64
+		tag.outline_size = 8
+		tag.modulate = Color(1.0, 0.75, 0.35)
+		ring.add_child(tag)
+
+
+## A berth's place round its station: {"hull": the carrier's middle from the station, "basis": how
+## it lies (port side to the station, bow round the ring), "out": straight out from the station}.
+func _berth_frame(pad: int) -> Dictionary:
+	var tier := 0 if pad <= 16 else 1
+	var a := deg_to_rad(((pad - 1) % 16) * 22.5 + tier * 11.25)
+	var out := Vector3(cos(a), 0, sin(a))
+	var hull := out * BERTH_RING + Vector3(0, BERTH_TIER if tier == 0 else -BERTH_TIER, 0)
+	return {"hull": hull, "basis": Basis(out, Vector3.UP, out.cross(Vector3.UP)), "out": out}
+
+
+## Where a carrier berthed at `pad` has its bridge (its position in space), 64-bit.
+func _berth_pos(station_id: String, pad: int) -> Array:
+	var b := _berth_frame(pad)
+	var hull: Vector3 = b.hull
+	var basis: Basis = b.basis
+	return System.offset(_stations[station_id].pos, hull + basis * Models.CARRIER_BRIDGE)
 
 
 ## Every Builder home planet gets a High Port; planets beyond Aster are added to the sky as they appear.
@@ -279,13 +399,20 @@ func _build_ship() -> void:
 	_camera.fov = 75
 	_ship.add_child(_camera)
 	_camera.make_current()
+	_chase = Camera3D.new()
+	_chase.near = 0.5
+	_chase.far = LOCAL_RANGE
+	_chase.fov = 60
+	_ship.add_child(_chase)
+	_cockpit = Node3D.new()
+	_ship.add_child(_cockpit)
 
 	var frame := Color(0.12, 0.13, 0.15)
 	var dash := _mesh(BoxMesh.new(), frame)
 	dash.mesh.size = Vector3(1.7, 0.4, 0.55)
 	dash.position = Vector3(0, -0.72, -0.95)
 	dash.rotation_degrees.x = -18
-	_ship.add_child(dash)
+	_cockpit.add_child(dash)
 	_accent = StandardMaterial3D.new()
 	_accent.emission_enabled = true
 	_accent.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -301,11 +428,11 @@ func _build_ship() -> void:
 		strut.mesh.size = Vector3(0.06, 1.6, 0.06)
 		strut.position = Vector3(0.95 * side, 0.05, -1.0)
 		strut.rotation_degrees.z = -14 * side
-		_ship.add_child(strut)
+		_cockpit.add_child(strut)
 	var top := _mesh(BoxMesh.new(), frame)
 	top.mesh.size = Vector3(1.8, 0.06, 0.06)
 	top.position = Vector3(0, 0.82, -1.05)
-	_ship.add_child(top)
+	_cockpit.add_child(top)
 
 	# Two dashboard monitors: ship systems on the left, navigation on the right.
 	for x in [-0.4, 0.4]:
@@ -313,7 +440,7 @@ func _build_ship() -> void:
 		panel.mesh.size = Vector2(0.62, 0.2)
 		panel.position = Vector3(x, -0.43, -0.74)
 		panel.rotation_degrees.x = -32
-		_ship.add_child(panel)
+		_cockpit.add_child(panel)
 		var screen := Label3D.new()
 		screen.position = Vector3(0, 0, 0.002)
 		screen.pixel_size = 0.0007
@@ -324,6 +451,61 @@ func _build_ship() -> void:
 		screen.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		panel.add_child(screen)
 		_cockpit_screens.append(screen)
+	_place_chase()
+
+
+## The outside view's camera: behind and above the ship, looking along it.
+func _place_chase() -> void:
+	var centre := -Models.CARRIER_BRIDGE if _carrier else Vector3.ZERO
+	var back := Vector3(150, 95, 380) if _carrier else Vector3(0, 6, 24)
+	_chase.position = centre + back
+	_chase.look_at_from_position(_chase.position, centre + Vector3(0, 0, -60 if _carrier else -6), Vector3.UP)
+
+
+func _set_outside(on: bool) -> void:
+	_outside = on
+	(_chase if on else _camera).make_current()
+
+
+## The demo's fleet carrier, once the server says pilots fly one: the heavier flight model, the
+## hull under the bridge, the berth rings round the stations, and other pilots drawn as carriers.
+func _apply_ship_class() -> void:
+	if Net.catalog.get("carrier", false) != true:
+		return
+	if not _carrier:
+		_carrier = true
+		flight.stats = Flight.CARRIER
+		for id in _stations:
+			_add_berths(_stations[id].node)
+		for id in _others:
+			_set_other_model(_others[id])
+		_place_chase()
+	var side := WarInfo.my_faction()
+	if side != _hull_side:
+		_hull_side = side
+		if _hull:
+			_hull.queue_free()
+		_hull = Models.fleet_carrier(WarInfo.faction_color(side) if side != "" else Models.TEAL)
+		_hull.position = -Models.CARRIER_BRIDGE
+		_ship.add_child(_hull)
+
+
+## Another pilot's ship model: a carrier (drawn so the node is at its bridge) or the small ship.
+func _set_other_model(o: Dictionary) -> void:
+	var node: Node3D = o.node
+	for child in node.get_children():
+		if child.name != "Tag":
+			child.queue_free()
+	var tag: Label3D = node.get_node("Tag")
+	if _carrier:
+		var side = Net.state.get("pilots", {}).get(o.name, {}).get("faction") if not Net.state.is_empty() else null
+		var hull := Models.fleet_carrier(WarInfo.faction_color(side) if side != null else Models.TEAL)
+		hull.position = -Models.CARRIER_BRIDGE
+		node.add_child(hull)
+		tag.position = Vector3(0, 60, 0)
+	else:
+		node.add_child(Models.starter_ship())
+		tag.position = Vector3(0, 10, 0)
 
 
 func _build_hud() -> void:
@@ -367,6 +549,15 @@ func _build_hud() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_hint.modulate = Color(1, 1, 1, 0.6)
 	_hud.add_child(_hint)
+	_seat_button = Button.new()
+	_seat_button.text = "Leave seat (G)"
+	_seat_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_seat_button.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_seat_button.position += Vector2(-16, 48)
+	_seat_button.visible = false
+	_seat_button.focus_mode = Control.FOCUS_NONE
+	_seat_button.pressed.connect(_leave_helm)
+	_hud.add_child(_seat_button)
 
 	_chat = ChatBox.new()
 	_chat.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -398,6 +589,7 @@ func _build_hud() -> void:
 	war_layer.add_child(_war_panel)
 	_war_panel.closed.connect(_close_panel)
 	_war_panel.wants_faction.connect(_show_picker)
+	_war_panel.wants_battles.connect(_open_battles)
 	_trade = TradePanel.new()
 	_trade.visible = false
 	war_layer.add_child(_trade)
@@ -420,6 +612,8 @@ func _build_hud() -> void:
 # --- Input -------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _battle:
+		return
 	if _panel_open() and (event.is_action_pressed("menu") or event.is_action_pressed("ui_cancel")):
 		if _picker.visible:
 			_picker_dismissed = true
@@ -472,6 +666,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		flight.add_pip(Flight.WEP)
 	elif event.is_action_pressed("pip_reset"):
 		flight.reset_pips()
+	elif event.is_action_pressed("leave_seat"):
+		_leave_helm()
+	elif event.is_action_pressed("outside_view") and _approach.is_empty():
+		_set_outside(not _outside)
 
 
 func _refresh_focus() -> void:
@@ -488,19 +686,32 @@ func _refresh_focus() -> void:
 # --- Flying ------------------------------------------------------------------
 
 func _process(delta: float) -> void:
-	if _raid or _station:
+	_check_battle()
+	_sync_space(delta)
+	if _battle:
+		_send_ship(delta)
+		return
+	if _raid:
+		return
+	if _station is Carrier:
+		_aboard(delta)
+		return
+	if _station:
 		return
 	if controls.drift_hold and controls.enabled:
 		flight.drift = Input.is_action_pressed("drift")
-	var input: Dictionary = controls.read()
+	var input: Dictionary = controls.read() if _approach.is_empty() else {}
 	if _docked != "":
 		flight.velocity = Vector3.ZERO
 		flight.throttle = 0.0
-	for said in flight.step(input, _flight_env(), delta):
-		_say(said)
-	_pos = System.offset(_pos, flight.velocity * delta)
+	if _approach.is_empty():
+		for said in flight.step(input, _flight_env(), delta):
+			_say(said)
+		_pos = System.offset(_pos, flight.velocity * delta)
+		_collide()
+	else:
+		_approach_step(delta)
 	_ship.basis = flight.basis
-	_collide()
 	if flight.hull <= 0.0:
 		_respawn()
 
@@ -510,15 +721,17 @@ func _process(delta: float) -> void:
 		if _others.has(pilot_id):
 			stop.pos = _others[pilot_id].shown
 	_check_arrival()
-
-	_send_timer -= delta
-	if _send_timer <= 0 and Net.refused == "": # a pilot the server turned away has nobody to tell
-		_send_timer = SEND_EVERY
-		var r := flight.basis.get_euler()
-		Net.send({"type": "ship", "pos": _pos, "rot": [r.x, r.y, r.z]})
+	_send_ship(delta)
 
 	_mine_timer -= delta
-	if _docked == "":
+	if _dock_wait != "":
+		_dock_wait_time -= delta
+		_prompt.text = "Asked %s for a berth..." % _stations[_dock_wait].name
+		if _dock_wait_time <= 0.0:
+			_berth_anyway(_dock_wait)
+	elif not _approach.is_empty():
+		_prompt.text = _approach_text()
+	elif _docked == "":
 		_interact()
 	else:
 		_prompt.text = ""
@@ -527,6 +740,35 @@ func _process(delta: float) -> void:
 		_nav_timer = 0.25
 		_nav.refresh(_nav_items(), _pos, flight.forward())
 	_update_hud(delta)
+
+
+## Tells the others where your ship is (and the contested world it's over, for sector battles).
+## Aboard someone else's carrier, yours is where you left it, clamped at its berth.
+func _send_ship(delta: float) -> void:
+	_send_timer -= delta
+	if _send_timer > 0.0 or Net.refused != "": # a pilot the server turned away has nobody to tell
+		return
+	var crew := not _crew.is_empty()
+	var still := crew or _station != null or _battle or (_docked != "" and _approach.is_empty())
+	_send_timer = SEND_EVERY * (5.0 if still else 1.0)
+	var r: Vector3 = (_crew.basis if crew else flight.basis).get_euler()
+	var msg := {"type": "ship", "pos": _crew.pos if crew else _pos, "rot": [r.x, r.y, r.z]}
+	var over := _over_planet()
+	if crew:
+		over = _docked if not WarInfo.planet(_docked).is_empty() else ""
+	if over != "":
+		msg.over = over
+	Net.send(msg)
+
+
+## The contested world whose orbit you're in: docked at its orbital station, or within 30 km of it.
+func _over_planet() -> String:
+	if _docked != "" and not WarInfo.planet(_docked).is_empty():
+		return _docked
+	for id in _stations:
+		if _stations[id].orbital and System.distance(_stations[id].pos, _pos) < OVER_RANGE:
+			return id
+	return ""
 
 
 func _flight_env() -> Dictionary:
@@ -540,7 +782,13 @@ func _flight_env() -> Dictionary:
 	}
 
 
-func _place_world(delta: float) -> void:
+## Draws space around the ship. `view` is how the ship lies (flying: nothing to undo, since the
+## ship turns; aboard: space is turned the other way, so the interior stays level) and `cam` is the
+## camera looking out, for the sky.
+func _place_world(delta: float, view := Basis(), cam: Camera3D = null) -> void:
+	if cam == null:
+		cam = _chase if _outside else _camera
+	_space.basis = view.inverse()
 	for id in _stations:
 		var port: Node3D = _stations[id].node
 		port.position = System.diff(_stations[id].pos, _pos)
@@ -554,11 +802,16 @@ func _place_world(delta: float) -> void:
 		var t := minf(1.0, delta * 10.0)
 		o.shown = [lerpf(o.shown[0], o.pos[0], t), lerpf(o.shown[1], o.pos[1], t), lerpf(o.shown[2], o.pos[2], t)]
 		o.node.position = System.diff(o.shown, _pos)
-		o.node.visible = o.node.position.length() < LOCAL_RANGE
+		# Carriers berthed in another copy of the station you're docked at lie where others of
+		# your copy do: only your copy's are drawn.
+		var elsewhere: bool = _docked != "" and not o.get("berth", {}).is_empty() and str(o.berth.get("station", "")) == _docked and int(o.berth.get("copy", 1)) != int(_berth.get("copy", 1))
+		o.node.visible = o.node.position.length() < LOCAL_RANGE and o.name != _crew.get("owner", "") and not elsewhere
 
 	var to_star := System.diff(System.STAR.pos, _pos).normalized()
 	_sun.basis = Basis.looking_at(-to_star, Vector3.UP if absf(to_star.y) < 0.99 else Vector3.RIGHT)
-	_sky.follow(_pos, _camera.global_basis)
+	_sky.follow(_pos, view * cam.global_basis)
+	if _station:
+		return # aboard: no dust or phase tint, the view's the interior's own
 
 	# Dust: hidden in the phase-shift drive, where it would only flicker.
 	var phase := flight.mode == Flight.Mode.PHASE
@@ -582,7 +835,7 @@ func _collide() -> void:
 		spheres.append([System.diff(_stations[id].pos, _pos), PORT_RADIUS])
 	for s in spheres:
 		var rel: Vector3 = s[0]
-		var reach: float = s[1] + SHIP_RADIUS
+		var reach: float = s[1] + (CARRIER_RADIUS if _carrier else SHIP_RADIUS)
 		var d := rel.length()
 		if d >= reach or d < 0.001:
 			continue
@@ -694,7 +947,15 @@ func _interact() -> void:
 			if holding and _mine_timer <= 0 and flight.draw(Flight.WEP, MINE_ENERGY):
 				_mine_timer = MINE_EVERY
 				Net.send({"type": "collect", "resource": "ice", "amount": 1})
-	elif _near_station(DOCK_RANGE) != "":
+	elif _carrier and _near_station(CARRIER_DOCK_RANGE) != "":
+		var id := _near_station(CARRIER_DOCK_RANGE)
+		if flight.speed() > CARRIER_DOCK_SPEED:
+			_prompt.text = "Slow below %d m/s to dock at %s" % [CARRIER_DOCK_SPEED, _stations[id].name]
+		else:
+			_prompt.text = "Press %s to request docking at %s: the carrier flies itself to its berth" % [controls.binding_text("interact", false), _stations[id].name]
+			if holding:
+				_request_dock(id)
+	elif not _carrier and _near_station(DOCK_RANGE) != "":
 		var id := _near_station(DOCK_RANGE)
 		if flight.speed() > DOCK_SPEED:
 			_prompt.text = "Slow below %d m/s to dock at %s" % [DOCK_SPEED, _stations[id].name]
@@ -717,11 +978,22 @@ func _near_station(range_m: float) -> String:
 # --- Docking and surface transit ----------------------------------------------------------
 
 ## Lands at a planet's High Port: the ship sets down on pad 06 in the hangar and you're in the
-## pilot's seat, with the ship's menu up.
+## pilot's seat, with the ship's menu up. The server is asked for a pad too (dock_request), which
+## puts you in that station's shared copy with the other pilots there.
+## A fleet carrier is clamped at its berth on the station's berth ring at once, with you in its
+## pilot's chair (flying in, the automated approach ends here; see _request_dock).
 func dock(planet_id: String) -> void:
 	_docked = planet_id
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
+	_approach = {}
+	if _berth.get("station", "") != planet_id:
+		_berth = {"station": planet_id, "copy": 1, "pad": _local_pad(), "local": true}
+		Net.send({"type": "dock_request", "station": planet_id})
+	if _carrier:
+		_snap_to_berth()
+		_enter_carrier(Net.my_name, "seat")
+		return
 	_land_in(Station.new(planet_id), false)
 
 
@@ -731,19 +1003,385 @@ func _land_in(place: Node3D, at_base: bool) -> void:
 	_at_spaceport = at_base
 	controls.enabled = false
 	_set_space_visible(false)
-	_station = place
-	_station.controls = controls
+	_adopt(place)
 	_station.seated_down.connect(_show_ship_menu)
-	_station.wants_menu.connect(_open_standing_menu)
-	_station.service.connect(_on_service)
 	add_child(_station)
 	_show_ship_menu()
+
+
+## Makes a place the one you're in, listening to what's used in it.
+func _adopt(place: Node3D) -> void:
+	_station = place
+	_station.controls = controls
+	_station.wants_menu.connect(_open_standing_menu)
+	_station.service.connect(_on_service)
+	_station.wants_space.connect(_go_space)
+
+
+# --- The fleet carrier: berths, the automated approach, walking aboard -----------------------
+
+## A berth number of our own for when the server gives none (an older server without pads).
+func _local_pad() -> int:
+	return absi(hash(Net.my_name)) % BERTHS + 1
+
+
+## "Berth 12, Cinder Orbital (1)": the berth and the station's copy.
+func _berth_text() -> String:
+	if _berth.is_empty() or not _stations.has(_berth.station):
+		return ""
+	return "Berth %d, %s (%d)" % [int(_berth.pad), _stations[_berth.station].name, int(_berth.copy)]
+
+
+## Near a station in a carrier: ask for a berth. The approach starts when the server grants one.
+func _request_dock(id: String) -> void:
+	if _dock_wait != "" or not _approach.is_empty():
+		return
+	if _berth.get("station", "") == id and not _berth.get("local", false):
+		_start_approach(id)
+		return
+	_dock_wait = id
+	_dock_wait_time = 4.0
+	Net.send({"type": "dock_request", "station": id})
+
+
+## No answer from the server (or a refusal): dock at a berth of our own anyway, alone.
+func _berth_anyway(id: String) -> void:
+	_dock_wait = ""
+	_berth = {"station": id, "copy": 1, "pad": _local_pad(), "local": true}
+	if _station == null:
+		_start_approach(id)
+
+
+## The automated approach to the berth, about 25 seconds in four legs: out to the approach point
+## (round the station if it's in the way), sliding in sideways to line up alongside the berth while
+## turning to lie along it, the slow final approach, and the clamps. Seen from outside; F skips it.
+func _start_approach(id: String) -> void:
+	var st: Dictionary = _stations[id]
+	var b := _berth_frame(int(_berth.pad))
+	var berth: Vector3 = b.hull
+	var lie: Basis = b.basis
+	var out: Vector3 = b.out
+	var start := System.diff(_pos, st.pos) - flight.basis * Models.CARRIER_BRIDGE
+	var line_up := berth + out * 480.0
+	var far := berth + out * 1800.0 + Vector3(0, signf(berth.y) * 160.0, 0)
+	var points := [start]
+	# Round the station rather than through it.
+	var seg := far - start
+	var t := clampf(-start.dot(seg) / maxf(seg.length_squared(), 1.0), 0.0, 1.0)
+	if (start + seg * t).length() < 700.0:
+		var side := (start + far)
+		if side.length() < 100.0:
+			side = Vector3.UP
+		points.append(side.normalized() * 2200.0)
+	points.append(far)
+	var legs := []
+	var basis := flight.basis
+	for i in range(1, points.size()):
+		var a: Vector3 = points[i - 1]
+		var z: Vector3 = points[i]
+		var dir := (z - a).normalized() if (z - a).length() > 1.0 else -basis.z
+		var facing := Basis.looking_at(dir, Vector3.UP if absf(dir.y) < 0.95 else Vector3.BACK)
+		legs.append({"from": a, "to": z, "b0": basis, "b1": facing, "time": clampf(a.distance_to(z) / 200.0, 5.0, 12.0), "stage": "Approach"})
+		basis = facing
+	legs.append({"from": far, "to": line_up, "b0": basis, "b1": lie, "time": 9.0, "stage": "Lining up"})
+	legs.append({"from": line_up, "to": berth, "b0": lie, "b1": lie, "time": 8.0, "stage": "Final approach"})
+	legs.append({"from": berth, "to": berth, "b0": lie, "b1": lie, "time": 2.5, "stage": "Clamps"})
+	_approach = {"station": id, "t": 0.0, "legs": legs}
+	controls.enabled = false
+	_set_outside(true)
+	_say("Docking granted: %s" % _berth_text())
+
+
+func _approach_step(delta: float) -> void:
+	_approach.t += delta
+	if _approach.t > 1.0 and Input.is_action_just_pressed("interact"):
+		_clamp()
+		return
+	var t: float = _approach.t
+	for leg in _approach.legs:
+		if t > leg.time:
+			t -= leg.time
+			continue
+		var u := smoothstep(0.0, 1.0, t / leg.time)
+		var hull: Vector3 = leg.from.lerp(leg.to, u)
+		var basis: Basis = leg.b0.slerp(leg.b1, u).orthonormalized()
+		var st: Dictionary = _stations[_approach.station]
+		var was := _pos
+		_pos = System.offset(st.pos, hull + basis * Models.CARRIER_BRIDGE)
+		flight.velocity = System.diff(_pos, was) / maxf(delta, 0.001)
+		flight.basis = basis
+		_approach.stage = leg.stage
+		return
+	_clamp()
+
+
+func _approach_text() -> String:
+	var left := 0.0
+	for leg in _approach.legs:
+		left += leg.time
+	return "Automated docking: %s · %s · %d s · %s to skip" % [_berth_text(), _approach.get("stage", "Approach"), ceili(left - _approach.t), controls.binding_text("interact", false)]
+
+
+## The clamps close: the carrier lies at its berth and you're in the pilot's chair.
+func _clamp() -> void:
+	var id: String = _approach.station
+	_approach = {}
+	_set_outside(false)
+	dock(id)
+	_say("Clamps engaged. %s" % _berth_text())
+	if _station:
+		_station._say("Clamps engaged. %s" % _berth_text(), 5.0)
+
+
+## Puts the carrier at its berth, stopped.
+func _snap_to_berth() -> void:
+	if _berth.is_empty() or not _stations.has(_berth.station):
+		return
+	var b := _berth_frame(int(_berth.pad))
+	_pos = _berth_pos(_berth.station, int(_berth.pad))
+	flight.basis = b.basis
+	flight.velocity = Vector3.ZERO
+	flight.throttle = 0.0
+
+
+## Leave seat (G), flying: the carrier holds still (shedding its speed over 2 s) and you're on
+## your feet on the Bridge, beside the pilot's chair.
+func _leave_helm() -> void:
+	if _station or _raid or _battle:
+		return
+	if not _carrier:
+		_say("Your ship's cabin is only the cockpit. Fleet carriers have room to walk around.")
+		return
+	if not _approach.is_empty() or _dock_wait != "":
+		return # the carrier is docking (or about to): stay at the helm
+	_hold_rate = flight.speed() / 2.0
+	flight.throttle = 0.0
+	flight.mode = Flight.Mode.SUBLIGHT
+	_enter_carrier(Net.my_name, "bridge")
+
+
+## Into a carrier's interior: your own (from the chair, the airlock, the shuttle) or someone
+## else's (once the server lets you aboard). `at` is "seat" (in the pilot's chair, docked),
+## "bridge" (standing by it) or "hangar" (just in from the airlock).
+func _enter_carrier(owner: String, at := "seat") -> void:
+	_leave_place()
+	controls.enabled = false
+	_set_outside(false)
+	_set_view("aboard")
+	var c := Carrier.new(owner, "")
+	_adopt(c)
+	c.seated_down.connect(_on_chair)
+	_update_carrier(c)
+	add_child(c)
+	if at == "seat":
+		_show_ship_menu()
+	else:
+		c.arrive(at)
+
+
+## What a carrier's interior shows: where it's docked, the berth, the planet below.
+func _update_carrier(c: Node) -> void:
+	if _crew.is_empty():
+		c.docked_at = _docked
+		c.berth_text = _berth_text() if _docked != "" else ""
+		c.over = _over_planet()
+	else:
+		var o := _other_named(_crew.owner)
+		var at: Dictionary = o.get("berth", {}) if not o.is_empty() else {}
+		if at.is_empty() and not o.is_empty():
+			at = _berth_at(o.pos)
+		c.docked_at = str(at.get("station", ""))
+		c.berth_text = ("Berth %d, %s" % [int(at.pad), _stations[at.station].name]) if _stations.has(str(at.get("station", ""))) else ""
+		c.over = str(o.get("over", "")) if not o.is_empty() else ""
+
+
+## Each frame aboard a carrier: your own holds still (or sits at its berth); someone else's goes
+## where its owner flies it, and you with it. Space is drawn turned to the ship.
+func _aboard(delta: float) -> void:
+	var view := flight.basis
+	if _crew.is_empty():
+		if _docked == "":
+			flight.velocity = flight.velocity.move_toward(Vector3.ZERO, maxf(_hold_rate, 1.0) * delta)
+			_pos = System.offset(_pos, flight.velocity * delta)
+	else:
+		var o := _other_named(_crew.owner)
+		if not o.is_empty():
+			_pos = o.shown.duplicate()
+			view = Basis.from_euler(o.get("rot", Vector3.ZERO))
+	_update_carrier(_station)
+	_place_world(delta, view, _station._camera)
+	_send_ship(delta)
+
+
+## Sitting in the pilot's chair: docked, the ship's menu; in open space, back to flying.
+func _on_chair() -> void:
+	if not _station.mine:
+		_station._say("Only %s flies this carrier." % _station.owner_name)
+		return
+	if _docked != "":
+		_station.sit()
+		_show_ship_menu()
+		return
+	_leave_place()
+	_set_view("flight")
+	_set_outside(false)
+	controls.enabled = true
+	flight.throttle = 0.0
+	_refresh_focus()
+	Net.send({"type": "walk", "pos": CHAIR_POSE.pos, "yaw": CHAIR_POSE.yaw, "anim": CHAIR_POSE.anim})
+	_say("At the helm. %s to leave your seat." % controls.binding_text("leave_seat", false))
+
+
+## A door into another shared space, from a place: your carrier's airlock into the station, a
+## boarding door onto someone's carrier, the gate back to your own, the shuttle home.
+func _go_space(space: String) -> void:
+	if space == "ship:" + Net.my_name:
+		_home_to_carrier()
+	elif space.begins_with("ship:"):
+		_board(space.substr(5))
+	elif space.begins_with("station:"):
+		_walk_into_station(space.substr(8))
+
+
+## Back aboard your own carrier, in from the airlock.
+func _home_to_carrier() -> void:
+	if not _crew.is_empty():
+		_pos = _crew.pos
+		flight.basis = _crew.basis
+		_crew = {}
+	_enter_carrier(Net.my_name, "hangar")
+
+
+## Asks to board someone's carrier; aboard when the server says yes (space_joined).
+func _board(owner: String) -> void:
+	_boarding = owner
+	_boarding_time = 5.0
+	Net.send({"type": "enter_space", "space": "ship:" + owner, "pos": [-18.6, -15.95, 8.0], "yaw": -PI / 2.0, "anim": "idle"})
+	if _station:
+		_station._say("Asking to come aboard %s's carrier..." % owner, 3.0)
+
+
+func _boarded(msg: Dictionary) -> void:
+	var owner := _boarding
+	_boarding = ""
+	_space_id = str(msg.space)
+	if _crew.is_empty():
+		_crew = {"owner": owner, "pos": _pos.duplicate(), "basis": flight.basis}
+	else:
+		_crew.owner = owner
+	_enter_carrier(owner, "hangar")
+	_station.space_id = _space_id
+	_station.walkers.on_message(msg)
+	_station._say("Aboard %s's carrier. The shuttle on the Hangar Deck takes you back to yours." % owner, 5.0)
+
+
+## Through the airlock into a station's Carrier Berth hall, arriving at the gate you came by.
+func _walk_into_station(id: String) -> void:
+	if not _stations.has(id):
+		return
+	var from := ""
+	if _station is Carrier and not _station.mine:
+		from = _station.owner_name
+	if not _crew.is_empty():
+		_pos = _crew.pos
+		flight.basis = _crew.basis
+		_crew = {}
+	_leave_place()
+	_at_station = id
+	controls.enabled = false
+	_set_view("away")
+	var st := Station.new(id)
+	st.carrier_mode = true
+	st.berth = _berth
+	st.gates_provider = _docked_carriers.bind(id)
+	st.arrive_from = from
+	_adopt(st)
+	st.seated_down.connect(func(): pass)
+	add_child(st)
+	st.stand()
+	st._say("%s · Carrier Berths. Your carrier's gate is lit green." % _stations[id].name, 4.0)
+
+
+## Every carrier berthed in your copy of a station: [{"name", "pad"}]. The server says which berth
+## each ship holds (`berth` on its `ship` messages); without that, it's read off where the ship lies.
+func _docked_carriers(station_id: String) -> Array:
+	var out := []
+	for id in _others:
+		var at: Dictionary = _others[id].get("berth", {})
+		if at.is_empty():
+			at = _berth_at(_others[id].pos)
+		elif int(at.get("copy", 1)) != int(_berth.get("copy", 1)):
+			continue # docked in another copy of the station: not beside you
+		if at.get("station", "") == station_id:
+			out.append({"name": _others[id].name, "pad": int(at.pad)})
+	return out
+
+
+## Which berth a ship at `pos` lies at, or {}: {"station", "pad"}.
+func _berth_at(pos: Array) -> Dictionary:
+	for id in _stations:
+		if System.distance(_stations[id].pos, pos) > 2_000.0:
+			continue
+		for pad in range(1, BERTHS + 1):
+			if System.distance(_berth_pos(id, pad), pos) < 40.0:
+				return {"station": id, "pad": pad}
+	return {}
+
+
+func _other_named(pilot: String) -> Dictionary:
+	for id in _others:
+		if _others[id].name == pilot:
+			return _others[id]
+	return {}
+
+
+## Keeps the server told which shared space you're in, from where you are: your carrier (flying
+## it, or aboard), someone else's, a station's copy (on foot; in a carrier station, as soon as you
+## walk in), a Builder's base on foot. Seated in a small ship at a station you're in none.
+func _sync_space(delta: float) -> void:
+	if _boarding != "":
+		_boarding_time -= delta
+		if _boarding_time <= 0.0:
+			_boarding = ""
+		return
+	var want := ""
+	if _raid:
+		want = ""
+	elif _station is Carrier:
+		want = "ship:" + _station.owner_name
+	elif _station and _station.get_script() == Station:
+		var id: String = _station.planet_id
+		if _station.carrier_mode or (not _station.seated and _berth.get("station", "") == id and not _berth.get("local", false)):
+			want = "station:" + id
+	elif _station and _station.get_script() == Surface:
+		want = "" if _station.seated else "surface:" + _station.planet_id
+	elif _station == null and _carrier and _crew.is_empty():
+		want = "ship:" + Net.my_name # at the helm of your carrier
+	if want.begins_with("ship:") and want != "ship:" + Net.my_name and want != _space_id:
+		want = _space_id # someone else's carrier only by boarding, with the server's yes
+	if want != _space_id:
+		if want == "":
+			Net.send({"type": "leave_space"})
+		else:
+			var msg := {"type": "enter_space", "space": want}
+			var pose: Dictionary = _station.walker_pose() if _station and _station.has_method("walker_pose") else {}
+			if _station == null:
+				pose = {"pos": Vector3(CHAIR_POSE.pos[0], CHAIR_POSE.pos[1], CHAIR_POSE.pos[2]), "yaw": CHAIR_POSE.yaw, "anim": CHAIR_POSE.anim}
+			if not pose.is_empty():
+				msg.pos = [pose.pos.x, pose.pos.y, pose.pos.z]
+				msg.yaw = pose.yaw
+				msg.anim = pose.anim
+			Net.send(msg)
+		_space_id = want
+	if _station:
+		_station.space_id = _space_id
 
 
 func _leave_place() -> void:
 	if _station:
 		_station.queue_free()
 		_station = null
+	_at_station = ""
 	_menu_standing = false
 	_dock_panel.visible = false
 
@@ -756,7 +1394,7 @@ func _show_ship_menu() -> void:
 	_refresh_dock()
 
 
-## Leave the pilot's seat and walk down the ramp.
+## Leave the pilot's seat and walk down the ramp (or, docked in a carrier, get up from its chair).
 func _leave_seat() -> void:
 	_hide_panels()
 	_dock_panel.visible = false
@@ -774,11 +1412,15 @@ func _on_service(kind: String) -> void:
 		"contracts":
 			_open_trade("contracts")
 		"dock_market":
-			_open_trade("market", str(Net.planet(_docked).get("owner", "")))
+			_open_trade("market", str(Net.planet(_here()).get("owner", "")))
 
 
-## The transit terminal in the station: the same trips, while you stand at the console.
+## The transit terminal in the station: the same trips, while you stand at the console. (Off
+## someone else's carrier at another station than yours: trips go from where your carrier is.)
 func _open_standing_menu() -> void:
+	if _here() != _docked:
+		_station._say("Your carrier is docked at %s: the shuttle at your gate takes you back to it for trips from there." % (_stations[_docked].name if _stations.has(_docked) else "another station"), 5.0)
+		return
 	_menu_standing = true
 	_station.set_menu_open(true)
 	_dock_panel.visible = true
@@ -805,8 +1447,24 @@ func _fly_to_station() -> void:
 
 
 ## Launch from the High Port: the ship lifts off the pad and flies out of the hangar into space.
+## A carrier's clamps let go instead and it drifts clear of its berth, with you at the helm.
 func undock() -> void:
 	var from := _docked
+	Net.send({"type": "undock"})
+	_berth = {}
+	if _carrier:
+		_leave_place()
+		_docked = ""
+		_at_spaceport = false
+		_set_view("flight")
+		_set_outside(false)
+		controls.enabled = true
+		flight.velocity = flight.basis.x * 25.0 # out from the berth
+		flight.throttle = 0.0
+		_refresh_focus()
+		Net.send({"type": "walk", "pos": CHAIR_POSE.pos, "yaw": CHAIR_POSE.yaw, "anim": CHAIR_POSE.anim})
+		_say("Clamps released at %s. Fly safe." % (_stations[from].name if _stations.has(from) else "the station"))
+		return
 	_leave_place()
 	_docked = ""
 	_at_spaceport = false
@@ -853,10 +1511,13 @@ func _refresh_dock() -> void:
 		_dock_market_entry(owner)
 		_war_row()
 		_dock_button("Leave your seat and walk around the base", _leave_seat)
-		_dock_button("Fly back up to %s" % _stations[_docked].name, _fly_to_station)
+		_dock_button(("Lift off, back up to your carrier at %s" if _carrier else "Fly back up to %s") % _stations[_docked].name, _fly_to_station)
 	else:
 		if _menu_standing:
 			_dock_title.text = "Surface Transit, %s" % _stations[_docked].name
+		elif _carrier:
+			_dock_title.text = "In your carrier's chair · %s" % _berth_text()
+			_dock_button("Leave your seat and walk around your carrier (the airlock leads into the station)", _leave_seat)
 		else:
 			_dock_title.text = "In your ship on pad 06, %s" % _stations[_docked].name
 			_dock_button("Leave your seat and walk into the station", _leave_seat)
@@ -866,7 +1527,7 @@ func _refresh_dock() -> void:
 			where = wp.get("name", _docked)
 			_dock_note(_front_note(wp), WarInfo.faction_color(wp.get("owner")).lightened(0.2))
 		elif Net.has_building("spaceport", _docked):
-			_dock_button("Fly down to %s's base and land at the Spaceport" % owner, _fly_to_base)
+			_dock_button(("Take a lander down to %s's base, to the Spaceport" if _carrier else "Fly down to %s's base and land at the Spaceport") % owner, _fly_to_base)
 		else:
 			_dock_note("%s has no Spaceport yet." % where)
 		var facs := facilities_on(_docked)
@@ -878,7 +1539,7 @@ func _refresh_dock() -> void:
 		if _menu_standing:
 			_dock_button("Close", _close_standing_menu)
 		else:
-			_dock_button("Launch", undock)
+			_dock_button("Undock" if _carrier else "Launch", undock)
 	var first := _dock_list.get_children().filter(func(c): return c is Button and not c.is_queued_for_deletion())
 	if not first.is_empty():
 		first[0].grab_focus.call_deferred()
@@ -1097,15 +1758,41 @@ func _show_picker() -> void:
 	_open_panel(_picker)
 
 
+## The station you're at: the one you're walking in, else where your ship is docked (or "").
+func _here() -> String:
+	return _at_station if _at_station != "" else _docked
+
+
 ## The War terminal, on a planet: the one you're at if it's contested, else the first of the system.
 func _open_war(planet_id := "") -> void:
 	if planet_id == "":
-		planet_id = _docked if not WarInfo.planet(_docked).is_empty() else ""
+		planet_id = _here() if not WarInfo.planet(_here()).is_empty() else ""
 	if planet_id == "":
 		var here := WarInfo.planets_in(str(Net.state.get("system", {}).get("id", "teal-prime")))
 		planet_id = here[0].id if not here.is_empty() else "cinder"
 	_war_panel.open(planet_id)
 	_open_panel(_war_panel)
+
+
+## The War terminal's Sector Battles: that screen (game/battle/battle_menu.gd) for the planet, over
+## whatever you're doing. Attacking needs you aboard a carrier in its orbit; the defender's pilots
+## may also join from its station. A battle it starts takes over the screen (see _check_battle).
+func _open_battles(planet_id: String) -> void:
+	var path := "res://battle/battle_menu.gd"
+	if not ResourceLoader.exists(path):
+		return
+	_hide_panels()
+	_dock_panel.visible = false
+	var menu: Control = load(path).open(self, planet_id)
+	if _station:
+		_station.set_menu_open(true)
+	controls.enabled = false
+	controls.release_mouse()
+	menu.closed.connect(func():
+		await get_tree().process_frame
+		if Place.battle_active():
+			return # the battle view has the screen; _check_battle brings everything back after
+		_close_panel(), CONNECT_ONE_SHOT)
 
 
 ## The dock market of a Builder's Carrier Dock, or supply contracts.
@@ -1146,6 +1833,8 @@ func _near_rock() -> bool:
 
 ## For tests: put the ship somewhere, stopped.
 func teleport(pos: Array) -> void:
+	_approach = {}
+	_dock_wait = ""
 	_pos = pos.duplicate()
 	flight.velocity = Vector3.ZERO
 	flight.throttle = 0.0
@@ -1187,10 +1876,11 @@ func _update_hud(delta: float) -> void:
 	var stash: Array = me.get("stash", [])
 	var side := WarInfo.my_faction()
 	var hold: Dictionary = me.get("hold", {})
-	_info.text = "%s · %s%s\nIce in cargo %d\nCredits %d   Reputation %d\n%s%s%s" % [
+	_info.text = "%s · %s%s%s\nIce in cargo %d\nCredits %d   Reputation %d\n%s%s%s" % [
 		Net.my_name,
 		WarInfo.faction_name(side) if side != "" else "no faction yet",
 		" · admin" if Net.admin else "",
+		" · fleet carrier (demo)" if _carrier else "",
 		_cargo("ice"),
 		int(me.get("credits", 0)),
 		int(me.get("reputation", 0)),
@@ -1223,6 +1913,11 @@ func _update_hud(delta: float) -> void:
 	_hint.text = "%s map   %s chat   %s settings   %s phase-shift   %s drift" % [
 		controls.binding_text("nav_map", false), controls.binding_text("chat", false),
 		controls.binding_text("menu", false), controls.binding_text("phase", false), controls.binding_text("drift", false)]
+	if _carrier:
+		_hint.text += "\n%s leave seat (walk your carrier)   %s outside view" % [controls.binding_text("leave_seat", false), controls.binding_text("outside_view", false)]
+	_seat_button.visible = _carrier and _approach.is_empty() and _dock_wait == ""
+	_seat_button.text = "Leave seat (%s)" % controls.binding_text("leave_seat", false)
+	_seat_button.position.y = 70.0
 
 	_message_time -= delta
 	if _message_time > 0.0 and _prompt.text == "":
@@ -1361,6 +2056,7 @@ func _draw_hud() -> void:
 
 func _on_state(_state: Dictionary) -> void:
 	_refresh_refusal()
+	_apply_ship_class()
 	_sync_stations()
 	# A pilot with no side is asked to pick one, once a session ("Not now" leaves it to the ship's menu).
 	var side := WarInfo.my_faction()
@@ -1412,18 +2108,133 @@ func _leave_raid(result: Dictionary) -> void:
 
 
 func _set_space_visible(on: bool) -> void:
-	for node in [_ship, _dust, _sun, _sky_layer, _hud_layer]:
-		node.visible = on
-	_field.visible = on
-	for id in _stations:
-		_stations[id].node.visible = on
-	for id in _others:
-		_others[id].node.visible = on
-	_sky.render_target_update_mode = SubViewport.UPDATE_ALWAYS if on else SubViewport.UPDATE_DISABLED
-	if on and _world_env.get_parent() == null:
+	_set_view("flight" if on else "away")
+
+
+## What's drawn of space: "flight" (all of it, from the seat), "aboard" (walking a carrier: space
+## and the sky out of its windows, but not your own hull, the cockpit or the flight HUD; the sun
+## casts shadows so it shines in through them) or "away" (in a station, a base, a raid).
+func _set_view(mode: String) -> void:
+	var space_on := mode != "away"
+	_space.visible = space_on
+	_dust.visible = mode == "flight"
+	_ship.visible = mode == "flight"
+	_sky_layer.visible = space_on
+	_hud_layer.visible = mode == "flight"
+	_sun.shadow_enabled = mode == "aboard"
+	if mode != "aboard":
+		_space.basis = Basis()
+	# Aboard, the interior is lit like a station's; out in space it's the dim light of space.
+	var env := _world_env.environment
+	env.ambient_light_color = Color(0.55, 0.62, 0.7) if mode == "aboard" else Color(0.2, 0.24, 0.32)
+	env.ambient_light_energy = 0.6 if mode == "aboard" else 1.0
+	env.glow_enabled = mode == "aboard"
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC if mode == "aboard" else Environment.TONE_MAPPER_LINEAR
+	# Name tags out in space show through everything in flight, but not through a carrier's walls.
+	for node in _space.find_children("Tag", "Label3D", true, false):
+		(node as Label3D).no_depth_test = mode != "aboard"
+	_sky.render_target_update_mode = SubViewport.UPDATE_ALWAYS if space_on else SubViewport.UPDATE_DISABLED
+	if space_on and _world_env.get_parent() == null:
 		add_child(_world_env)
-	elif not on and _world_env.get_parent() != null:
+	elif not space_on and _world_env.get_parent() != null:
 		remove_child(_world_env)
+
+
+## A sector battle's RTS view (game/battle/battle_view.gd) has its own camera, world and input:
+## while it's up, everything of ours is hidden and ignores the keys; when it closes, back to
+## where you were (the carrier's Command Deck, at the holo table).
+func _check_battle() -> void:
+	var on := Place.battle_active()
+	if on == _battle:
+		return
+	_battle = on
+	controls.enabled = not on and _station == null and _raid == null
+	if on:
+		_hide_panels()
+		_dock_panel.visible = false
+		_battle_env = []
+		if _world_env.get_parent() != null:
+			_battle_env.append(_world_env)
+			remove_child(_world_env)
+		for node in [_space, _ship]:
+			node.visible = false
+		_sky_layer.visible = false
+		_hud_layer.visible = false
+		if _station:
+			_station.battle_hide(true)
+		return
+	if _station:
+		_station.battle_hide(false)
+		_set_view("aboard" if _station is Carrier else "away")
+		_station._camera.make_current()
+		if _station.seated:
+			_show_ship_menu()
+		else:
+			_station.set_menu_open(false)
+	elif _raid == null:
+		_set_view("flight")
+		_set_outside(_outside)
+		_refresh_focus()
+	_battle_env = []
+
+
+## A new connection (the Wi-Fi came back, the server restarted, a new admin key): the server has
+## forgotten our pad, our space and whether our carrier takes visitors. Ask for the pad again, then
+## enter our space afresh with where we stand (_sync_space, next frame; crew go straight back
+## aboard), the place's walkers waiting for the server's new word on who is there.
+func _rejoin() -> void:
+	if not _berth.is_empty() and not _berth.get("local", false):
+		Net.send({"type": "dock_request", "station": _berth.station})
+	if not Carrier.open_to_visitors:
+		Net.send({"type": "ship_open", "open": false})
+	var was := _space_id
+	_space_id = ""
+	if _station:
+		_station.walkers.rejoin()
+	if was.begins_with("ship:") and was != "ship:" + Net.my_name and not _crew.is_empty():
+		var msg := {"type": "enter_space", "space": was}
+		var pose: Dictionary = _station.walker_pose() if _station and _station.has_method("walker_pose") else {}
+		if not pose.is_empty():
+			msg.merge({"pos": [pose.pos.x, pose.pos.y, pose.pos.z], "yaw": pose.yaw, "anim": pose.anim})
+		Net.send(msg)
+		_space_id = was
+
+
+## Server messages for the carrier and the shared spaces (Net.message).
+func _on_net_message(msg: Dictionary) -> void:
+	match str(msg.get("type", "")):
+		"welcome":
+			_rejoin()
+		"dock_granted":
+			var st := str(msg.get("station", ""))
+			if not _stations.has(st):
+				return
+			_berth = {"station": st, "copy": int(msg.get("copy", 1)), "pad": clampi(int(msg.get("pad", 1)), 1, BERTHS)}
+			if _dock_wait == st:
+				_dock_wait = ""
+				if _carrier and _station == null:
+					_start_approach(st) # (away from the helm, F near the station flies it in later)
+			elif _carrier and _docked == st and _crew.is_empty():
+				# Docked before the answer came (back from a raid, say): over to the real berth.
+				_snap_to_berth()
+				if _station is Carrier:
+					_update_carrier(_station)
+				if _dock_panel.visible:
+					_refresh_dock()
+		"space_joined":
+			if _boarding != "" and str(msg.get("space", "")) == "ship:" + _boarding:
+				_boarded(msg)
+		"error":
+			if _boarding != "":
+				if _station:
+					_station._say("Can't board: %s" % str(msg.get("reason", "")), 4.0)
+				_boarding = ""
+			elif _dock_wait != "":
+				_berth_anyway(_dock_wait)
+		"ship":
+			if _others.has(int(msg.get("id", -1))):
+				_others[int(msg.id)].over = str(msg.get("over", ""))
+				_others[int(msg.id)].berth = msg.get("berth", {}) if msg.get("berth") is Dictionary else {}
 
 
 func _on_ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3) -> void:
@@ -1432,19 +2243,21 @@ func _on_ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3) -> 
 	var world: Array = Net.last_ship_pos if Net.last_ship_pos.size() == 3 else [pos.x, pos.y, pos.z]
 	if not _others.has(id):
 		var node := Node3D.new()
-		node.add_child(Models.starter_ship())
 		var tag := Label3D.new()
+		tag.name = "Tag"
 		tag.text = pilot_name
-		tag.position = Vector3(0, 10, 0)
 		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		tag.fixed_size = true
 		tag.pixel_size = 0.0006
 		tag.font_size = 40
 		tag.no_depth_test = true
 		node.add_child(tag)
-		add_child(node)
-		_others[id] = {"node": node, "pos": world, "shown": world.duplicate(), "name": pilot_name}
+		_space.add_child(node)
+		_others[id] = {"node": node, "pos": world, "shown": world.duplicate(), "name": pilot_name, "rot": rot, "over": "", "berth": {}}
+		_set_other_model(_others[id])
+		node.visible = _space.visible
 	_others[id].pos = world
+	_others[id].rot = rot
 	_others[id].node.rotation = rot
 
 

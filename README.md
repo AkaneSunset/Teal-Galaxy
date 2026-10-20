@@ -5,8 +5,9 @@ Phone players (Builders) grow star systems and planetary bases. PC players (Expl
 fly to those places, take the jobs builders post, and play together.
 
 This is an early playable prototype: one star system with a planet for every Builder, jobs,
-walkable space stations, first-person raids on Builders' outposts, and a galactic war between
-factions, fought with navies across seven star systems.
+walkable space stations shared with the other pilots there, first-person raids on Builders' outposts,
+and a galactic war between factions, fought with navies across seven star systems and, on the
+ground, in real-time sector battles commanded from a walkable fleet carrier.
 
 ## What's here
 
@@ -38,7 +39,14 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 **Demo mode:** start the server with `DEMO=1 npm start` and every Builder base gets 2000 metal, 200 ice,
 200 alloy, 40 isotope cells, a few plans and 5000 credits, enough to try every building, defence, warship and
 security tier, and everything builds 10 times faster. Each base is topped up once, the first time its Builder connects with demo mode on.
-Demo mode also lets pilots take sectors of the war by hand (see [Taking planets](#taking-planets)).
+Demo mode also turns on **the demo war**, for play-testing sector battles: every faction holds at least
+25% of the orbit of every system that isn't a capital (so anyone may bring a carrier anywhere), footholds
+are waived, a captured planet locks for 5 minutes instead of a week, and every pilot flies a
+[fleet carrier](#the-fleet-carrier-demo). Pilots can still take sectors by hand too (see
+[Taking planets](#taking-planets)).
+
+**Fast battles:** `BATTLE_SPEED=10 npm start` runs [sector battles](#sector-battles) ten times faster
+(the game tests use 10 to 20).
 
 **Admins:** start the server with `ADMIN_KEY=<any secret> npm start`, and apps that say hello with
 that key can play the Coma Conglomerate and steer its AI director (see
@@ -229,9 +237,9 @@ system counts as wholly its faction's). Once it holds a sector of a planet, the 
 one it holds. Capital worlds can't be attacked at all. Builders with outposts on a planet get an alert
 when one of their faction's sectors there falls.
 
-Sector battles, where pilots fight for sectors (32 to a battle), aren't built yet. Until they are, a
-server started with `DEMO=1` lets pilots take sectors by hand: in the War terminal's sector view a
-sector your side may take has *Take sector (demo)*, and every rule above applies.
+Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
+pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
+*Take sector (demo)*, and every rule above applies.
 
 ### Carrier Dock, contracts and war supply
 
@@ -459,6 +467,8 @@ destination, dropping you out about 2 km short of it.
 | Power to systems / engines / weapons, balance | 1 / 2 / 3 / 4 | D-pad left / up / right / down |
 | Mine, deliver | F | A |
 | Navigation map | M | Back |
+| Leave seat (fleet carrier) | G | Right stick click |
+| Outside view (fleet carrier) | V | |
 | Chat | Enter | Guide |
 | Settings and rebinding | Esc | Start |
 
@@ -474,6 +484,77 @@ levels (the Galactic level is the [war map](#the-war-map)), filters for landmark
 pilots, and a route queue (shift-click).
 Chat works from both the cockpit and the phone; the ship keeps flying while you type.
 
+## The fleet carrier (demo)
+
+On a `DEMO=1` server every pilot's ship is a **fleet carrier**: a 260 m warship in its pilot's faction
+colours with a flight deck, a bridge island, gun sponsons and four engines. It flies like the small ship,
+only heavier (slower to turn and to get going; boost still works). Other pilots' carriers are drawn the
+same way. **V** switches to the outside view.
+
+**Leave seat (G**, or the button on the HUD) gets you up from the pilot's chair while flying: the carrier
+sheds its speed over two seconds and holds still, and you're on your feet on the Bridge, with the real
+sky, the planet and the stations out of the windows. Sit in the chair again (**F**) to fly. Aboard:
+
+| Deck | What's there |
+| --- | --- |
+| Bridge | The pilot's chair on its dais, the wide forward window, crew consoles; COMMS (**F**) opens or closes your carrier to visitors |
+| Command Deck | The **holo table** (**F**: [Sector Battles](#sector-battles) for the planet below, with its sectors floating over the table), the war log, the planet-below screen |
+| Crew Lounge | The lobby: sofas, the bar and its stools (**F** to sit), who's aboard, the pilots' channel |
+| Hangar Deck | Down the lift: parked tanks, strikers, gunships and landers, the launch doors, and the airlock to the station when docked |
+
+**Docking and pads.** Near a station, slow down and press **F** to ask for a berth (`dock_request`).
+Each copy of a station has 32 pads, and a full station opens another copy, so the pads decide how many
+pilots share one. The carrier then flies itself in (approach, lining up, final approach, clamps) in
+about 25 seconds while you watch from outside; **F** skips to the clamps. It says where you are:
+*Berth 12, Cinder Orbital (1)*, the number in brackets being the copy. Clamped, you're in the chair;
+undock from there.
+
+**Shared spaces.** On foot you share the space with everyone in the same one: a station's copy, a
+carrier, or a Builder's base. You see the others walk, run and sit, with their names over them, and chat
+works as everywhere. From the Hangar Deck the airlock leads into the station's **Carrier Berths**, where
+every carrier docked in your copy has a boarding gate ("Board Akane's carrier"; yours is lit green;
+the hall has nine at a time, and DOCK CONTROL by the entrance shows the next nine).
+Walk through one to visit that carrier; the same gate, or the shuttle console on its Hangar Deck, takes
+you back. If its owner undocks with you aboard, you ride along as crew, and you can only step off where
+the carrier docks next.
+
+## Sector battles
+
+A sector battle is a real-time battle over one sector of a contested planet, in the spirit of
+Supreme Commander: Forged Alliance, simulated on the server for up to 32 pilots. Open **Sector Battles**
+from the carrier's holo table (or the War terminal's sector view): it shows the planet below, its sectors
+and owners, which ones your side can attack (the same rules as [taking planets](#taking-planets); you
+must be aboard a carrier in that planet's orbit, within 30 km of its orbital station or docked there),
+and the battles running there. **Attack sector** starts one; **Join battle** joins one on your side (the
+defenders' pilots can also join from the planet's station). The defender is the sector's owner, played
+by an AI (plus any of its pilots who join), or a militia if nobody holds it. You lead one attack at a
+time: starting another gives up the last one unless other pilots are still fighting it.
+
+The RTS view takes over the screen. You start with 400 mass and earn 2 a second from your carrier plus
+3 per Mass Extractor. Call units in by drop pod from the panel on the right; they land in your landing
+zone 6 seconds later. Engineers build extractors on mass points, turrets and land factories.
+The defender's AI keeps a guard round its base and, after giving you five minutes to dig in, sends
+waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction fields
+more than a militia. **Destroy the Command Node** to take the sector (*Sector taken*); the defenders win if they
+hold for 30 minutes, if the attackers have nothing on the field for a minute, or if none of the
+attackers' pilots has been in the battle for five minutes. An attack is called off if the planet locks
+meanwhile (another sector's battle took it). Either way a banner says so and you're back at the holo
+table.
+
+| Command | Keys and mouse |
+| --- | --- |
+| Select | Left click, left drag for a box, double click for every unit of that type on screen, Shift adds |
+| Move / attack | Right click on the ground / on an enemy |
+| Attack-move | **A**, then left click |
+| Stop | **S** |
+| Queue orders | Hold Shift (queued waypoints are drawn as lines) |
+| Build (engineers) | The build buttons, then left click (extractors snap to mass points); or right click a free mass point |
+| Produce (a factory selected) | The produce buttons |
+| Groups | Ctrl+1-9 sets a group, 1-9 recalls it (twice: look at it) |
+| Camera | WASD, the arrow keys or the screen's edges to pan; the wheel to zoom from 25 m to the whole map (units turn into strategic icons past 500 m); Q / E or middle drag to turn; Space looks at your units, H at your landing zone; click the minimap to look there |
+| Take control | **P** with one unit selected: WASD drives it, the mouse aims, left mouse fires (+25% damage); **P** or Esc hands it back |
+| Leave battle | The button at the top: your units stay on the field, and Join battle brings you back |
+
 ## Play the Builder on your real phone
 
 Run the server on your computer, then export the game to Android from Godot
@@ -484,7 +565,7 @@ choose Builder. Both devices must be on the same Wi-Fi.
 ## Tests
 
 ```bash
-cd server && npm test     # every server rule (jobs, raids, the war, the director, admin keys) and games over real WebSockets
+cd server && npm test     # every server rule (jobs, raids, the war, the director, admin keys, shared spaces, sector battles) and games over real WebSockets
 ```
 
 The game tests play against a running server, each on a **fresh galaxy**: give the server a save file
@@ -518,6 +599,29 @@ returns, and boards it (instructions at the top of `game/tests/raid_test.gd`).
 cd server && rm -f /tmp/raid.json && SAVE_FILE=/tmp/raid.json PORT=9001 DEMO=1 BUILD_SPEED=0 npm start
 godot --headless --path game res://tests/raid.tscn -- --server=ws://127.0.0.1:9001
 ```
+
+`game/tests/spaces_test.tscn` checks the fleet carrier and shared spaces against a `DEMO=1` server: two
+pilots dock at Cinder Orbital (different pads, one copy); the game's pilot flies the automated approach,
+leaves the chair, walks the carrier, goes through the airlock into the Carrier Berths, where each sees the
+other move, is refused at the other's closed carrier, and boards it once it's open.
+`game/tests/battle_test.tscn` plays a whole sector battle from the pilot's chair against a `DEMO=1`
+server with fast battles: G to leave the seat, a walk to the holo table, F, Attack sector, tanks called
+in, an attack-move (A and a click), a tank driven (P and D), and the fight until the Command Node falls
+and the pilot is back on the Command Deck (it also checks the defenders' AI fought back, and that the War
+terminal opens Sector Battles). `game/tests/rts_test.tscn` checks the RTS view itself: 360 units drawn in
+budget, leaving and rejoining a battle, and taking a militia sector on Scar.
+
+```bash
+cd server && rm -f /tmp/spaces.json && SAVE_FILE=/tmp/spaces.json PORT=9002 DEMO=1 npm start
+godot --headless --path game res://tests/spaces_test.tscn -- --server=ws://127.0.0.1:9002
+cd server && rm -f /tmp/battle.json && SAVE_FILE=/tmp/battle.json PORT=9003 DEMO=1 BATTLE_SPEED=20 npm start
+godot --headless --path game res://tests/battle_test.tscn -- --server=ws://127.0.0.1:9003
+godot --headless --path game res://tests/rts_test.tscn -- --server=ws://127.0.0.1:9003   # a fresh server for each
+```
+
+Add `--shots=<folder>` and run them with a display (not `--headless`) to save screenshots along the way.
+`game/tests/tour_shots.tscn` saves views of the carrier inside and out for looking it over (a display
+and a `DEMO=1` server).
 
 `game/tests/flight_test.gd` checks the flight model on its own, with no server:
 `godot --headless --path game --script res://tests/flight_test.gd`

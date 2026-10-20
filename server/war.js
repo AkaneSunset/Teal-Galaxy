@@ -4,8 +4,8 @@
 //
 // A planet is won by holding its capital sector and 75% of its sectors, and then it locks for a
 // week. Fleets never take ground: they win orbital control, and a faction needs 25% of a system's
-// before it can attack the planets there. capture() is the one way a sector changes hands, so
-// the sector battles of phase 3 will call it.
+// before it can attack the planets there. capture() is the one way a sector changes hands: the
+// sector battles (battle.js) call it when an attack takes a sector.
 //
 // Fleets with `ai: true` are the Coma Conglomerate's armadas (director.js): they belong to no
 // Builder, need no supplies, and stand down when they get home.
@@ -15,6 +15,7 @@ const N = require('./navy');
 const S = require('./sites');
 
 const LOCK_MS = 7 * 24 * 3600_000; // a planet that changes hands can't be attacked for a week
+const DEMO_LOCK_MS = 5 * 60_000; // ...or for five minutes in the demo war
 const CARRIER_SHARE = 0.25; // orbital control a faction needs before it can attack a system's planets
 const PLANET_SHARE = 0.75; // sectors that win a planet, with its capital sector
 const SECTOR_PILOTS = 32; // pilots in one sector battle (phase 3)
@@ -40,6 +41,24 @@ const MAP = [
   ['drift', 'The Drift', [0, 2], ['aurelia', 'comae'], null, [['eddy', 'Eddy', null], ['mire', 'Mire', null]]],
 ];
 const HOME_SYSTEM = 'teal-prime';
+
+// The demo war (DEMO=1 on the server, for play-testing sector battles): every faction holds at
+// least CARRIER_SHARE of every system that isn't a capital, footholds are waived, and a captured
+// planet locks for DEMO_LOCK_MS. One flag for the whole process, set by server.js.
+let demo = false;
+
+function setDemo(on) {
+  demo = !!on;
+}
+
+function isDemo() {
+  return demo;
+}
+
+// How long a planet locks after it changes hands.
+function lockMs() {
+  return demo ? DEMO_LOCK_MS : LOCK_MS;
+}
 
 function fail(reason) {
   return { ok: false, reason };
@@ -161,12 +180,17 @@ function systemShare(g, systemId, faction) {
 // A faction can only reach a planet it has a foothold near: a sector of it, another planet in the
 // same system, or half of a system one lane away.
 function foothold(g, faction, wp) {
+  if (demo) return true;
   if (wp.sectors.some((s) => s.owner === faction)) return true;
   if (g.war.planets.some((p) => p !== wp && p.system === wp.system && p.owner === faction)) return true;
   return (system(g, wp.system)?.lanes || []).some((id) => systemShare(g, id, faction) >= 0.5);
 }
 
 function timeLeft(ms) {
+  if (ms < 3600_000 && demo) {
+    const minutes = Math.max(1, Math.ceil(ms / 60_000));
+    return `${minutes} more minute${minutes === 1 ? '' : 's'}`;
+  }
   if (ms >= DAY) {
     const days = Math.ceil(ms / DAY);
     return `${days} more day${days === 1 ? '' : 's'}`;
@@ -215,8 +239,9 @@ function capture(g, planetId, sectorId, faction, now = Date.now()) {
   wp.owner = planetOwner(wp);
   if (wp.owner !== before) {
     if (wp.owner) {
-      wp.lockedUntil = now + LOCK_MS;
-      warLog(g, `${wp.name} fell to ${F.the(wp.owner)}: it is locked for ${Math.round(LOCK_MS / DAY)} days`, now);
+      wp.lockedUntil = now + lockMs();
+      const lock = demo ? `${Math.round(DEMO_LOCK_MS / 60_000)} minutes` : `${Math.round(LOCK_MS / DAY)} days`;
+      warLog(g, `${wp.name} fell to ${F.the(wp.owner)}: it is locked for ${lock}`, now);
     } else warLog(g, `${F.FACTIONS[before].name} lost control of ${wp.name}`, now);
   }
   if (lost) {
@@ -241,7 +266,9 @@ function power(ships) {
 
 // Each faction's share of orbital control over a system: its stationed fleets' power over everyone's.
 // A fleet that arrived where another faction is in orbit (`joining`) has no say until it has fought
-// a round there, so a fleet called home before every round never wins any control.
+// a round there, so a fleet called home before every round never wins any control. In the demo
+// war every faction is shown at least CARRIER_SHARE of a system that isn't a capital (the shares
+// may then add up past 1).
 function shares(g, systemId) {
   const out = Object.fromEntries(Object.keys(F.FACTIONS).map((f) => [f, 0]));
   let total = 0;
@@ -252,6 +279,7 @@ function shares(g, systemId) {
     total += p;
   }
   if (total > 0) for (const f of Object.keys(out)) out[f] /= total;
+  if (demo && system(g, systemId) && !system(g, systemId).capitalOf) for (const f of Object.keys(out)) out[f] = Math.max(out[f], CARRIER_SHARE);
   return out;
 }
 
@@ -514,6 +542,7 @@ function warLog(g, text, now) {
 
 module.exports = {
   LOCK_MS,
+  DEMO_LOCK_MS,
   CARRIER_SHARE,
   PLANET_SHARE,
   SECTOR_PILOTS,
@@ -525,6 +554,9 @@ module.exports = {
   HOME_JUMPS,
   MAP,
   hash,
+  setDemo,
+  isDemo,
+  lockMs,
   newWar,
   ensureWar,
   system,
