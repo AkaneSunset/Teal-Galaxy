@@ -90,6 +90,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   const isAdmin = adminCheck(adminKey);
 
   const wss = new WebSocketServer({ port });
+  wss.on('error', (err) => {
+    if (err.code !== 'EADDRINUSE') throw err;
+    console.error(`Port ${port} is already in use: a galaxy server is probably running already.`);
+    console.error(`Use that one, stop it (Linux/Mac: fuser -k ${port}/tcp), or start this one with PORT=<another port>.`);
+    process.exit(1);
+  });
   const clients = new Map(); // ws -> { id, role, name, admin, ws, and a pilot's space, pad, over, battle }
   let nextClientId = 1;
   let saveTimer = null;
@@ -690,16 +696,18 @@ if (require.main === module) {
   const adminKey = process.env.ADMIN_KEY || null;
   // BATTLE_SPEED: sector battles run this many times faster (default 1).
   const battleSpeed = Number(process.env.BATTLE_SPEED) > 0 ? Number(process.env.BATTLE_SPEED) : 1;
-  startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed });
-  console.log(
-    `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
-  );
-  // The addresses to type on a phone on the same Wi-Fi.
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const a of list || []) {
-      if (a.family === 'IPv4' && !a.internal) console.log(`  Phone: ws://${a.address}:${port}`);
+  const { wss } = startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed });
+  wss.on('listening', () => {
+    console.log(
+      `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
+    );
+    // The addresses to type on a phone on the same Wi-Fi.
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const a of list || []) {
+        if (a.family === 'IPv4' && !a.internal) console.log(`  Phone: ws://${a.address}:${port}`);
+      }
     }
-  }
+  });
 }
 
 module.exports = { startServer, adminCheck };
