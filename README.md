@@ -555,12 +555,30 @@ table.
 | Take control | **P** with one unit selected: WASD drives it, the mouse aims, left mouse fires (+25% damage); **P** or Esc hands it back |
 | Leave battle | The button at the top: your units stay on the field, and Join battle brings you back |
 
-## Play the Builder on your real phone
+## Play the Builder on your real phone (Android)
 
-Run the server on your computer, then export the game to Android from Godot
-(Project > Export, add an Android preset). On the phone's start screen set the server to
-`ws://<your computer's Wi-Fi address>:8080` (and, if you run the galaxy, type its admin key) and
-choose Builder. Both devices must be on the same Wi-Fi.
+1. Start the server on your computer (`cd server && npm start`). It prints the address to use, such as
+   `Phone: ws://192.168.1.20:8080`. If the phone can't connect, allow Node through the computer's firewall.
+2. Install the APK on the phone: copy `teal-galaxy.apk` over (or download it), open it, and allow
+   installing from that app when Android asks.
+3. Open Teal Galaxy, type your name and the server address, and tap **Play**. Both devices must be on
+   the same Wi-Fi. The phone remembers both for next time.
+
+The phone app is the Builder only, held sideways either way up. Android's back button closes the open
+panel, the shop or the War screen a step at a time, and leaves the app when nothing is open.
+
+**Building the APK yourself.** `game/export_presets.cfg` has an **Android** preset (arm64, internet
+permission, the app icon). In Godot install the export templates (Editor > Manage Export Templates),
+set the Android SDK and a keystore in Editor Settings > Export > Android, then Project > Export > Android.
+Or headless, with the keystore in environment variables:
+
+```bash
+export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/your.keystore
+export GODOT_ANDROID_KEYSTORE_RELEASE_USER=<alias> GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=<password>
+godot --headless --path game --export-release Android ../build/teal-galaxy.apk
+```
+
+Sign every build with the same keystore so a new APK installs over the old one.
 
 ## Tests
 

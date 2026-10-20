@@ -13,6 +13,7 @@
 //                                        play the Coma Conglomerate and steer its AI director)
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -693,6 +694,12 @@ if (require.main === module) {
   console.log(
     `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
   );
+  // The addresses to type on a phone on the same Wi-Fi.
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal) console.log(`  Phone: ws://${a.address}:${port}`);
+    }
+  }
 }
 
 module.exports = { startServer, adminCheck };

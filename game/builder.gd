@@ -561,8 +561,15 @@ func _build_hud() -> void:
 	var hud := MarginContainer.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "right", "top", "bottom"]:
-		hud.add_theme_constant_override("margin_" + side, 14)
+	# Keep clear of the phone's camera cutout and rounded corners.
+	var win := get_window()
+	var safe := Rect2(DisplayServer.get_display_safe_area())
+	var inset := {"left": 0.0, "top": 0.0, "right": 0.0, "bottom": 0.0}
+	if OS.has_feature("mobile") and safe.has_area():
+		inset = {"left": safe.position.x, "top": safe.position.y,
+			"right": win.size.x - safe.end.x, "bottom": win.size.y - safe.end.y}
+	for side in inset:
+		hud.add_theme_constant_override("margin_" + side, 14 + int(maxf(inset[side], 0.0) / win.content_scale_factor))
 	add_child(hud)
 	var layer := Control.new()
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1213,6 +1220,27 @@ func open_war(system := "") -> void:
 	_show_page("")
 	_shop.visible = false
 	_war.open(system)
+
+
+## Android's back button: closes what's open, a step at a time. False when nothing was open.
+func back_pressed() -> bool:
+	if _war != null and _war.visible:
+		_war.visible = false
+		_place_toasts()
+	elif _shop.visible:
+		_shop.visible = false
+	elif _page != "":
+		_show_page("")
+	elif _placing != "":
+		_set_placing("")
+	elif _selected >= 0 or _sel_piece >= 0:
+		_sel_piece = -1
+		select_pad(-1)
+	elif _view != "":
+		show_view("")
+	else:
+		return false
+	return true
 
 
 ## Toasts sit top centre (beside the drawer while it's open), and at the bottom while the War

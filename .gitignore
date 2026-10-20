@@ -1,6 +1,7 @@
 # Godot
 game/.godot/
-game/export_presets.cfg
+# export_presets.cfg is shared: Godot keeps keystore passwords in .godot/export_credentials.cfg
+build/
 *.apk
 *.aab
 
