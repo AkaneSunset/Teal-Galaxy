@@ -526,7 +526,13 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       } catch {
         return send(ws, { type: 'error', reason: 'bad json' });
       }
-      handle(ws, me, msg);
+      try {
+        handle(ws, me, msg);
+      } catch (err) {
+        // One bad request mustn't take the whole galaxy down with it.
+        console.error(`error handling ${msg?.type}:`, err);
+        return send(ws, { type: 'error', reason: 'the server hit an error' });
+      }
       seen(me);
     });
     ws.on('close', () => {
@@ -536,7 +542,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   });
 
   const ticker = setInterval(() => {
-    if (G.tick(galaxy, now())) changed();
+    try {
+      if (G.tick(galaxy, now())) changed();
+    } catch (err) {
+      console.error('error in the galaxy tick:', err);
+    }
   }, tickMs);
   const raidTicker = setInterval(raidTick, RAID_TICK_MS);
 

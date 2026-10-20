@@ -28,6 +28,7 @@ test('ships build one at a time, in order, and launch into the navy', () => {
   const g = base();
   G.build(g, 'aster', 0, 'spaceport');
   G.build(g, 'aster', 1, 'foundry');
+  g.buildSpeed = 1; // ships take their real time from here on
   const t = 1_000_000;
   const metal = g.stock.metal;
   assert.ok(G.queueShip(g, 'aster', 1, 'corvette', t).ok);
@@ -45,6 +46,19 @@ test('ships build one at a time, in order, and launch into the navy', () => {
   G.tick(g, t + 60_000 + 180_000);
   assert.strictEqual(g.navy.frigate, 1);
   assert.ok(g.feed.some((e) => e.text === 'Frigate launched from the Ship Foundry on Aster'));
+});
+
+test('demo build speed builds warships faster too', () => {
+  const g = base();
+  G.build(g, 'aster', 0, 'spaceport');
+  G.build(g, 'aster', 1, 'foundry');
+  g.buildSpeed = 10;
+  const t = 1_000_000;
+  assert.ok(G.queueShip(g, 'aster', 1, 'corvette', t).ok);
+  G.tick(g, t + 5_000);
+  assert.strictEqual(g.navy.corvette, 0);
+  G.tick(g, t + 6_000);
+  assert.strictEqual(g.navy.corvette, 1);
 });
 
 test('costs, queue and hangar limits, and cancelling refunds', () => {

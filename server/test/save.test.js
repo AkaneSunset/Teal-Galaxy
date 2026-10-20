@@ -133,3 +133,13 @@ test('the server loads an old save file and broadcasts the war', async () => {
     fs.rmSync(path.dirname(file), { recursive: true, force: true });
   }
 });
+
+test('buildings from other versions load: an Ice Well becomes an Ice Extractor, unknown ones go', () => {
+  const g = G.newGalaxy();
+  const aster = g.system.planets.find((p) => p.id === 'aster');
+  aster.buildings.push({ slot: 4, type: 'icewell', level: 1 }, { slot: 5, type: 'teleporter', level: 1 });
+  G.recoverRaids(g);
+  assert.strictEqual(aster.buildings.find((b) => b.slot === 4).type, 'extractor');
+  assert.ok(!aster.buildings.some((b) => b.slot === 5));
+  assert.ok(G.upgradeBuilding(g, 'aster', 4).ok !== undefined); // no crash
+});

@@ -27,12 +27,13 @@ function fleetSize(e) {
 
 // Adds a ship to Foundry `b`'s queue, paid from economy `e`. `pay` takes the cost or says what is short.
 // How long a Foundry takes over a ship: each Foundry level above 1 builds 25% faster.
-function shipMs(b, shipId) {
-  return (SHIPS[shipId].seconds * 1000) / (1 + 0.25 * ((b.level ?? 1) - 1));
+// `speed`: the galaxy's build speed (10 in demo mode).
+function shipMs(b, shipId, speed = 1) {
+  return (SHIPS[shipId].seconds * 1000) / (1 + 0.25 * ((b.level ?? 1) - 1)) / speed;
 }
 
 // `away`: the Builder's ships out with fleets (war.js), which still have their berths.
-function queueShip(e, b, shipId, now, pay, away = 0) {
+function queueShip(e, b, shipId, now, pay, away = 0, speed = 1) {
   ensure(e);
   b.queue ||= [];
   const def = SHIPS[shipId];
@@ -41,7 +42,7 @@ function queueShip(e, b, shipId, now, pay, away = 0) {
   if (fleetSize(e) + away + b.queue.length >= HANGAR) return fail(away ? `the hangar is full: ${away} of its ships are out with your fleets` : 'the hangar is full');
   const err = pay(def.cost);
   if (err) return fail(err);
-  b.queue.push({ ship: shipId, doneAt: b.queue.length ? null : now + shipMs(b, shipId) });
+  b.queue.push({ ship: shipId, doneAt: b.queue.length ? null : now + shipMs(b, shipId, speed) });
   return { ok: true, name: def.name };
 }
 
@@ -58,14 +59,14 @@ function cancelShip(e, b) {
 
 // Finishes Foundry `b`'s ships whose time is up into economy `e`'s navy and starts the next
 // in line. Returns the names launched.
-function tick(e, b, now) {
+function tick(e, b, now, speed = 1) {
   ensure(e);
   const launched = [];
   while (b.queue?.length && b.queue[0].doneAt <= now) {
     const done = b.queue.shift();
     e.navy[done.ship] += 1;
     launched.push(SHIPS[done.ship].name);
-    if (b.queue.length) b.queue[0].doneAt = done.doneAt + shipMs(b, b.queue[0].ship);
+    if (b.queue.length) b.queue[0].doneAt = done.doneAt + shipMs(b, b.queue[0].ship, speed);
   }
   return launched;
 }

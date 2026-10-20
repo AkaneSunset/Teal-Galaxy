@@ -249,6 +249,7 @@ function upgradeBuilding(g, planetId, slot, now = Date.now()) {
   const b = p && p.buildings.find((x) => x.slot === slot);
   if (!b) return fail('nothing there');
   const def = BUILDINGS[b.type];
+  if (!def) return fail('nothing to upgrade there');
   if (busy(b, now)) return fail(`the ${def.name} is still ${b.level ? 'upgrading' : 'being built'}`);
   if (b.level >= MAX_LEVEL) return fail(`the ${def.name} is at the top level`);
   if (p.dormant) return fail('the outpost is dormant');
@@ -347,7 +348,7 @@ function tick(g, now = Date.now()) {
   for (const p of g.system.planets)
     for (const b of p.buildings)
       if (b.type === 'foundry' && !busy(b, now))
-        for (const name of N.tick(econ(g, p.id), b, now)) {
+        for (const name of N.tick(econ(g, p.id), b, now, g.buildSpeed || 1)) {
           log(g, `${name} launched from the Ship Foundry on ${p.name}`);
           changed = true;
         }
@@ -638,6 +639,12 @@ function recoverRaids(g) {
     e.alerts ||= [];
   }
   for (const name of Object.keys(g.pilots)) pilot(g, name);
+  // Buildings from other versions of the game: the Ice Well is an Ice Extractor here, anything else
+  // this version doesn't know is dropped rather than left to break whoever taps it.
+  for (const p of g.system.planets) {
+    for (const b of p.buildings) if (b.type === 'icewell') b.type = 'extractor';
+    p.buildings = p.buildings.filter((b) => BUILDINGS[b.type]);
+  }
   for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
   for (const p of g.system.planets) if (p.kind === 'satellite' && !p.obstacles) S.scatter(p);
   for (const p of g.system.planets) for (const b of p.buildings) b.level ??= 1; // built before levels // sites from before obstacles
@@ -682,7 +689,7 @@ function queueShip(g, planetId, slot, shipId, now) {
   // Ships out with the Builder's fleets keep their berths: fleets can hold an orbit for good.
   let away = 0;
   for (const fl of g.war.fleets) if (p.owner && !fl.ai && fl.owner === p.owner) for (const n of Object.values(fl.ships)) away += n;
-  const r = N.queueShip(e, b, shipId, now, (cost) => pay(e, cost), away);
+  const r = N.queueShip(e, b, shipId, now, (cost) => pay(e, cost), away, g.buildSpeed || 1);
   if (r.ok) log(g, `${r.name} queued at the Ship Foundry`);
   return r;
 }
