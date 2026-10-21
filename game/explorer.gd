@@ -2241,6 +2241,15 @@ func _on_net_message(msg: Dictionary) -> void:
 				menu.queued = {}
 			if view and not view.active:
 				view.open(self, msg)
+		"defense_joined":
+			# Matchmaking put us in a Sector Defense squad: the first-person view takes over.
+			var menu = _battle_script("battle_menu")
+			if menu:
+				menu.queued = {}
+			var path := "res://defense/defense_view.gd"
+			var dv = load(path) if ResourceLoader.exists(path) else null
+			if dv and dv.can_instantiate() and not dv.active:
+				dv.open(self, msg)
 		"dock_granted":
 			var st := str(msg.get("station", ""))
 			if not _stations.has(st):

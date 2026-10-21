@@ -25,13 +25,14 @@ const ZONE = 'America/New_York';
 const AI_SHARE = 0.5; // a win against AI only scores this much
 
 // Game modes. `points`: about 1 per 2.5 minutes of a typical match. Only Sector Battles is built
-// so far; the others show on the Campaign screen as coming.
+// and Sector Defense so far; the others show on the Campaign screen as coming. `alwaysAi`: fought
+// against AI troops only, so a win always scores half.
 const MODES = {
   sector: { name: 'Sector Battles', kind: 'RTS conquest', points: 10, minutes: 25, sides: 8, open: true },
   supremacy: { name: 'Supremacy', kind: 'FPS control points, then a ship assault', points: 8, minutes: 20, sides: 16, open: false },
   space: { name: 'Space Battles', kind: 'Starfighter assault', points: 6, minutes: 15, sides: 12, open: false },
   facility: { name: 'Facility Battles', kind: 'FPS arena', points: 4, minutes: 10, sides: 8, open: false },
-  defense: { name: 'Sector Defense', kind: 'FPS co-op waves against AI', points: 6, minutes: 15, sides: 4, open: false, alwaysAi: true },
+  defense: { name: 'Sector Defense', kind: 'FPS co-op waves against AI', points: 6, minutes: 15, sides: 4, open: true, alwaysAi: true },
 };
 
 // Each planet's built-in bonus for whoever holds it, in one mode.
@@ -150,7 +151,7 @@ function tick(g, now = Date.now()) {
 
 // What a won match scores: the mode's points, half against AI only, double in the final push.
 function worth(c, mode, vsAi, now) {
-  return MODES[mode].points * (vsAi ? AI_SHARE : 1) * (now >= c.finalAt ? 2 : 1);
+  return MODES[mode].points * (vsAi || MODES[mode].alwaysAi ? AI_SHARE : 1) * (now >= c.finalAt ? 2 : 1);
 }
 
 // A match on a planet ended: its winner scores for the campaign (if it's in it). Returns the points.
@@ -172,9 +173,11 @@ const FILL_MS = 1000;
 
 // The queues of every planet: pilots wait for a mode's match there, and when one can start (two
 // factions queued, or one that has waited long enough to fight AI) they go in together; a pilot
-// whose side of a running match has room joins it at once. `battles` is battle.js createBattles();
+// whose side of a running match has room joins it at once. Sector Defense squads are one faction:
+// they go in when four are queued, or after the wait with however many there are.
+// `battles` is battle.js createBattles(), `defenses` defense.js createDefenses();
 // `where(me)` says where a pilot is (the planet their carrier is over); `factionOf(me)` their side.
-function createMatchmaking({ galaxy, now = Date.now, battles, where, factionOf, send, changed, wait = null }) {
+function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, where, factionOf, send, changed, wait = null }) {
   const queues = new Map(); // planet id -> [{ me, faction, mode, since }]
 
   function waitMs() {
@@ -207,7 +210,8 @@ function createMatchmaking({ galaxy, now = Date.now, battles, where, factionOf, 
     if (!MODES[mode].open) return fail(`${MODES[mode].name} isn't in the game yet`);
     if (!c.entrants.includes(faction)) return fail(`${F.the(faction)} isn't in the campaign for ${wp.name}: it needs ${Math.round(W.CARRIER_SHARE * 100)}% of the orbit when the week starts`);
     if (where(me).over !== wp.id) return fail(`bring your carrier into ${F.the(faction)}'s naval zone over ${wp.name} to queue`);
-    if (me.battle) return fail("you're in a match already");
+    if (me.battle || me.defense) return fail("you're in a match already");
+    if (mode === 'defense' && !defenses) return fail('Sector Defense is off on this server');
     leave(me, true);
     if (!queues.has(wp.id)) queues.set(wp.id, []);
     queues.get(wp.id).push({ me, faction, mode, since: now() });
@@ -233,12 +237,36 @@ function createMatchmaking({ galaxy, now = Date.now, battles, where, factionOf, 
     return { ok: true };
   }
 
-  // Into a match: out of the queue, into the battle on their side.
+  // Into a match: out of the queue, into the battle on their side (or the defense squad).
   function place(e, b, side) {
     leave(e.me, true);
-    const r = battles.enlistCampaign(e.me, b, side, e.faction);
+    const r = side === 'squad' ? defenses.enlist(e.me, b) : battles.enlistCampaign(e.me, b, side, e.faction);
     tell(e.me);
     return r;
+  }
+
+  // Sector Defense on a planet: backfill a squad of the same faction with room, else start a squad
+  // of up to four once four are queued or the first has waited long enough.
+  function fillDefense(g, wp, c, t) {
+    const queued = (queues.get(wp.id) || []).filter((e) => e.mode === 'defense').sort((x, y) => x.since - y.since);
+    for (const e of queued) {
+      const d = defenses.running(wp.id).find((m) => m.faction === e.faction && m.phase === 'break' && defenses.room(m));
+      if (d) place(e, d, 'squad');
+    }
+    const by = new Map();
+    for (const e of (queues.get(wp.id) || []).filter((x) => x.mode === 'defense').sort((x, y) => x.since - y.since)) {
+      if (!by.has(e.faction)) by.set(e.faction, []);
+      by.get(e.faction).push(e);
+    }
+    for (const [faction, list] of by) {
+      if (list.length < MODES.defense.sides && t - list[0].since < waitMs()) continue;
+      // The enemy: the holder's troops, or (for the holder's own squads) another faction's in the campaign.
+      const enemy = wp.owner && wp.owner !== faction ? wp.owner : c.entrants.find((f) => f !== faction) ?? null;
+      const d = defenses.start(wp.id, wp.name, faction, enemy);
+      for (const e of list.slice(0, MODES.defense.sides)) place(e, d, 'squad');
+      W.warLog(g, `A ${F.FACTIONS[faction].name} squad is holding a sector of ${wp.name} against ${enemy ? F.the(enemy) : 'the militia'}`, t);
+      changed();
+    }
   }
 
   // Every FILL_MS: backfill running matches, then start new ones.
@@ -249,7 +277,8 @@ function createMatchmaking({ galaxy, now = Date.now, battles, where, factionOf, 
       const c = g.war.campaigns?.[planetId];
       const wp = W.planet(g, planetId);
       // Pilots who are no longer where they queued, or whose faction left, drop out.
-      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle) leave(e.me);
+      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle || e.me.defense) leave(e.me);
+      if (c && wp && defenses) fillDefense(g, wp, c, t);
       const queued = (queues.get(planetId) || []).filter((e) => e.mode === 'sector');
       if (!c || !wp || !queued.length) continue;
       // Backfill: a running match here with room on this pilot's side.

@@ -223,6 +223,9 @@ func _on_message(msg: Dictionary) -> void:
 		"campaign_queued":
 			_modes_key = ""
 			refresh()
+		"defense_joined":
+			_waiting = false
+			_close() # the explorer opens the Sector Defense view
 		"error":
 			if _waiting or is_visible_in_tree():
 				_waiting = false
@@ -329,12 +332,12 @@ func _refresh_campaign_clock() -> void:
 	var mine := WarInfo.my_faction()
 	if mine != "" and not c.get("entrants", []).has(mine):
 		lines.append("%s isn't in this campaign: it needs 25%% of the orbit when the week starts." % WarInfo.faction_name(mine))
-	var waiting: Dictionary = Net.state.get("queues", {}).get(planet_id, {}).get("sector", {})
+	var waiting: Dictionary = Net.state.get("queues", {}).get(planet_id, {}).get(str(queued.get("mode", "sector")), {})
 	if str(queued.get("planet", "")) == planet_id:
 		var who := []
 		for f in waiting:
 			who.append("%d %s" % [int(waiting[f]), WarInfo.faction_name(f)])
-		lines.append("In the queue for %s: %s  ·  waiting: %s. With no opponents queued, you fight the AI after a short wait." % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(queued.mode), {}).get("name", queued.mode), time_text(t - float(queued.since)), ", ".join(who)])
+		lines.append(("In the queue for %s: %s  ·  waiting: %s. " + ("Squads of up to 4 go in together, or on their own after a short wait." if str(queued.mode) == "defense" else "With no opponents queued, you fight the AI after a short wait.")) % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(queued.mode), {}).get("name", queued.mode), time_text(t - float(queued.since)), ", ".join(who)])
 	_camp_status.text = "\n".join(lines)
 
 

@@ -258,8 +258,33 @@ matched at once, the holder defending if it's one of them; a faction queued alon
 in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
 whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
 match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
-RTS view opens by itself when a match starts, wherever you are. Supremacy, Space Battles, Facility Battles
-and Sector Defense show on the screen as coming.
+RTS view opens by itself when a match starts, wherever you are. Supremacy, Space Battles and Facility
+Battles show on the screen as coming.
+
+### Sector Defense
+
+The second campaign mode, in the spirit of Halo's Firefight: a squad of 1 to 4 pilots of one faction
+holds a walled position on the planet against waves of AI troops (`server/defense.js`, the view in
+`game/defense/`). Queue for it like Sector Battles; four queued go in at once, fewer after the wait (a
+queued pilot also joins a squad of their faction on the planet with room, between waves). The enemy is
+the holder's troops, or, for the holder's own squads, another faction's in the campaign.
+
+- **3 sets of 5 waves**, each harder than the last (troopers, drones, elites, brutes), a **Warlord** boss
+  ending each set. Waves come in through the gaps in the wall; a break of 10 seconds between waves, 20
+  between sets.
+- **Shared lives**: the squad starts with 7 and gets 3 more after each set. A fallen pilot comes back 5
+  seconds later for a life; with none left they stay down, and when everyone is down the match is lost.
+- **Modifiers** switch on as the sets go on: from set 2 *Tough* (enemies have 50% more health), from set 3
+  *Fury* (they hit 40% harder) and *Famine* (fewer supply drops).
+- **Supply drops** land between waves: ammo, med packs, shield cells, and rocket launchers (4 rockets;
+  always at the end of a set). Walk over one to take it.
+- Shields (60) soak damage first and recharge 4 seconds after the last hit; health (100) doesn't.
+- W A S D walk, Shift run, Space jump, mouse look, left mouse fire, R reload, 1 rifle, 2 rocket launcher,
+  Esc pause (*Leave match*).
+
+Holding all 15 waves wins the match for the squad's faction (6 points, halved to 3: it's always against
+AI); a squad that falls scores for the enemy's. The enemies, the waves and every hit are decided on the
+server: each screen reports where its pilot stands and every shot it fires.
 
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has

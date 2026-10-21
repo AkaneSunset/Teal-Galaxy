@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const B = require('./battle');
 const C = require('./campaign');
+const DF = require('./defense');
 const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
@@ -59,6 +60,7 @@ const PILOT_ONLY = {
   battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles',
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
   campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches',
+  defense_move: 'only pilots fight', defense_fire: 'only pilots fight', defense_leave: 'only pilots fight',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
 const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
@@ -120,11 +122,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   function playerView() {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), queues: matchmaking.list() };
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list(), queues: matchmaking.list() };
+    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list() };
   }
 
   function stateFor(me) {
@@ -171,10 +173,15 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onCampaignEnd: (b, winner, vsAi) => C.score(galaxy, b.planet, 'sector', winner, vsAi, now()),
   });
+  // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
+  const defenses = DF.createDefenses({
+    now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now()),
+  });
   // Planet campaigns: the week's matches, and the queues for them.
   C.tick(galaxy, now());
   const matchmaking = C.createMatchmaking({
-    galaxy: () => galaxy, now, battles, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
+    galaxy: () => galaxy, now, battles, defenses, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
     send: (c, msg) => send(c.ws, msg), changed, wait: queueWait,
   });
 
@@ -618,6 +625,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'campaign_unqueue':
         matchmaking.leave(me);
         return;
+      case 'defense_move':
+      case 'defense_fire':
+      case 'defense_leave':
+        result = defenses.handle(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
       case 'battle_leave':
       case 'battle_drop':
       case 'battle_order':
@@ -667,6 +680,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     ws.on('close', () => {
       spaces.drop(me);
       matchmaking.leave(me, true);
+      defenses.leave(me);
       battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
@@ -691,11 +705,13 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     runs,
     spaces,
     battles,
+    defenses,
     matchmaking,
     close() {
       clearInterval(ticker);
       clearInterval(raidTicker);
       battles.close();
+      defenses.close();
       matchmaking.close();
       clearTimeout(saveTimer);
       for (const ws of clients.keys()) ws.terminate();

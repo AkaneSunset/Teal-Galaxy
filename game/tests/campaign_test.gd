@@ -4,7 +4,7 @@ extends Node
 ##   godot --headless --path game res://tests/campaign_test.tscn
 ## "Campaign Tester" (Ashen Collective) goes aboard its carrier over Cinder, opens the Sector Battles
 ## screen, checks the campaign there (the week's scoreboard with Ashen in it, the planet's bonus, a
-## Queue button for Sector Battles and the modes still to come), queues, sees it's queued (in the
+## Queue button for Sector Battles and Sector Defense, and the modes still to come), queues, sees it's queued (in the
 ## screen), and with no opponents is matched against the holder's AI: the RTS view opens by itself.
 ## `-- --server=ws://127.0.0.1:9000` for a server on another port. Prints PASS or FAIL and quits.
 
@@ -102,8 +102,8 @@ func _steps() -> void:
 			if not _menu._camp_status.text.contains("left in this campaign"):
 				_finish(false, "the screen should show the time left: " + _menu._camp_status.text)
 				return
-			if _buttons(_menu, "coming soon").size() != 4:
-				_finish(false, "the four modes still to come should show, greyed out")
+			if _buttons(_menu, "coming soon").size() != 3 or _buttons(_menu, "Queue: Sector Defense").is_empty():
+				_finish(false, "Sector Defense should be open to queue for, and the three modes still to come greyed out")
 				return
 			var q := _buttons(_menu, "Queue: Sector Battles")
 			if q.is_empty() or q[0].disabled:
