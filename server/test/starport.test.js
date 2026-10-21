@@ -20,7 +20,7 @@ test('buy orders need a Star Port, materials or supplies, a price and how many a
   const { g, e } = base();
   assert.strictEqual(G.setBid(g, 'Akane', 'ice', 5, 10).reason, 'build a Star Port first');
   G.build(g, 'aster', 0, 'spaceport');
-  assert.strictEqual(G.setBid(g, 'Akane', 'drive', 5, 10).reason, 'the Star Port buys materials and supplies');
+  assert.strictEqual(G.setBid(g, 'Akane', 'drive', 5, 10).reason, 'the Star Port buys materials, ores and supplies');
   assert.match(G.setBid(g, 'Akane', 'ice', 1.5, 10).reason, /whole number of credits/);
   assert.match(G.setBid(g, 'Akane', 'ice', 5, 0).reason, /want 1 to/);
   assert.ok(G.setBid(g, 'Akane', 'ice', 5, 10).ok);

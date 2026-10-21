@@ -45,7 +45,7 @@ const BUILDING_INFO := {
 const OUTPOST_ABOUT := "A freighter brings the goods home every 5 minutes; until then pilots of other factions can raid the vault."
 ## What each level adds, for the Info page.
 const LEVEL_EFFECT := {
-	"extractor": "Each level digs another 12 metal and melts another 2 ice a minute.",
+	"extractor": "Each level digs another 12 metal and melts another 2 ice a minute, and from level 2 each adds a rarer ore and a refinery that turns it into an alloy worth more.",
 	"warehouse": "Each level holds 750 more metal and 750 more ice.",
 	"power": "Each level adds another 10% to the base's production.",
 	"habitat": "Each level houses 50 more people paying another 12 credits a minute.",
@@ -137,7 +137,9 @@ var _found_key := ""
 var _founding := "" # the outpost type being founded
 var _market: VBoxContainer # the Carrier Dock's market
 var _market_key := ""
-var _port: VBoxContainer # the Star Port page: its berths and buy orders
+var _port: VBoxContainer # the Star Port page: its berths, buy orders, sell listings and the galactic market
+var _refinery: VBoxContainer # the Extractor's ores and refineries
+var _refinery_key := ""
 var _port_key := ""
 var _raids: Label
 var _info: Label
@@ -799,6 +801,12 @@ func _build_drawer(layer: Control) -> void:
 	body.add_child(_port)
 	_pages["port"] = _port
 
+	# The Extractor's ores and refineries, each refinery with an on/off switch.
+	_refinery = VBoxContainer.new()
+	_refinery.add_theme_constant_override("separation", 8)
+	body.add_child(_refinery)
+	_pages["refinery"] = _refinery
+
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(chat)
@@ -1163,7 +1171,7 @@ func _show_page(page: String) -> void:
 	_drawer.visible = page != ""
 	_drawer.custom_minimum_size.x = 520 if page == "found" else 340 # room for a row of sectors
 	_place_toasts()
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your outposts", "market": "Dock market", "port": "Star Port"}.get(page, "")
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your outposts", "market": "Dock market", "port": "Star Port", "refinery": "Ores and refineries"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
@@ -1175,6 +1183,8 @@ func _show_page(page: String) -> void:
 		_market_key = ""
 	if page == "port":
 		_port_key = ""
+	if page == "refinery":
+		_refinery_key = ""
 	if not Net.state.is_empty():
 		_refresh(Net.state)
 
@@ -1507,6 +1517,8 @@ func _refresh(state: Dictionary) -> void:
 		_refresh_market(state)
 	if _page == "port":
 		_refresh_port(state)
+	if _page == "refinery":
+		_refresh_refinery()
 	_refresh_raids(state)
 	_refresh_jobs(state)
 	if _page == "shipyard":
@@ -1640,8 +1652,10 @@ func _refresh_selection(state: Dictionary) -> void:
 			var capped: bool = _view == "" and b.type != "command" and level >= _command_level()
 			acts.append({"id": "level", "icon": "rank", "disabled": dormant or capped or not _can_afford(cost),
 				"text": ("Needs Command\nCentre L%d" % (level + 1)) if capped else "Level %d\n%s" % [level + 1, _cost_text(cost)]})
+		if b.type == "extractor" and _view == "":
+			acts.append({"id": "refinery", "text": "Refineries", "icon": "metal"})
 		if b.type == "spaceport":
-			acts.append({"id": "port", "text": "Buy orders", "icon": "economy"})
+			acts.append({"id": "port", "text": "Trade", "icon": "economy"})
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
 				"disabled": not Net.open_job(_pid()).is_empty()})
 		if b.type == "foundry":
@@ -1712,6 +1726,8 @@ func _on_action(id: String) -> void:
 			_toggle_page("market")
 		"port":
 			_toggle_page("port")
+		"refinery":
+			_toggle_page("refinery")
 		"level":
 			Net.send({"type": "upgrade_building", "planet": _pid(), "slot": _selected})
 		"remove":
@@ -1947,6 +1963,8 @@ func _refresh_info(state: Dictionary) -> void:
 				lines.append("Upgrade the Command Centre to level %d first." % (level + 1))
 	if b.type == "command":
 		lines.append(_command_ladder())
+	if b.type == "extractor" and _view == "":
+		lines.append(_extractor_ladder(level))
 	if _is_facility(b.type):
 		var now := Net.now_ms()
 		var vault := []
@@ -2376,7 +2394,7 @@ func _refresh_port(_state: Dictionary) -> void:
 	var e := _econ()
 	var bids: Dictionary = e.get("bids", {})
 	var open := _berths_open_now()
-	var key := JSON.stringify([bids.keys(), open])
+	var key := JSON.stringify([bids.keys(), open, _sellable(), e.get("asks", {}).keys()])
 	if key != _port_key:
 		_port_key = key
 		for c in _port.get_children():
@@ -2394,6 +2412,12 @@ func _refresh_port(_state: Dictionary) -> void:
 		head.text = "Buy orders: pilots sell you these at your price, paid from your credits. From the High Port they lose %d%% to its tariff, so landing pays them more." % roundi(float(Net.catalog.get("tariff", 0.2)) * 100.0)
 		for item in Net.catalog.get("contractItems", ["metal", "ice"]):
 			_port_row(str(item))
+		var sell := _label(_port, 14)
+		sell.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sell.modulate = Color(0.8, 0.9, 0.95)
+		sell.text = "Sell: list your stock for pilots to buy at your price (from the High Port they pay its tariff on top), or sell it to the galactic market now, for less."
+		for item in _sellable():
+			_ask_row(item)
 	for row in _port.get_children():
 		if row.has_meta("update"):
 			row.get_meta("update").call()
@@ -2441,6 +2465,130 @@ func _port_row(item: String) -> void:
 			("buying %d at %d credits each" % [int(now.want), int(now.price)]) if not now.is_empty() else "not buying"]
 		text.modulate = Color(1, 1, 1) if not now.is_empty() else Color(0.8, 0.85, 0.9)
 		post.disabled = _qty(price) < 1 or _qty(want) < 1)
+
+
+## What the Star Port can sell from stock: what's in it among the goods it trades.
+func _sellable() -> Array:
+	var stock: Dictionary = _econ().get("stock", {})
+	var asks: Dictionary = _econ().get("asks", {})
+	return Array(Net.catalog.get("contractItems", ["metal", "ice"])).filter(func(i): return int(stock.get(i, 0)) > 0 or asks.has(i))
+
+
+## A sell row: list it for pilots, or sell some to the galactic market.
+func _ask_row(item: String) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_port.add_child(box)
+	var text := _label(box, 15)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var asked := int(_econ().get("asks", {}).get(item, 0))
+	var price := LineEdit.new()
+	price.placeholder_text = "price"
+	price.text = str(asked) if asked > 0 else ""
+	price.custom_minimum_size = Vector2(90, 0)
+	price.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	price.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	price.select_all_on_focus = true
+	row.add_child(price)
+	var list := Button.new()
+	list.text = "Update" if asked > 0 else "List"
+	row.add_child(list)
+	var unlist := Button.new()
+	unlist.text = "Unlist"
+	unlist.disabled = asked == 0
+	unlist.pressed.connect(func(): Net.send({"type": "set_ask", "item": item, "price": 0}))
+	row.add_child(unlist)
+	var market := Button.new()
+	row.add_child(market)
+	var send := func(_t = ""):
+		if _qty(price) >= 1:
+			Net.send({"type": "set_ask", "item": item, "price": _qty(price)})
+	list.pressed.connect(send)
+	price.text_submitted.connect(send)
+	var lot := func(): return mini(int(_econ().stock.get(item, 0)), 10)
+	market.pressed.connect(func():
+		if lot.call() > 0:
+			Net.send({"type": "market_sell", "item": item, "qty": lot.call()}))
+	box.set_meta("update", func():
+		var now := int(_econ().get("asks", {}).get(item, 0))
+		var name := _stock_name(item).capitalize() if item in ["metal", "ice"] else _stock_name(item)
+		var each := _galactic_price(item)
+		text.text = "%s: %d in stock, %s. The market pays %d each." % [name, int(_econ().stock.get(item, 0)),
+			("listed at %d credits each" % now) if now > 0 else "not listed", each]
+		market.text = "Sell %d: %d cr" % [lot.call(), lot.call() * each]
+		market.disabled = lot.call() < 1
+		list.disabled = _qty(price) < 1)
+
+
+## What the galactic market pays for one of `item` (the server's galacticPrice).
+func _galactic_price(item: String) -> int:
+	if item == "metal":
+		return 1
+	if item == "ice":
+		return 2
+	var value := float(Net.catalog.get("items", {}).get(item, {}).get("value", 0))
+	return maxi(1, roundi(value * float(Net.catalog.get("galacticRate", 0.6))))
+
+
+## The Extractor's tiers: the ore each level digs and the refinery that comes with it.
+func _extractor_ladder(level: int) -> String:
+	var tick_s := float(Net.catalog.get("tickMs", 5000)) / 1000.0
+	var lines := ["Level 1: metal and ice."]
+	var tiers: Dictionary = Net.catalog.get("extractorTiers", {})
+	for key in tiers:
+		var t: Dictionary = tiers[key]
+		var takes := []
+		for res in t.takes:
+			takes.append("%d %s" % [int(t.takes[res]), _stock_name(res)])
+		lines.append("Level %s%s: digs %s (%s a minute); the %s makes 1 %s from %s every %s." % [key, " (yours)" if int(key) <= level else "",
+			_stock_name(t.ore), _per_minute(float(t.rate) * 60.0 / tick_s), t.refinery, _stock_name(t.makes), " and ".join(takes), _minutes_text(int(t.every) * tick_s)])
+	return "\n".join(lines)
+
+
+## "minute", "2 minutes", "30 seconds".
+func _minutes_text(secs: float) -> String:
+	if secs < 60.0:
+		return "%d seconds" % roundi(secs)
+	var m := secs / 60.0
+	return "minute" if is_equal_approx(m, 1.0) else "%s minutes" % _per_minute(m)
+
+
+func _per_minute(n: float) -> String:
+	return str(int(n)) if is_equal_approx(n, roundf(n)) else "%.1f" % n
+
+
+## The Ores and refineries page: what the Extractor digs and refines, with a switch per refinery.
+func _refresh_refinery() -> void:
+	var ex := {}
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "extractor":
+			ex = b
+	var level := int(ex.get("level", 0))
+	var off: Array = ex.get("refineOff", [])
+	var key := JSON.stringify([level, off])
+	if key == _refinery_key:
+		return
+	_refinery_key = key
+	for c in _refinery.get_children():
+		_refinery.remove_child(c)
+		c.queue_free()
+	var head := _label(_refinery, 15)
+	head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	head.text = _extractor_ladder(level) + "\n\nA refinery waits until its inputs are in stock. Switch one off to keep its inputs to sell."
+	var tiers: Dictionary = Net.catalog.get("extractorTiers", {})
+	for k in tiers:
+		var tier := int(k)
+		var b := Button.new()
+		var on := not (float(tier) in off or tier in off)
+		if tier > level:
+			b.text = "%s: comes with Extractor level %d" % [tiers[k].refinery, tier]
+			b.disabled = true
+		else:
+			b.text = "%s: %s (tap to switch %s)" % [tiers[k].refinery, "on" if on else "off", "off" if on else "on"]
+			b.pressed.connect(func(): Net.send({"type": "set_refinery", "tier": tier, "on": not on}))
+		_refinery.add_child(b)
 
 
 ## The Carrier Dock on the home planet, or an empty Dictionary.

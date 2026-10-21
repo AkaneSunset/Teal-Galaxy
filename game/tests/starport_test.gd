@@ -6,7 +6,8 @@ extends Node
 ## buy order for ice. Two pilots over their own connections land on both berths. "Port P", the game
 ## itself, docks at the High Port: the Star Port refuses it a berth, so it takes the shuttle down and
 ## sells ice less the High Port's tariff. One of the others flies away; P takes the shuttle back up,
-## flies its ship down onto the free berth and sells ice again, at full price.
+## flies its ship down onto the free berth and sells ice again, at full price; then the Builder lists
+## ice for sale and P buys it back.
 ## Add `-- --server=ws://127.0.0.1:9000` for a server on another port. Prints PASS or FAIL and quits.
 
 const ExplorerMode := preload("res://explorer.gd")
@@ -160,7 +161,18 @@ func _steps() -> void:
 			if int(b.get("stock", {}).get("ice", 0)) != 20 or int(b.bids.ice.want) != 80:
 				_finish(false, "the Builder should have the 20 ice and want 80 more")
 				return
-			_finish(true, "berths full: shuttled down and sold less the tariff; a berth freed: landed on it and sold at full price")
+			_send(BUILDER, {"type": "set_ask", "item": "ice", "price": 3})
+			_step = "listed"
+		"listed":
+			var buy := _button("Buy 10 Ice from %s for 30 credits" % BUILDER)
+			if not buy:
+				return
+			buy.pressed.emit()
+			_step = "bought"
+		"bought":
+			if _credits() != 60 or _explorer._cargo("ice") != 10:
+				return
+			_finish(true, "berths full: shuttled down and sold less the tariff; a berth freed: landed on it, sold at full price and bought from the Star Port's listings")
 
 
 func _collect(n: int) -> void:

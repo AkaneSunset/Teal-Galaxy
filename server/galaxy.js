@@ -69,6 +69,16 @@ const PRODUCES = {
   habitat: { credits: 1 }, // rent: 12 credits a minute
   hydroponics: { credits: 2 }, // sells food: 24 credits a minute
 };
+// The Extractor digs metal and ice from level 1. Each level from 2 adds a rarer ore and a refinery
+// that turns ores (and the last refinery's alloy) into something worth more: per tier, the ore and
+// how much a tick it digs, and the refinery's recipe, run once every `every` ticks while the
+// inputs are in stock. The Power Plant speeds both up; the Warehouse caps what's kept.
+const EXTRACTOR_TIERS = {
+  2: { ore: 'copper', rate: 1 / 6, refinery: 'Alloy Refinery', takes: { metal: 4, copper: 2 }, makes: 'alloy', every: 12 },
+  3: { ore: 'titanium', rate: 1 / 12, refinery: 'Titanium Refinery', takes: { titanium: 2, alloy: 2 }, makes: 'ti_alloy', every: 24 },
+  4: { ore: 'iridium', rate: 1 / 24, refinery: 'Iridium Refinery', takes: { iridium: 2, ti_alloy: 1 }, makes: 'ir_alloy', every: 48 },
+  5: { ore: 'xenite', rate: 1 / 48, refinery: 'Exotic Matter Refinery', takes: { xenite: 2, ir_alloy: 1 }, makes: 'exotic', every: 96 },
+};
 // Building takes time, and every building can be upgraded up to MAX_LEVEL. Each level costs and
 // takes twice what the one before did, and produces more (see levelled effects in tick()).
 // A building under construction or being upgraded does nothing until it's done.
@@ -150,6 +160,7 @@ function newEconomy() {
     merit: 0,
     market: {}, // the Carrier Dock's listings: item -> credits per unit
     bids: {}, // the Star Port's buy orders: item -> {price, want}
+    asks: {}, // the Star Port's sell listings to pilots: item -> credits per unit
     alerts: [], // [{at, text}] for the phone's toasts, the last 20
   };
 }
@@ -197,6 +208,7 @@ function claimBase(g, name) {
       merit: 0,
       market: {},
       bids: {},
+      asks: {},
       alerts: [],
     };
     S.locate(g);
@@ -458,6 +470,7 @@ function tick(g, now = Date.now()) {
           if (res === 'credits') e.credits += whole;
           else e.stock[res] = Math.min(cap, (e.stock[res] || 0) + whole);
         }
+        if (b.type === 'extractor') refine(e, b, level, boost, cap);
         changed = true;
       }
       const fac = H.FACILITIES[b.type];
@@ -731,6 +744,7 @@ function recoverRaids(g) {
     e.merit ||= 0;
     e.market ||= {};
     e.bids ||= {};
+    e.asks ||= {};
     e.alerts ||= [];
   }
   for (const name of Object.keys(g.pilots)) pilot(g, name);
@@ -850,7 +864,7 @@ const CONTRACT_MAX = 1000; // units one contract can ask for
 const OPEN_CONTRACTS = 5; // open contracts per pilot
 const CLOSED_KEPT = 20; // finished and cancelled contracts kept for the record
 // What pilots can contract Builders for: raw materials and war supplies.
-const CONTRACT_ITEMS = ['metal', 'ice', ...Object.keys(H.ITEMS).filter((k) => ['material', 'supply'].includes(H.ITEMS[k].cat))];
+const CONTRACT_ITEMS = ['metal', 'ice', ...Object.keys(H.ITEMS).filter((k) => ['ore', 'material', 'supply'].includes(H.ITEMS[k].cat))];
 // War Merit per unit donated: an item's value, metal 2 and ice 3.
 const MERIT_VALUE = { metal: 2, ice: 3, ...Object.fromEntries(Object.entries(H.ITEMS).map(([k, d]) => [k, d.value])) };
 
@@ -863,6 +877,69 @@ function stockable(item) {
 function amountOf(item, n) {
   const name = H.ITEMS[item]?.name || item;
   return `${n} ${n === 1 || !H.ITEMS[item] || /(s|matter)$/.test(name) ? name : `${name}s`}`;
+}
+
+// The Extractor's tiers above level 1: each digs its ore, and its refinery runs its recipe.
+function refine(e, b, level, boost, cap) {
+  b.refine = typeof b.refine === 'object' && b.refine ? b.refine : {}; // tier -> ticks of work done
+  for (let tier = 2; tier <= level; tier++) {
+    const t = EXTRACTOR_TIERS[tier];
+    if ((e.stock[t.ore] || 0) < cap) {
+      b.carry[t.ore] = (b.carry[t.ore] || 0) + t.rate * boost;
+      const whole = Math.floor(b.carry[t.ore] + 1e-9);
+      if (whole >= 1) {
+        b.carry[t.ore] -= whole;
+        e.stock[t.ore] = Math.min(cap, (e.stock[t.ore] || 0) + whole);
+      }
+    }
+    if ((b.refineOff || []).includes(tier)) continue;
+    b.refine[tier] = Math.min(t.every, (b.refine[tier] || 0) + boost);
+    if (b.refine[tier] < t.every) continue;
+    if ((e.stock[t.makes] || 0) >= cap) continue;
+    if (Object.entries(t.takes).some(([res, n]) => (e.stock[res] || 0) < n)) continue; // waits, ready to go
+    for (const [res, n] of Object.entries(t.takes)) e.stock[res] -= n;
+    e.stock[t.makes] = (e.stock[t.makes] || 0) + 1;
+    b.refine[tier] = 0;
+  }
+}
+
+// The Builder turns one of their Extractor's refineries off (to keep its inputs) or on again.
+function setRefinery(g, builder, tier, on) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('you have no home planet');
+  const b = home.buildings.find((x) => x.type === 'extractor');
+  if (!b) return fail('build an Extractor first');
+  if (!Object.hasOwn(EXTRACTOR_TIERS, tier)) return fail('no such refinery');
+  if ((b.level ?? 1) < Number(tier)) return fail(`the ${EXTRACTOR_TIERS[tier].refinery} comes with Extractor level ${tier}`);
+  const off = new Set(b.refineOff || []);
+  if (on) off.delete(Number(tier));
+  else off.add(Number(tier));
+  b.refineOff = [...off];
+  return { ok: true };
+}
+
+// The galactic market: it buys anything a Builder has in stock, at any time, for less than pilots
+// usually pay. Credits a unit.
+const GALACTIC_RATE = 0.6;
+function galacticPrice(item) {
+  if (item === 'metal') return 1;
+  if (item === 'ice') return 2;
+  return H.ITEMS[item] ? Math.max(1, Math.round(H.ITEMS[item].value * GALACTIC_RATE)) : 0;
+}
+
+// The Builder sells from stock to the galactic market, through their Star Port.
+function marketSell(g, builder, item, qty) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('you have no home planet');
+  if (!hasBuilding(g, 'spaceport', home.id)) return fail('build a Star Port first');
+  if (!CONTRACT_ITEMS.includes(item)) return fail('the galactic market buys materials, ores and supplies');
+  if (!Number.isInteger(qty) || qty < 1) return fail('bad amount');
+  const e = econ(g, home.id);
+  if ((e.stock[item] || 0) < qty) return fail(`you only have ${e.stock[item] || 0}`);
+  const paid = galacticPrice(item) * qty;
+  e.stock[item] -= qty;
+  e.credits += paid;
+  return { ok: true, paid };
 }
 
 function homeOf(g, builder) {
@@ -926,7 +1003,7 @@ function setBid(g, builder, item, price, want) {
   const home = homeOf(g, builder);
   if (!home) return fail('you have no home planet');
   if (!hasBuilding(g, 'spaceport', home.id)) return fail('build a Star Port first');
-  if (!CONTRACT_ITEMS.includes(item)) return fail('the Star Port buys materials and supplies');
+  if (!CONTRACT_ITEMS.includes(item)) return fail('the Star Port buys materials, ores and supplies');
   const e = econ(g, home.id);
   e.bids ||= {};
   if (price === 0 || price === null || price === undefined) {
@@ -969,6 +1046,50 @@ function sellToBuilder(g, name, builder, item, qty, tariffed) {
   log(g, `${name} sold ${amountOf(item, qty)} to ${builder}'s Star Port`);
   F.alert(e, `${name} sold you ${amountOf(item, qty)} for ${cost} credits${tariffed ? ' from the High Port' : ''}`);
   return { ok: true, paid: cost - tariff, tariff };
+}
+
+// The Star Port's sell listings: the Builder offers anything they'd buy back (materials, ores,
+// supplies) to any pilot at `price` a unit (0 or null takes it off). A pilot on a berth pays the
+// price; from the High Port they pay the tariff on top, to the platform.
+function setAsk(g, builder, item, price) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('you have no home planet');
+  if (!hasBuilding(g, 'spaceport', home.id)) return fail('build a Star Port first');
+  if (!CONTRACT_ITEMS.includes(item)) return fail('the Star Port sells materials, ores and supplies');
+  const e = econ(g, home.id);
+  e.asks ||= {};
+  if (price === 0 || price === null || price === undefined) {
+    delete e.asks[item];
+    return { ok: true, price: 0 };
+  }
+  if (!Number.isInteger(price) || price < 1 || price > PRICE_MAX) return fail(`a price is a whole number of credits from 1 to ${PRICE_MAX}`);
+  e.asks[item] = price;
+  return { ok: true, price };
+}
+
+// A pilot buys from a Builder's Star Port listings, into their cargo.
+function buyFromBuilder(g, name, builder, item, qty, tariffed) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('no such Builder');
+  if (!hasBuilding(g, 'spaceport', home.id)) return fail(`${builder} has no Star Port`);
+  if (name === builder) return fail("you can't buy from your own base");
+  const e = econ(g, home.id);
+  const price = CONTRACT_ITEMS.includes(item) && Object.hasOwn(e.asks || {}, item) ? e.asks[item] : 0;
+  if (!price) return fail(`${builder} isn't selling that`);
+  if (!Number.isInteger(qty) || qty < 1) return fail('bad amount');
+  const have = e.stock[item] || 0;
+  if (qty > have) return fail(have ? `only ${have} in stock` : 'sold out');
+  const cost = price * qty;
+  const tariff = tariffed ? Math.round(cost * TARIFF) : 0;
+  const p = pilot(g, name);
+  if (p.credits < cost + tariff) return fail('not enough credits');
+  p.credits -= cost + tariff;
+  e.credits += cost;
+  e.stock[item] = have - qty;
+  p.cargo[item] = (p.cargo[item] || 0) + qty;
+  log(g, `${name} bought ${amountOf(item, qty)} at ${builder}'s Star Port`);
+  F.alert(e, `${name} bought ${amountOf(item, qty)} from your Star Port for ${cost} credits`);
+  return { ok: true, cost, tariff };
 }
 
 // A pilot asks Builders of their faction for goods. The reward is held from their credits and
@@ -1072,6 +1193,13 @@ function sell(g, name) {
 }
 
 module.exports = {
+  EXTRACTOR_TIERS,
+  GALACTIC_RATE,
+  galacticPrice,
+  marketSell,
+  setRefinery,
+  setAsk,
+  buyFromBuilder,
   BUILDINGS,
   NODES,
   COMMAND_SLOT,

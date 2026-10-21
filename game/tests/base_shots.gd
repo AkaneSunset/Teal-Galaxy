@@ -43,6 +43,10 @@ func _process(delta: float) -> void:
 			func(): for i in 4: Net.send({"type": "upgrade_building", "planet": Net.home, "slot": 8}),
 			func(): _build(["hydroponics", "warehouse", "power", "foundry", "dock"]); _builder.select_pad(-1),
 			func(): return "4-base-level-5",
+			func(): Net.send({"type": "set_ask", "item": "alloy", "price": 30}); for i in 2: Net.send({"type": "upgrade_building", "planet": Net.home, "slot": 1}),
+			func(): _builder.select_pad(1); _builder._show_page("refinery"); return "4b-refineries",
+			func(): _builder._show_page(""); _builder.select_pad(0); _builder._show_page("port"); _builder._port.get_parent().get_parent().scroll_vertical = 2400; return "4c-star-port-sell",
+			func(): _builder._show_page(""); _builder.select_pad(-1),
 			func(): _builder._zoom = 170.0; _builder._focus = Vector3(40, 0, 60); _builder._place_camera(); return "5-close-up",
 			func(): get_tree().quit(),
 		]

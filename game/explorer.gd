@@ -1659,6 +1659,7 @@ func _star_port_bids(builder: String, tariffed: bool) -> void:
 	var bids: Dictionary = Net.state.get("bases", {}).get(builder, {}).get("bids", {})
 	if bids.is_empty():
 		_dock_note("%s's Star Port isn't buying anything right now." % builder)
+		_star_port_asks(builder, tariffed)
 		return
 	var tariff: float = float(Net.catalog.get("tariff", 0.2)) if tariffed else 0.0
 	var hold: Dictionary = _me().get("hold", {})
@@ -1680,6 +1681,30 @@ func _star_port_bids(builder: String, tariffed: bool) -> void:
 		_dock_button(text, func(): Net.send({"type": "sell_to_builder", "builder": builder, "item": item, "qty": qty}))
 	if tariffed and any:
 		_dock_note("Land at the Star Port to sell without the High Port's %d%% tariff." % roundi(tariff * 100.0))
+	_star_port_asks(builder, tariffed)
+
+
+## The Builder's Star Port sell listings: buy up to 10 at a time into your cargo. From the High
+## Port (`tariffed`) the platform's tariff goes on top.
+func _star_port_asks(builder: String, tariffed: bool) -> void:
+	var base: Dictionary = Net.state.get("bases", {}).get(builder, {})
+	var asks: Dictionary = base.get("asks", {})
+	var tariff: float = float(Net.catalog.get("tariff", 0.2)) if tariffed else 0.0
+	var credits := int(_me().get("credits", 0))
+	for item in asks:
+		var price := int(asks[item])
+		var stock := int(base.get("stock", {}).get(item, 0))
+		var qty := mini(stock, 10)
+		while qty > 0 and price * qty + roundi(price * qty * tariff) > credits:
+			qty -= 1
+		if qty <= 0:
+			_dock_note("%s sells %s at %d credits each: %s" % [builder, WarInfo.goods_name(item), price, "sold out" if stock <= 0 else "you can't afford one"])
+			continue
+		var cut := roundi(price * qty * tariff)
+		var text := "Buy %d %s from %s for %d credits" % [qty, WarInfo.goods_name(item), builder, price * qty + cut]
+		if cut > 0:
+			text += " (%d of it the High Port's tariff)" % cut
+		_dock_button(text, func(): Net.send({"type": "buy_from_builder", "builder": builder, "item": item, "qty": qty}))
 
 
 ## At a Builder's base: their Carrier Dock market, if it's finished and trades with your side.

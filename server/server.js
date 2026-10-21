@@ -47,13 +47,13 @@ const BASE = 'only Builders run a base';
 const BUILDER_ONLY = {
   build: BASE, post_job: BASE, ship_cargo: BASE, upgrade_security: BASE, sound_alarm: BASE, queue_ship: BASE, cancel_ship: BASE,
   place_piece: BASE, remove_piece: BASE, clear_obstacle: BASE, upgrade_building: BASE,
-  found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war',
+  found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', set_ask: 'only Builders run a Star Port', market_sell: 'only Builders run a Star Port', set_refinery: 'only Builders run an Extractor', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war',
 };
 const PILOT_ONLY = {
   collect: 'only pilots carry cargo', deliver: 'only pilots carry cargo', sell: 'only pilots sell to the Fence',
   dock_buy: 'only pilots buy at a Carrier Dock', post_contract: 'only pilots post contracts', cancel_contract: 'only pilots post contracts', demo_capture: 'only pilots take sectors',
   dock_request: 'only pilots dock at stations', undock: 'only pilots dock at stations', land_request: 'only pilots land at a Star Port',
-  sell_to_builder: 'only pilots sell at a Star Port',
+  sell_to_builder: 'only pilots sell at a Star Port', buy_from_builder: 'only pilots buy at a Star Port',
   enter_space: 'only pilots walk around', leave_space: 'only pilots walk around', walk: 'only pilots walk around', ship_open: 'only pilots have carriers',
   battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
   battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles',
@@ -425,7 +425,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE,
         buildings: G.BUILDINGS, nodes: G.NODES, commandSlot: G.COMMAND_SLOT, commandLevels: G.COMMAND_LEVELS,
         storage: { base: G.STORAGE_BASE, perLevel: G.STORAGE_PER_LEVEL }, powerBoost: G.POWER_BOOST, produces: G.PRODUCES,
-        berthsPerLevel: G.BERTHS_PER_LEVEL, berthsMax: G.BERTHS_MAX, tariff: G.TARIFF, wantMax: G.WANT_MAX, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH,
+        berthsPerLevel: G.BERTHS_PER_LEVEL, berthsMax: G.BERTHS_MAX, tariff: G.TARIFF, wantMax: G.WANT_MAX, extractorTiers: G.EXTRACTOR_TIERS, galacticRate: G.GALACTIC_RATE, tickMs, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH,
         buildSpeed: Number.isFinite(galaxy.buildSpeed) ? galaxy.buildSpeed : 0,
         // The faction war
         factions: F.FACTIONS,
@@ -535,11 +535,23 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'set_bid':
         result = G.setBid(galaxy, me.name, msg.item, msg.price, msg.want);
         break;
-      case 'sell_to_builder': {
-        // From a berth at the Builder's Star Port, at full price; from their High Port, less the tariff.
+      case 'set_ask':
+        result = G.setAsk(galaxy, me.name, msg.item, msg.price);
+        break;
+      case 'market_sell':
+        result = G.marketSell(galaxy, me.name, msg.item, msg.qty);
+        break;
+      case 'set_refinery':
+        result = G.setRefinery(galaxy, me.name, msg.tier, msg.on === true);
+        break;
+      case 'sell_to_builder':
+      case 'buy_from_builder': {
+        // From a berth at the Builder's Star Port, at the price; from their High Port, the tariff
+        // comes off what a seller gets, or on top of what a buyer pays.
         const home = galaxy.system.planets.find((p) => p.owner === msg.builder && p.kind !== 'satellite');
-        if (home && me.berth?.base === home.id) result = G.sellToBuilder(galaxy, me.name, msg.builder, msg.item, msg.qty, false);
-        else if (home && me.pad?.station === home.id) result = G.sellToBuilder(galaxy, me.name, msg.builder, msg.item, msg.qty, true);
+        const trade = msg.type === 'sell_to_builder' ? G.sellToBuilder : G.buyFromBuilder;
+        if (home && me.berth?.base === home.id) result = trade(galaxy, me.name, msg.builder, msg.item, msg.qty, false);
+        else if (home && me.pad?.station === home.id) result = trade(galaxy, me.name, msg.builder, msg.item, msg.qty, true);
         else result = { ok: false, reason: `land at ${msg.builder}'s Star Port or dock at their High Port to trade` };
         break;
       }
