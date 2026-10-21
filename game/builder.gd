@@ -137,6 +137,8 @@ var _found_key := ""
 var _founding := "" # the outpost type being founded
 var _market: VBoxContainer # the Carrier Dock's market
 var _market_key := ""
+var _port: VBoxContainer # the Star Port page: its berths and buy orders
+var _port_key := ""
 var _raids: Label
 var _info: Label
 var _yard_fleet: Label
@@ -290,12 +292,12 @@ func _make_pad(world: Node3D, pos: Vector3, size: float) -> Dictionary:
 
 	var label := Label3D.new()
 	label.font_size = 40
-	label.pixel_size = 0.0011 # the same size on screen however far the camera is
+	label.pixel_size = 0.0005 # the same size on screen however far the camera is
 	label.fixed_size = true
 	label.outline_size = 10
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
-	label.position.y = 52.0
+	label.position.y = 16.0
 	label.visible = false
 	root.add_child(label)
 
@@ -791,6 +793,12 @@ func _build_drawer(layer: Control) -> void:
 	body.add_child(_market)
 	_pages["market"] = _market
 
+	# The Star Port: who's on its berths, and buy orders pilots sell to.
+	_port = VBoxContainer.new()
+	_port.add_theme_constant_override("separation", 6)
+	body.add_child(_port)
+	_pages["port"] = _port
+
 	var chat := VBoxContainer.new()
 	chat.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_child(chat)
@@ -1155,7 +1163,7 @@ func _show_page(page: String) -> void:
 	_drawer.visible = page != ""
 	_drawer.custom_minimum_size.x = 520 if page == "found" else 340 # room for a row of sectors
 	_place_toasts()
-	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your outposts", "market": "Dock market"}.get(page, "")
+	_drawer_title.text = {"jobs": "Jobs", "raids": "Raids", "chat": "Chat", "info": "Info", "shipyard": "Shipyard", "sites": "Your outposts", "market": "Dock market", "port": "Star Port"}.get(page, "")
 	if page != "":
 		_shop.visible = false
 	if page == "info" and _selected >= 0:
@@ -1165,6 +1173,8 @@ func _show_page(page: String) -> void:
 		_found_key = ""
 	if page == "market":
 		_market_key = ""
+	if page == "port":
+		_port_key = ""
 	if not Net.state.is_empty():
 		_refresh(Net.state)
 
@@ -1495,6 +1505,8 @@ func _refresh(state: Dictionary) -> void:
 		_refresh_found(state)
 	if _page == "market":
 		_refresh_market(state)
+	if _page == "port":
+		_refresh_port(state)
 	_refresh_raids(state)
 	_refresh_jobs(state)
 	if _page == "shipyard":
@@ -1629,6 +1641,7 @@ func _refresh_selection(state: Dictionary) -> void:
 			acts.append({"id": "level", "icon": "rank", "disabled": dormant or capped or not _can_afford(cost),
 				"text": ("Needs Command\nCentre L%d" % (level + 1)) if capped else "Level %d\n%s" % [level + 1, _cost_text(cost)]})
 		if b.type == "spaceport":
+			acts.append({"id": "port", "text": "Buy orders", "icon": "economy"})
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
 				"disabled": not Net.open_job(_pid()).is_empty()})
 		if b.type == "foundry":
@@ -1697,6 +1710,8 @@ func _on_action(id: String) -> void:
 			_toggle_page("shipyard")
 		"market":
 			_toggle_page("market")
+		"port":
+			_toggle_page("port")
 		"level":
 			Net.send({"type": "upgrade_building", "planet": _pid(), "slot": _selected})
 		"remove":
@@ -2353,6 +2368,79 @@ func _market_row(item: String, price: int) -> void:
 		text.text = "%s: %d in stock, %s" % [_stock_name(item).capitalize() if item in ["metal", "ice"] else _stock_name(item), have, ("%d credits each" % price) if price > 0 else "not for sale"]
 		text.modulate = Color(1, 1, 1) if price > 0 else Color(0.8, 0.85, 0.9)
 		list.disabled = _qty(edit) < 1)
+
+
+## The Star Port page: who's landed on its berths, and the buy orders pilots sell to (in full
+## from a berth, less the High Port's tariff from orbit).
+func _refresh_port(_state: Dictionary) -> void:
+	var e := _econ()
+	var bids: Dictionary = e.get("bids", {})
+	var open := _berths_open_now()
+	var key := JSON.stringify([bids.keys(), open])
+	if key != _port_key:
+		_port_key = key
+		for c in _port.get_children():
+			_port.remove_child(c)
+			c.queue_free()
+		var berths := _label(_port, 15)
+		berths.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		berths.set_meta("update", func():
+			var names: Array = Net.state.get("berths", {}).get(Net.home, []).filter(func(n): return n != null)
+			berths.text = "Berths: %d of %d taken%s. Pilots land on a berth; when they're full, they shuttle down from the High Port." % [
+				names.size(), open, (" (%s)" % ", ".join(names)) if not names.is_empty() else ""])
+		var head := _label(_port, 14)
+		head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		head.modulate = Color(0.8, 0.9, 0.95)
+		head.text = "Buy orders: pilots sell you these at your price, paid from your credits. From the High Port they lose %d%% to its tariff, so landing pays them more." % roundi(float(Net.catalog.get("tariff", 0.2)) * 100.0)
+		for item in Net.catalog.get("contractItems", ["metal", "ice"]):
+			_port_row(str(item))
+	for row in _port.get_children():
+		if row.has_meta("update"):
+			row.get_meta("update").call()
+
+
+func _port_row(item: String) -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	_port.add_child(box)
+	var text := _label(box, 15)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	box.add_child(row)
+	var bid: Dictionary = _econ().get("bids", {}).get(item, {})
+	var price := LineEdit.new()
+	price.placeholder_text = "price"
+	price.text = str(int(bid.price)) if not bid.is_empty() else ""
+	var want := LineEdit.new()
+	want.placeholder_text = "how many"
+	want.text = str(int(bid.want)) if not bid.is_empty() else ""
+	for edit in [price, want]:
+		edit.custom_minimum_size = Vector2(90, 0)
+		edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+		edit.select_all_on_focus = true
+		row.add_child(edit)
+	var post := Button.new()
+	post.text = "Update" if not bid.is_empty() else "Buy"
+	row.add_child(post)
+	var stop := Button.new()
+	stop.text = "Stop"
+	stop.disabled = bid.is_empty()
+	stop.pressed.connect(func(): Net.send({"type": "set_bid", "item": item, "price": 0}))
+	row.add_child(stop)
+	var send := func(_t = ""):
+		if _qty(price) >= 1 and _qty(want) >= 1:
+			Net.send({"type": "set_bid", "item": item, "price": _qty(price), "want": _qty(want)})
+	post.pressed.connect(send)
+	price.text_submitted.connect(send)
+	want.text_submitted.connect(send)
+	box.set_meta("update", func():
+		var now: Dictionary = _econ().get("bids", {}).get(item, {})
+		var name := _stock_name(item).capitalize() if item in ["metal", "ice"] else _stock_name(item)
+		text.text = "%s: %d in stock, %s" % [name, int(_econ().stock.get(item, 0)),
+			("buying %d at %d credits each" % [int(now.want), int(now.price)]) if not now.is_empty() else "not buying"]
+		text.modulate = Color(1, 1, 1) if not now.is_empty() else Color(0.8, 0.85, 0.9)
+		post.disabled = _qty(price) < 1 or _qty(want) < 1)
 
 
 ## The Carrier Dock on the home planet, or an empty Dictionary.

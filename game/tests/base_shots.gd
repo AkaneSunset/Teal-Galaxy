@@ -37,6 +37,8 @@ func _process(delta: float) -> void:
 			func(): _build(["spaceport", "extractor", "habitat"]),
 			func(): return "1-base-level-1",
 			func(): _builder.select_pad(8); _builder._show_page("info"); return "2-command-centre-info",
+			func(): Net.send({"type": "set_bid", "item": "ice", "price": 6, "want": 40}),
+			func(): _builder._show_page(""); _builder.select_pad(0); _builder._show_page("port"); return "2b-star-port",
 			func(): _builder._show_page(""); _builder.select_pad(4); return "3-locked-node",
 			func(): for i in 4: Net.send({"type": "upgrade_building", "planet": Net.home, "slot": 8}),
 			func(): _build(["hydroponics", "warehouse", "power", "foundry", "dock"]); _builder.select_pad(-1),
