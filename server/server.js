@@ -3,25 +3,79 @@
 //
 //   node server.js            (listens on port 8080, saves to galaxy.json)
 //   PORT=9000 SAVE_FILE=x.json node server.js
-//   DEMO=1 node server.js     (every base starts with enough to build everything, and builds 10x faster)
+//   DEMO=1 node server.js     (every base starts with enough to build everything, and builds 10x faster;
+//                              pilots can take sectors with demo_capture to play-test the war; the demo
+//                              war: every faction holds 25% of every system, so anyone may attack
+//                              anywhere, captures lock for 5 minutes, and every pilot flies a carrier)
+//   BATTLE_SPEED=10 node server.js   (sector battles run 10x faster, for the game tests)
 //   BUILD_SPEED=0 node server.js   (buildings finish instantly, for the game smoke tests)
+//   ADMIN_KEY=<secret> node server.js   (apps that say hello with this admin_key are admins: they can
+//                                        play the Coma Conglomerate and steer its AI director)
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+const B = require('./battle');
+const D = require('./director');
+const F = require('./factions');
 const G = require('./galaxy');
 const H = require('./heist');
 const N = require('./navy');
 const S = require('./sites');
+const SP = require('./spaces');
+const W = require('./war');
 
 const TICK_MS = 5000;
 const CHAT_MAX = 200;
 const CHAT_GAP_MS = 500; // at most two chat lines a second per player
 const RAID_TICK_MS = 200; // reveals, Heat and the run clock
 const RAID_MSGS_PER_S = 30; // per raider; more than this is dropped
+const SPACE_MSGS_PER_S = 10; // dock_request, enter_space, leave_space and ship_open, per pilot
+const BATTLE_JOINS_PER_S = 2; // battle_start and battle_join, per pilot
+// Whether a connection has sent more than `perS` messages of one kind (`key`) this second.
+function tooFast(me, key, perS, t = Date.now()) {
+  const w = ((me.limits ??= {})[key] ??= { at: 0, n: 0 });
+  if (t - w.at >= 1000) [w.at, w.n] = [t, 0];
+  return ++w.n > perS;
+}
 
-function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, buildSpeed = null } = {}) {
+// Messages only a Builder (phone) or only a pilot (PC) sends, and what the other gets told. A
+// Builder and a pilot of the same name are different characters, so neither may play the other's.
+const BASE = 'only Builders run a base';
+const BUILDER_ONLY = {
+  build: BASE, post_job: BASE, ship_cargo: BASE, upgrade_security: BASE, sound_alarm: BASE, queue_ship: BASE, cancel_ship: BASE,
+  place_piece: BASE, remove_piece: BASE, clear_obstacle: BASE, upgrade_building: BASE,
+  found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war',
+};
+const PILOT_ONLY = {
+  collect: 'only pilots carry cargo', deliver: 'only pilots carry cargo', sell: 'only pilots sell to the Fence',
+  dock_buy: 'only pilots buy at a Carrier Dock', post_contract: 'only pilots post contracts', cancel_contract: 'only pilots post contracts', demo_capture: 'only pilots take sectors',
+  dock_request: 'only pilots dock at stations', undock: 'only pilots dock at stations',
+  enter_space: 'only pilots walk around', leave_space: 'only pilots walk around', walk: 'only pilots walk around', ship_open: 'only pilots have carriers',
+  battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
+  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles',
+  battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
+};
+// Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
+const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
+
+// Whether a hello's admin_key is the server's ADMIN_KEY (none set: nobody is an admin). The bytes
+// are compared in constant time, so the key can't be found a character at a time; a key of another
+// length never matches. The key is never echoed or logged.
+function adminCheck(secret) {
+  const want = secret ? Buffer.from(String(secret)) : null;
+  return (key) => {
+    if (!want || typeof key !== 'string') return false;
+    const got = Buffer.from(key);
+    return got.length === want.length && crypto.timingSafeEqual(got, want);
+  };
+}
+
+// `demoWar` turns the demo war (war.js setDemo) on or off for the whole process; left out, it stays
+// as it is. `battleSpeed` is BATTLE_SPEED.
+function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, demoWar, buildSpeed = null, adminKey = null, battleSpeed = 1 } = {}) {
+  if (demoWar !== undefined) W.setDemo(demoWar);
   let galaxy = G.newGalaxy();
   if (saveFile && fs.existsSync(saveFile)) {
     galaxy = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
@@ -32,9 +86,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // Demo mode builds 10 times faster; tests can pass Infinity for instant buildings.
   galaxy.buildSpeed = buildSpeed ?? (demo ? 10 : 1);
   const runs = new Map(); // pilot name -> live raid run (server only: holds container contents)
+  const isAdmin = adminCheck(adminKey);
 
   const wss = new WebSocketServer({ port });
-  const clients = new Map(); // ws -> { id, role, name }
+  const clients = new Map(); // ws -> { id, role, name, admin, ws, and a pilot's space, pad, over, battle }
   let nextClientId = 1;
   let saveTimer = null;
 
@@ -50,13 +105,111 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
   }
 
+  // Everything about the galaxy goes only to apps it has welcomed: not to one that hasn't said
+  // hello yet, or was turned away.
   function broadcast(msg, except = null) {
-    for (const ws of clients.keys()) if (ws !== except) send(ws, msg);
+    for (const [ws, c] of clients) if (ws !== except && c.role) send(ws, msg);
+  }
+
+  // The galaxy as a player may see it: the Coma director's settings are for admins only, and so is
+  // which armadas an admin sent by hand (players see every armada, as ships in space). It is only
+  // ever written out as JSON, which leaves the undefined fields out. Both views carry the sector
+  // battles running now (`battles`), which are never saved.
+  function playerView() {
+    const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list() };
+  }
+
+  function adminView() {
+    return { ...galaxy, battles: battles.list() };
+  }
+
+  function stateFor(me) {
+    return me.admin ? adminView() : playerView();
+  }
+
+  // The state to every welcomed app: admins get all of it, everyone else the player view (each
+  // written once).
+  function broadcastState(except = null) {
+    let all = null;
+    let open = null;
+    for (const [ws, c] of clients) {
+      if (ws === except || !c.role || ws.readyState !== ws.OPEN) continue;
+      if (c.admin) ws.send((all ??= JSON.stringify({ type: 'state', state: adminView() })));
+      else ws.send((open ??= JSON.stringify({ type: 'state', state: playerView() })));
+    }
   }
 
   function changed() {
-    broadcast({ type: 'state', state: galaxy });
+    broadcastState();
     save();
+  }
+
+  // --- Shared spaces and sector battles ----------------------------------------------------
+
+  function pilots() {
+    return [...clients.values()].filter((c) => c.role === 'explorer');
+  }
+
+  // Stations: every contested world's orbital (not the capitals'), and every Builder planet's High Port.
+  const spaces = SP.createSpaces({
+    isStation: (id) => {
+      const wp = W.planet(galaxy, id);
+      if (wp) return !wp.capital;
+      return galaxy.system.planets.some((p) => p.id === id && p.kind !== 'satellite');
+    },
+    isSurface: (id) => galaxy.system.planets.some((p) => p.id === id),
+    factionOf: (name) => (Object.hasOwn(galaxy.pilots, name) ? galaxy.pilots[name].faction ?? null : null),
+    people: pilots,
+    send: (c, msg) => send(c.ws, msg),
+  });
+
+  const battles = B.createBattles({ galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed });
+
+  // Where a pilot is, for the battle rules: the planet the carrier they're aboard is over (its
+  // owner flying in that orbit, or docked at that planet's station), and the station they're at.
+  function where(me) {
+    const ship = me.space?.startsWith('ship:') ? me.space.slice(5) : null;
+    const owner = ship && pilots().find((c) => c.name === ship);
+    const docked = owner?.pad && W.planet(galaxy, owner.pad.station) ? owner.pad.station : null;
+    const station = me.space?.startsWith('station:') ? me.space.slice(8) : me.pad?.station ?? null;
+    return { over: owner ? docked || owner.over || null : null, station };
+  }
+
+  // dock_request, enter_space, leave_space and ship_open.
+  function space(ws, me, msg) {
+    let result = { ok: true };
+    if (msg.type === 'dock_request') result = spaces.dock(me, msg.station);
+    else if (msg.type === 'enter_space') result = spaces.enter(me, msg.space, msg);
+    else if (msg.type === 'leave_space') spaces.leave(me);
+    else spaces.setOpen(me, msg.open);
+    if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+  }
+
+  function pilotFaction(me) {
+    return Object.hasOwn(galaxy.pilots, me.name) ? galaxy.pilots[me.name].faction ?? null : null;
+  }
+
+  // A character's record notes when its app last spoke: the director counts who is active.
+  function seen(me) {
+    const book = me.role === 'builder' ? galaxy.bases : me.role === 'explorer' ? galaxy.pilots : null;
+    if (book && Object.hasOwn(book, me.name)) book[me.name].seenAt = now();
+  }
+
+  // The admins-only faction (the Coma Conglomerate) a character plays for, or null. Names are not
+  // passwords, so such a character needs the key: at hello, and again with every message, in case
+  // an admin took it into Coma while another app was playing it.
+  function adminsOnly(role, name) {
+    const book = role === 'builder' ? galaxy.bases || {} : galaxy.pilots;
+    const f = Object.hasOwn(book, name) ? book[name].faction : null;
+    return Object.hasOwn(F.FACTIONS, f) && !F.FACTIONS[f].playable ? F.FACTIONS[f] : null;
+  }
+
+  // Turns an app away from a character: with no role, nothing it sends is acted on and it hears
+  // nothing more of the galaxy.
+  function turnAway(ws, me, faction) {
+    me.role = me.name = null;
+    send(ws, { type: 'error', reason: `that character plays for the ${faction.name}: admins only` });
   }
 
   // --- Raids ---------------------------------------------------------------------------
@@ -243,15 +396,44 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 
   function handle(ws, me, msg) {
     if (msg.type === 'hello') {
-      me.role = msg.role === 'builder' ? 'builder' : 'explorer';
-      me.name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
-      const catalog = { attack: { travel: N.TRAVEL_S, loot: N.LOOT_SHARE, shield: N.SHIELD_MS }, sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES }, ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX, items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH, buildSpeed: Number.isFinite(galaxy.buildSpeed) ? galaxy.buildSpeed : 0 };
+      const role = msg.role === 'builder' ? 'builder' : 'explorer';
+      const name = String(msg.name || `Pilot ${me.id}`).slice(0, 24);
+      me.admin = isAdmin(msg.admin_key);
+      // Names key the galaxy's books of characters, so none may be one every object already has.
+      if (name in Object.prototype) {
+        me.role = me.name = null;
+        return send(ws, { type: 'error', reason: `"${name}" can't be a name: pick another` });
+      }
+      const locked = !me.admin && adminsOnly(role, name);
+      if (locked) return turnAway(ws, me, locked);
+      me.role = role;
+      me.name = name;
+      const catalog = {
+        sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES },
+        ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX,
+        items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE,
+        buildings: G.BUILDINGS, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH,
+        buildSpeed: Number.isFinite(galaxy.buildSpeed) ? galaxy.buildSpeed : 0,
+        // The faction war
+        factions: F.FACTIONS,
+        ranks: F.RANKS,
+        outposts: { max: S.MAX_SITES, perSector: S.PER_SECTOR },
+        war: {
+          lockMs: W.lockMs(), carrierShare: W.CARRIER_SHARE, battleMs: W.BATTLE_MS, upkeepMs: W.UPKEEP_MS, upkeep: W.UPKEEP,
+          fuelCredits: W.FUEL_CREDITS, planetShare: W.PLANET_SHARE, sectorPilots: W.SECTOR_PILOTS,
+        },
+        contractItems: G.CONTRACT_ITEMS,
+        meritValue: G.MERIT_VALUE,
+        demo,
+        carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
+        director: { ms: D.DIRECTOR_MS, scaleMax: D.SCALE_MAX, patrolPower: D.PATROL_POWER, armadaCap: D.ARMADA_CAP, activeMs: D.ACTIVE_MS },
+      };
       // A Builder gets their own home planet the first time they connect.
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
       if (demo && home) G.demoTopUp(G.econ(galaxy, home));
-      send(ws, { type: 'welcome', id: me.id, name: me.name, home, state: galaxy, catalog });
+      send(ws, { type: 'welcome', id: me.id, name: me.name, home, admin: me.admin, state: stateFor(me), catalog });
       if (home) {
-        broadcast({ type: 'state', state: galaxy }, ws); // the new Builder already has it
+        broadcastState(ws); // the new Builder already has it
         save();
       }
       // Back after a dropped connection mid-raid: pick up where the run is.
@@ -263,6 +445,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       return;
     }
     if (!me.role) return send(ws, { type: 'error', reason: 'say hello first' });
+    const locked = !me.admin && adminsOnly(me.role, me.name);
+    if (locked) return turnAway(ws, me, locked);
+
+    if (Object.hasOwn(BUILDER_ONLY, msg.type) && me.role !== 'builder') return send(ws, { type: 'error', reason: BUILDER_ONLY[msg.type] });
+    if (Object.hasOwn(PILOT_ONLY, msg.type) && me.role !== 'explorer') return send(ws, { type: 'error', reason: PILOT_ONLY[msg.type] });
+    if (ADMIN_ONLY.includes(msg.type) && !me.admin) return send(ws, { type: 'error', reason: 'admins only' });
 
     // Builders can only manage their own planets.
     const MANAGE = ['build', 'post_job', 'ship_cargo', 'upgrade_security', 'sound_alarm', 'queue_ship', 'cancel_ship', 'place_piece', 'remove_piece', 'clear_obstacle', 'upgrade_building'];
@@ -301,10 +489,57 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = G.sell(galaxy, me.name);
         break;
       case 'found_site':
-        result = me.role === 'builder' ? G.foundSite(galaxy, me.name, msg.facility) : { ok: false, reason: 'only Builders found sites' };
+        result = G.foundSite(galaxy, me.name, msg.facility, msg.planet, msg.sector, now());
         break;
       case 'launch_attack':
-        result = me.role === 'builder' ? G.launchAttack(galaxy, me.name, msg.target, now(), msg.ships || null) : { ok: false, reason: 'only Builders command fleets' };
+        result = { ok: false, reason: 'fleets fight for control of systems now: send them from the War map' };
+        break;
+      // --- The faction war ---
+      case 'choose_faction':
+        result = G.chooseFaction(galaxy, me.role, me.name, msg.faction, now(), { admin: me.admin });
+        // An admin took this character into Coma: any other app playing it without the key is turned away.
+        if (result.ok && adminsOnly(me.role, me.name))
+          for (const [other, c] of clients) if (other !== ws && !c.admin && c.role === me.role && c.name === me.name) turnAway(other, c, F.FACTIONS[result.faction]);
+        break;
+      case 'send_fleet':
+        result = W.sendFleet(galaxy, me.name, msg.system, msg.ships && typeof msg.ships === 'object' ? msg.ships : null, now());
+        break;
+      case 'recall_fleet':
+        result = W.recallFleet(galaxy, me.name, msg.fleet, now());
+        break;
+      case 'set_price':
+        result = G.setPrice(galaxy, me.name, msg.item, msg.price);
+        break;
+      case 'fill_contract':
+        result = G.fillContract(galaxy, me.name, msg.contract, msg.qty);
+        break;
+      case 'donate':
+        result = G.donate(galaxy, me.name, msg.item, msg.qty);
+        break;
+      case 'dock_buy':
+        result = G.dockBuy(galaxy, me.name, msg.builder, msg.item, msg.qty);
+        break;
+      case 'post_contract':
+        result = G.postContract(galaxy, me.name, msg.item, msg.amount, msg.reward);
+        break;
+      case 'cancel_contract':
+        result = G.cancelContract(galaxy, me.name, msg.contract);
+        break;
+      case 'demo_capture':
+        result = demo ? G.demoCapture(galaxy, me.name, msg.planet, msg.sector, now()) : { ok: false, reason: 'taking sectors by hand is only for demo mode' };
+        break;
+      // --- Admins: the Coma Conglomerate and its director ---
+      case 'director_set':
+        result = D.set(galaxy, { paused: msg.paused, scale: msg.scale, overrides: msg.overrides, posture: msg.posture }, now());
+        break;
+      case 'admin_armada':
+        result = D.armada(galaxy, msg.system, msg.power, now());
+        break;
+      case 'admin_recall':
+        result = D.recall(galaxy, msg.fleet, now());
+        break;
+      case 'admin_capture':
+        result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
         break;
       case 'place_piece':
         result = G.placePiece(galaxy, msg.planet, msg.piece, msg.x, msg.y);
@@ -335,8 +570,43 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         return;
       }
       case 'ship':
-        // Ship positions are relayed, not saved.
-        broadcast({ type: 'ship', id: me.id, name: me.name, pos: msg.pos, rot: msg.rot }, ws);
+        // Ship positions are relayed, not saved. `over`: the war planet whose orbit the ship is in;
+        // `berth`: the pad it holds ({station, copy, pad}), so the others can tell station copies apart.
+        me.over = typeof msg.over === 'string' && W.planet(galaxy, msg.over) ? msg.over : null;
+        broadcast({ type: 'ship', id: me.id, name: me.name, pos: msg.pos, rot: msg.rot, over: me.over ?? undefined, berth: me.pad ?? undefined }, ws);
+        return;
+      // --- Shared spaces: stations, carriers and bases on foot ---
+      // (Too many of these in a second are dropped without a word; walk has its own limit, and
+      // undock is never dropped.)
+      case 'undock':
+        spaces.undock(me);
+        return;
+      case 'dock_request':
+      case 'enter_space':
+      case 'leave_space':
+      case 'ship_open':
+        if (tooFast(me, 'space', SPACE_MSGS_PER_S)) return;
+        return space(ws, me, msg);
+      case 'walk':
+        spaces.walk(me, msg, Date.now());
+        return;
+      // --- Sector battles ---
+      case 'battle_start':
+      case 'battle_join':
+        if (tooFast(me, 'battle', BATTLE_JOINS_PER_S)) return;
+        result = msg.type === 'battle_start' ? battles.start(me, pilotFaction(me), msg.planet, msg.sector, where(me)) : battles.join(me, pilotFaction(me), msg.battle, where(me));
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
+      case 'battle_leave':
+      case 'battle_drop':
+      case 'battle_order':
+      case 'battle_produce':
+      case 'battle_upgrade':
+      case 'battle_possess':
+      case 'battle_drive':
+      case 'battle_release':
+        result = battles.handle(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
       default:
         if (typeof msg.type === 'string' && msg.type.startsWith('raid_') && me.role === 'explorer') {
@@ -355,7 +625,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   }
 
   wss.on('connection', (ws) => {
-    const me = { id: nextClientId++, role: null, name: null };
+    const me = { id: nextClientId++, role: null, name: null, admin: false, ws };
     clients.set(ws, me);
     ws.on('message', (data) => {
       let msg;
@@ -364,16 +634,29 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       } catch {
         return send(ws, { type: 'error', reason: 'bad json' });
       }
-      handle(ws, me, msg);
+      try {
+        handle(ws, me, msg);
+      } catch (err) {
+        // One bad request mustn't take the whole galaxy down with it.
+        console.error(`error handling ${msg?.type}:`, err);
+        return send(ws, { type: 'error', reason: 'the server hit an error' });
+      }
+      seen(me);
     });
     ws.on('close', () => {
+      spaces.drop(me);
+      battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
     });
   });
 
   const ticker = setInterval(() => {
-    if (G.tick(galaxy, now())) changed();
+    try {
+      if (G.tick(galaxy, now())) changed();
+    } catch (err) {
+      console.error('error in the galaxy tick:', err);
+    }
   }, tickMs);
   const raidTicker = setInterval(raidTick, RAID_TICK_MS);
 
@@ -383,9 +666,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       return galaxy;
     },
     runs,
+    spaces,
+    battles,
     close() {
       clearInterval(ticker);
       clearInterval(raidTicker);
+      battles.close();
       clearTimeout(saveTimer);
       for (const ws of clients.keys()) ws.terminate();
       return new Promise((resolve) => wss.close(resolve));
@@ -400,8 +686,14 @@ if (require.main === module) {
   // BUILD_SPEED=0 builds instantly (the game smoke tests use it); any other number divides build times.
   const speed = process.env.BUILD_SPEED;
   const buildSpeed = speed === undefined ? null : Number(speed) === 0 ? Infinity : Number(speed);
-  startServer({ port, saveFile, demo, buildSpeed });
-  console.log(`Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich)' : ''}`);
+  // ADMIN_KEY: unset or empty, nobody is an admin.
+  const adminKey = process.env.ADMIN_KEY || null;
+  // BATTLE_SPEED: sector battles run this many times faster (default 1).
+  const battleSpeed = Number(process.env.BATTLE_SPEED) > 0 ? Number(process.env.BATTLE_SPEED) : 1;
+  startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed });
+  console.log(
+    `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
+  );
 }
 
-module.exports = { startServer };
+module.exports = { startServer, adminCheck };

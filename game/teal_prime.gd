@@ -20,7 +20,18 @@ const PLANETS := [
 		"radius": 6_000_000.0, "color": Color(0.15, 0.55, 0.55), "bands": false},
 	{"id": "vesper", "name": "Vesper", "kind": "planet", "pos": [-150_000_000_000.0, -9_000_000_000.0, -120_000_000_000.0],
 		"radius": 58_000_000.0, "color": Color(0.78, 0.66, 0.5), "bands": true},
+	# A temperate world at 0.7 AU, between Aster and the Builders' outer homes.
+	{"id": "halcyon", "name": "Halcyon", "kind": "planet", "pos": [-98_700_000_000.0, 4_000_000_000.0, 35_900_000_000.0],
+		"radius": 5_600_000.0, "color": Color(0.32, 0.6, 0.44), "bands": false},
+	# An ice giant at 1.65 AU, about Neptune's size.
+	{"id": "morrow", "name": "Morrow", "kind": "planet", "pos": [212_000_000_000.0, -11_000_000_000.0, -126_000_000_000.0],
+		"radius": 24_000_000.0, "color": Color(0.52, 0.44, 0.7), "bands": true},
 ]
+
+# Cinder, Vesper, Halcyon and Morrow are the system's contested worlds in the faction war: no
+# Builder lives there, but each has an orbital station (Cinder Orbital, ...) over the outposts
+# Builders found in its sectors.
+const ORBITAL_ALTITUDE := 1_400_000.0 # an orbital station's height above its planet, as Aster's High Port
 
 # Places near Aster. The Spaceport orbits about 1,400 km above the surface.
 const PORT_POS := [1_000_000.0, 2_000_000.0, -60_000_000_000.0 + 7_000_000.0]
@@ -46,7 +57,7 @@ static func home_planet(id: String, planet_name: String, index: int) -> Dictiona
 		"radius": 4_000_000.0 + (h % 4) * 1_000_000.0, "color": Color.from_hsv(fposmod(h * 0.618034, 1.0), 0.45, 0.62), "bands": false}
 
 
-## A Builder planet by id: Aster or one of the homes, else an empty Dictionary.
+## A planet by id: Aster, a contested world or one of the homes, else an empty Dictionary.
 static func builder_planet(id: String) -> Dictionary:
 	for p in PLANETS + homes:
 		if p.id == id:
@@ -69,6 +80,22 @@ static func station_pos(planet_id: String) -> Array:
 
 static func station_name(planet_name: String) -> String:
 	return "%s High Port" % planet_name
+
+
+## Where a contested planet's orbital station is: off the sunward side like a High Port, but at a
+## height over the surface, since these worlds run from Cinder's size to Vesper's gas giant.
+static func orbital_pos(planet_id: String) -> Array:
+	var p := builder_planet(planet_id)
+	if p.is_empty():
+		return PORT_POS
+	var sunward := -Vector3(p.pos[0], p.pos[1], p.pos[2]).normalized()
+	var side := sunward.cross(Vector3.UP).normalized()
+	var dir := (sunward * STATION_OFFSET.z + Vector3.UP * STATION_OFFSET.y + side * STATION_OFFSET.x).normalized()
+	return offset(p.pos, dir * (p.radius + ORBITAL_ALTITUDE))
+
+
+static func orbital_name(planet_name: String) -> String:
+	return "%s Orbital" % planet_name
 
 
 static func bodies() -> Array:

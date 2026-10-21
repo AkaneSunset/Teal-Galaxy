@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const G = require('../galaxy');
+const H = require('../heist');
 
 function base() {
   const g = G.newGalaxy();
@@ -57,18 +58,20 @@ test('each level costs and takes twice the last, and produces more', () => {
   assert.match(G.upgradeBuilding(g, 'aster', 0, t).reason, /top level/);
 });
 
-test('facilities and defences take time too; unfinished defences do not fight', () => {
-  const S = require('../sites');
+test('outposts and defences take time too; unfinished defences are not there for raiders', () => {
   const { g } = base();
-  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const t = 1_000_000;
+  G.chooseFaction(g, 'builder', 'Akane', 'compact');
+  const { site } = G.foundSite(g, 'Akane', 'fuel', 'cinder', 'cinder-1', t);
   const fac = site.buildings[0];
   assert.strictEqual(fac.level, 0);
-  assert.ok(fac.readyAt > Date.now());
+  assert.strictEqual(fac.readyAt, t + G.BUILD_S.fuel * 1000);
   site.obstacles = [];
   assert.ok(G.placePiece(g, site.id, 'turret', 0, 0).ok);
   const turret = site.pieces[0];
-  assert.deepStrictEqual(S.defence(site, turret.readyAt - 1), { attack: 0, hull: 0 });
-  assert.deepStrictEqual(S.defence(site, turret.readyAt), { attack: 4, hull: 20 });
+  const pieces = (now) => H.generateLayout(1, 1, 'fuel', { site, now }).pieces.filter((p) => !p.ring).map((p) => p.type);
+  assert.deepStrictEqual(pieces(turret.readyAt - 1), []);
+  assert.deepStrictEqual(pieces(turret.readyAt), ['turret']);
 });
 
 test('old saves keep their buildings working at level 1', () => {

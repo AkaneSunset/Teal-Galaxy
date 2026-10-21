@@ -10,14 +10,25 @@ extends Node3D
 ## Subclasses build their world in `_build()`, may add per-frame work in `_tick()`, and name where
 ## the player is in `_location()`. Building blocks (boxes, screens, signs, consoles, lights, things
 ## to use with F, landed ships with ramps) are shared from here.
+## `planet_id` is a Builder's home planet, or a contested world of the war (its orbital station),
+## which has no record in the system's planets: `_planet` is empty there.
+##
+## Places are shared: other pilots in the same space (see walkers.gd) walk around in them too. The
+## explorer enters the server's space and sets `space_id`; `walker_pose()` is what others see of you.
+## While a sector battle's RTS view is up (game/battle/, BattleView.active), the explorer hides and
+## disables the place; `battle_active()` says so.
 
 const System := preload("res://teal_prime.gd")
 const Models := preload("res://models.gd")
 const ChatBox := preload("res://chat_box.gd")
+const WarInfo := preload("res://war_info.gd")
+const Walkers := preload("res://walkers.gd")
+const BATTLE_VIEW := "res://battle/battle_view.gd"
 
 signal seated_down # walked up your own ship's ramp and sat down
-signal service(kind: String) # "repair"
+signal service(kind: String) # "repair", "war" (a War terminal), "contracts", "dock_market"
 signal wants_menu # used a console that opens the ship's menu (the transit terminal)
+signal wants_space(space: String) # walked through a door into another shared space (an airlock, a boarding door)
 
 const WALK := 4.2
 const SPRINT := 7.0
@@ -26,6 +37,7 @@ const GRAVITY := 14.0
 const EYE := 1.65
 const LOOK_SPEED := 2.6
 const REACH := 2.6
+const SIT_EYE := 1.15
 
 # Colours, sampled from the station concept art: light grey panels, darker trim, cyan light strips.
 const WALL := Color(0.56, 0.58, 0.61)
@@ -44,6 +56,9 @@ var planet_id := "aster"
 var place_name := ""
 var seated := true # sitting in your ship (the ship's menu is up)
 var menu_open := false # the explorer has the ship's menu up while you stand (the transit terminal)
+var space_id := "" # the shared space the server has us in here ("station:cinder"), set by the explorer
+var walkers: Node3D # the other pilots here (walkers.gd)
+var hud_layer: CanvasLayer
 
 var _planet := {} # the server's planet record
 var _player: CharacterBody3D
@@ -52,6 +67,10 @@ var _pitch := 0.0
 var _mats := {}
 var _uses := [] # {"node": Node3D, "prompt": Callable, "action": Callable}
 var _ships := [] # landed ships: {"root", "entry", "spawn", "seat", "owner", "open", "mine", "pad"}
+var _arrival: Marker3D # where you stand when you leave your seat, in a place with no landed ship of yours
+var _sitting := false # sitting on a seat (a lounge chair), not in your ship
+var _own: Array[Node] = [] # what the place built, to hide while a battle's RTS view is up
+var _battle_envs: Array[Node] = []
 
 var _prompt: Label
 var _chat: VBoxContainer
@@ -70,6 +89,9 @@ func _ready() -> void:
 	_build()
 	_build_player()
 	_build_hud()
+	walkers = Walkers.new(self)
+	add_child(walkers)
+	_own.assign(get_children())
 	sit()
 
 
@@ -459,9 +481,11 @@ func _show_canopy(sh: Dictionary, on: bool) -> void:
 
 
 ## Leave your seat and walk down the ramp: you stand at its foot, facing away from the ship.
+## A place with no landed ship of yours stands you at its arrival point instead.
 func stand() -> void:
 	seated = false
 	menu_open = false
+	_sitting = false
 	_camera.top_level = false
 	_camera.transform = Transform3D(Basis(), Vector3(0, EYE, 0))
 	_pitch = 0.0
@@ -469,8 +493,45 @@ func stand() -> void:
 	if not sh.is_empty():
 		_stand_at(sh.spawn)
 		_show_canopy(sh, true)
+	elif _arrival:
+		_stand_at(_arrival)
 	if controls:
 		controls.capture_mouse()
+
+
+## Sit down on a seat (a lounge chair or a bar stool): the view drops to a sitting eye height and the
+## others see you sitting. Walking stands you up again.
+func sit_on(pos: Vector3, yaw: float) -> void:
+	_player.global_position = pos
+	_player.velocity = Vector3.ZERO
+	_player.rotation.y = yaw
+	_camera.position.y = SIT_EYE
+	_sitting = true
+
+
+func _stand_up() -> void:
+	_sitting = false
+	_camera.position.y = EYE
+	_player.global_position += _player.global_basis * Vector3(0, 0.05, -0.7)
+
+
+## What the other pilots in this space see of you: {"pos", "yaw", "anim"}, or {} to send nothing
+## (seated in your ship, which they see as a landed ship).
+func walker_pose() -> Dictionary:
+	if seated:
+		return {}
+	var v := Vector2(_player.velocity.x, _player.velocity.z).length()
+	var anim := "sit" if _sitting else ("run" if v > WALK + 0.5 else ("walk" if v > 0.4 else "idle"))
+	return {"pos": _player.global_position, "yaw": _player.rotation.y, "anim": anim}
+
+
+## True while a sector battle's RTS view is up (game/battle/battle_view.gd sets BattleView.active).
+## The view may not be built yet, so it's looked up rather than named.
+static func battle_active() -> bool:
+	if not ResourceLoader.exists(BATTLE_VIEW):
+		return false
+	var view = load(BATTLE_VIEW)
+	return view != null and view.get("active") == true
 
 
 ## For tests and screenshots: stand at a point (in `space`'s coordinates) looking at another.
@@ -486,7 +547,7 @@ func view_at(space: Node3D, at: Vector3, look: Vector3) -> void:
 
 
 func _walking() -> bool:
-	return not seated and not menu_open and not _paused.visible and not _chat.is_typing()
+	return not seated and not menu_open and not _paused.visible and not _chat.is_typing() and not battle_active()
 
 
 ## Mouse look is read in _input, before any on-screen control can catch the motion.
@@ -499,7 +560,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if seated or menu_open or _chat.is_typing():
+	if seated or menu_open or _chat.is_typing() or battle_active():
 		return
 	if event.is_action_pressed("menu"):
 		_set_paused(not _paused.visible)
@@ -544,13 +605,43 @@ func _look(yaw: float, pitch: float) -> void:
 	_camera.rotation.x = _pitch
 
 
+## Hides the place (and takes it out of the physics) while a sector battle's RTS view is up, or
+## brings it back. Only what the place built itself: screens a battle added stay as they are.
+func battle_hide(on: bool) -> void:
+	if on:
+		_battle_envs.clear()
+	for node in _own:
+		if not is_instance_valid(node):
+			continue
+		if node is WorldEnvironment:
+			if on and node.get_parent() == self:
+				remove_child(node)
+				_battle_envs.append(node)
+		elif node is Node3D or node is CanvasLayer:
+			node.visible = not on
+			node.process_mode = Node.PROCESS_MODE_DISABLED if on else Node.PROCESS_MODE_INHERIT
+	if not on:
+		for env in _battle_envs:
+			add_child(env)
+			move_child(env, 0)
+		_battle_envs.clear()
+		_player.velocity = Vector3.ZERO
+
+
 func _physics_process(delta: float) -> void:
+	if battle_active() or _player.process_mode == Node.PROCESS_MODE_DISABLED:
+		return
 	var walking := _walking()
 	var input := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back") if walking else Vector2.ZERO
 	var look := Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down") if walking else Vector2.ZERO
 	if look.length() > 0.1:
 		_look(-look.x * LOOK_SPEED * delta, -look.y * LOOK_SPEED * delta)
-	if not seated:
+	if _sitting and input.length() > 0.3:
+		_stand_up()
+	if _sitting:
+		input = Vector2.ZERO
+		_player.velocity = Vector3.ZERO
+	if not seated and not _sitting:
 		var speed := SPRINT if walking and Input.is_action_pressed("foot_sprint") else WALK
 		var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
 		_player.velocity.x = dir.x * speed
@@ -561,7 +652,7 @@ func _physics_process(delta: float) -> void:
 		else:
 			_player.velocity.y -= GRAVITY * delta
 		_player.move_and_slide()
-		if _player.global_position.y < -10.0:
+		if _player.position.y < _fall_limit():
 			stand()
 		_check_ramps()
 	_tick(delta)
@@ -587,6 +678,7 @@ func _nearest_use() -> Dictionary:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	hud_layer = layer
 	_where = Label.new()
 	_where.position = Vector2(20, 16)
 	_where.add_theme_font_size_override("font_size", 20)
@@ -644,7 +736,7 @@ func _build_hud() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	col.add_child(title)
 	var hint := Label.new()
-	hint.text = "To leave, walk back up your ship's ramp and take your seat."
+	hint.text = _leave_hint()
 	col.add_child(hint)
 	var resume := Button.new()
 	resume.text = "Resume"
@@ -656,7 +748,7 @@ func _update_hud(delta: float) -> void:
 	var crosshair := _prompt.get_parent().get_node("Crosshair") as Control
 	crosshair.visible = not seated
 	if seated:
-		_where.text = "%s · in your ship" % place_name
+		_where.text = _seated_text()
 		_prompt.text = ""
 	else:
 		var here := _location()
@@ -676,6 +768,21 @@ func _update_hud(delta: float) -> void:
 	_message.visible = _message_time > 0.0
 
 
+## Below this height you've fallen out of the place: back to the start.
+func _fall_limit() -> float:
+	return -10.0
+
+
+## The top-left line while you sit in your ship.
+func _seated_text() -> String:
+	return "%s · in your ship" % place_name
+
+
+## How to leave, on the pause screen.
+func _leave_hint() -> String:
+	return "To leave, walk back up your ship's ramp and take your seat."
+
+
 func _say(text: String, seconds := 4.0) -> void:
 	_message.text = text
 	_message_time = seconds
@@ -692,3 +799,10 @@ func _key() -> String:
 
 func _me() -> Dictionary:
 	return Net.state.get("pilots", {}).get(Net.my_name, {}) if not Net.state.is_empty() else {}
+
+
+## The planet's name: a Builder's home, or a contested world of the war.
+func _planet_name() -> String:
+	if _planet.has("name"):
+		return str(_planet.name)
+	return str(WarInfo.planet(planet_id).get("name", planet_id.capitalize()))
