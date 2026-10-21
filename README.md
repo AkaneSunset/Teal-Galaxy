@@ -532,9 +532,18 @@ defenders' pilots can also join from the planet's station). The defender is the 
 by an AI (plus any of its pilots who join), or a militia if nobody holds it. You lead one attack at a
 time: starting another gives up the last one unless other pilots are still fighting it.
 
-The RTS view takes over the screen. You start with 400 mass and earn 2 a second from your carrier plus
-3 per Mass Extractor. Call units in by drop pod from the panel on the right; they land in your landing
-zone 6 seconds later. Engineers build extractors on mass points, turrets and land factories.
+The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
+4000 energy; your carrier gives 2 mass and 10 energy a second, each Mass Extractor 3 mass more and each
+**Power Generator** (45 mass) 20 energy more. Call units in by drop pod from the panel on the right; they
+land in your landing zone 6 seconds later. The carrier drops **tier 1 units only, at full price**.
+Engineers build extractors on mass points, generators, turrets and land factories.
+
+**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever).
+Select one and its panel shows what its tier makes and its upgrade: tier 2 (400 mass, 2500 energy) and
+tier 3 (900 mass, 6000 energy), paid as it works, making nothing meanwhile. Each tier makes the Mk II or
+Mk III Striker, Tank, Artillery and AA: bigger, faster, tougher and harder hitting than the tier below
+(per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter bigger) and dearer.
+The defender's AI pays mass only.
 The defender's AI keeps a guard round its base and, after giving you five minutes to dig in, sends
 waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction fields
 more than a militia. **Destroy the Command Node** to take the sector (*Sector taken*); the defenders win if they

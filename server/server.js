@@ -54,7 +54,7 @@ const PILOT_ONLY = {
   dock_request: 'only pilots dock at stations', undock: 'only pilots dock at stations',
   enter_space: 'only pilots walk around', leave_space: 'only pilots walk around', walk: 'only pilots walk around', ship_open: 'only pilots have carriers',
   battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
-  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles',
+  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles',
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
@@ -601,6 +601,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'battle_drop':
       case 'battle_order':
       case 'battle_produce':
+      case 'battle_upgrade':
       case 'battle_possess':
       case 'battle_drive':
       case 'battle_release':

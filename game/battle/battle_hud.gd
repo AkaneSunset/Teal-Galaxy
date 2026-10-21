@@ -1,5 +1,5 @@
 extends Control
-## The sector battle's HUD: the top bar (sector, mass and income, units, time left, Leave battle),
+## The sector battle's HUD: the top bar (sector, mass and energy with their income, units, time left, Leave battle),
 ## the pilots by side, the battle feed, the minimap, the command panel for what's selected (orders,
 ## engineers' build buttons, a factory's production) and the call-in panel (every unit by drop
 ## pod, its cost and how many). While driving a unit: its health and reload. At the end: the banner.
@@ -9,10 +9,10 @@ const Units := preload("res://battle/battle_units.gd")
 
 const TEAL := Color(0.35, 0.95, 0.88)
 const MASS := Color(0.45, 1.0, 0.45)
+const ENERGY := Color(1.0, 0.85, 0.3)
 const PANEL_BG := Color(0.02, 0.05, 0.08, 0.86)
 const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "gunship"]
-const BUILDABLE := ["extractor", "turret", "factory"]
-const PRODUCIBLE := ["engineer", "scout", "striker", "tank", "artillery", "aa"]
+const BUILDABLE := ["extractor", "generator", "turret", "factory"]
 
 var view: Node # battle_view.gd
 var drop_count := 1
@@ -20,6 +20,10 @@ var drop_count := 1
 var _title: Label
 var _mass: Label
 var _mass_bar: ProgressBar
+var _energy: Label
+var _energy_bar: ProgressBar
+var _produce_key := "" # the factory (and its tier) the production buttons were made for
+var _upgrade_label: Label
 var _units: Label
 var _clock: Label
 var _pilots: Label
@@ -29,7 +33,7 @@ var _notice_t := 0.0
 var _selection: Label
 var _orders: HBoxContainer
 var _build: HBoxContainer
-var _produce: HBoxContainer
+var _produce: HFlowContainer
 var _command: PanelContainer
 var _drop_buttons := {} # type -> Button
 var _count_buttons: Array[Button] = []
@@ -74,6 +78,21 @@ func _ready() -> void:
 	bg.bg_color = Color(0.1, 0.15, 0.12)
 	_mass_bar.add_theme_stylebox_override("background", bg)
 	mass_box.add_child(_mass_bar)
+	var energy_box := VBoxContainer.new()
+	energy_box.add_theme_constant_override("separation", 0)
+	row.add_child(energy_box)
+	_energy = _label(energy_box, "", 17, ENERGY)
+	_energy_bar = ProgressBar.new()
+	_energy_bar.custom_minimum_size = Vector2(150, 5)
+	_energy_bar.show_percentage = false
+	_energy_bar.max_value = 25000
+	var efill := StyleBoxFlat.new()
+	efill.bg_color = ENERGY
+	_energy_bar.add_theme_stylebox_override("fill", efill)
+	var ebg := StyleBoxFlat.new()
+	ebg.bg_color = Color(0.15, 0.13, 0.08)
+	_energy_bar.add_theme_stylebox_override("background", ebg)
+	energy_box.add_child(_energy_bar)
 	_units = _label(row, "", 17, Color(0.85, 0.9, 0.95))
 	_clock = _label(row, "", 17, Color(0.85, 0.9, 0.95))
 	var leave := Button.new()
@@ -127,7 +146,8 @@ func _ready() -> void:
 	_take = _button(_orders, "Take control (P)", func(): view.take_control())
 	_build = HBoxContainer.new()
 	cmd.add_child(_build)
-	_produce = HBoxContainer.new()
+	_produce = HFlowContainer.new()
+	_produce.custom_minimum_size = Vector2(520, 0)
 	cmd.add_child(_produce)
 	_panels.append(_command)
 
@@ -142,7 +162,7 @@ func _ready() -> void:
 	drop.add_child(dv)
 	var dh := HBoxContainer.new()
 	dv.add_child(dh)
-	_label(dh, "Call in by drop pod", 15, TEAL).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_label(dh, "Call in by drop pod (tier 1, full price)", 15, TEAL).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for n in [1, 5, 10]:
 		var b := _button(dh, "x%d" % n, _set_count.bind(n))
 		b.toggle_mode = true
@@ -241,6 +261,8 @@ func _process(delta: float) -> void:
 	_title.text = "%s  ·  %s" % [str(info.get("planetName", "")), str(info.get("sectorName", ""))]
 	_mass.text = "Mass %d  (+%.1f/s)" % [int(view.mass), view.income]
 	_mass_bar.value = view.mass
+	_energy.text = "Energy %d  (+%.0f/s)" % [int(view.energy), view.energy_income]
+	_energy_bar.value = view.energy
 	_units.text = "Units %d / %d" % [view.my_unit_count(), 120]
 	var left := maxf(0.0, (float(view.ends_at) - Net.now_ms()) / 1000.0)
 	_clock.text = "%02d:%02d left" % [int(left) / 60, int(left) % 60]
@@ -257,9 +279,10 @@ func _process(delta: float) -> void:
 	var cat: Dictionary = view.catalog
 	for t in _drop_buttons:
 		var cost := int(cat.get(t, {}).get("cost", 0)) * drop_count
+		var energy := int(cat.get(t, {}).get("energy", 0)) * drop_count
 		var b: Button = _drop_buttons[t]
-		b.text = "%s  %d" % [str(cat.get(t, {}).get("name", t)), cost]
-		b.disabled = view.mass + 0.01 < cost or view.ended
+		b.text = "%s  %s" % [str(cat.get(t, {}).get("name", t)), price(cost, energy)]
+		b.disabled = view.mass + 0.01 < cost or view.energy + 0.01 < energy or view.ended
 		b.tooltip_text = _unit_tip(t)
 	var driving: bool = view.driving()
 	for p in _panels:
@@ -305,8 +328,17 @@ func _unit_tip(t: String) -> String:
 	if t == "aa":
 		s += " (hits air only)"
 	if t == "engineer":
-		s += ". Builds extractors, turrets and factories"
+		s += ". Builds extractors, generators, turrets and factories"
+	if t == "generator":
+		s += ". %d energy a second" % int(c.get("power", 0))
+	if int(c.get("tier", 1)) > 1:
+		s += ". Tier %d: made by an upgraded factory" % int(c.tier)
 	return s
+
+
+## A price in mass and energy: "130m 650e".
+static func price(mass: float, energy: float) -> String:
+	return "%dm %de" % [roundi(mass), roundi(energy)] if energy > 0.0 else "%dm" % roundi(mass)
 
 
 ## The command panel follows the selection: counts by type, and build or production buttons for
@@ -345,14 +377,39 @@ func _update_command() -> void:
 			_label(_build, "Build:", 14, Color(0.8, 0.85, 0.9))
 			for s in BUILDABLE:
 				var c: Dictionary = view.catalog.get(s, {})
-				_button(_build, "%s %d" % [str(c.get("name", s)), int(c.get("cost", 0))], func(): view.arm("build:" + s))
+				var b := _button(_build, "%s %s" % [str(c.get("name", s)), price(float(c.get("cost", 0)), float(c.get("energy", 0)))], func(): view.arm("build:" + s))
+				b.tooltip_text = _unit_tip(s)
 	var want_produce := factory >= 0
 	_produce.visible = want_produce
-	if want_produce and _produce.get_child_count() == 0:
-		_label(_produce, "Produce:", 14, Color(0.8, 0.85, 0.9))
-		for t in PRODUCIBLE:
+	if not want_produce:
+		_produce_key = ""
+		return
+	# The factory's buttons: what its tier makes, at the factory's half price, and its upgrade.
+	var f: Dictionary = view.factories.get(factory, {"tier": 1, "upgrade": null})
+	var tier := int(f.tier)
+	var key := "%d/%d/%s" % [factory, tier, f.upgrade != null]
+	if key != _produce_key:
+		_produce_key = key
+		for c in _produce.get_children():
+			c.free()
+		var share := float(view.economy.get("factoryDiscount", 0.5))
+		_label(_produce, "Tier %d factory, half price:" % tier, 14, Color(0.8, 0.85, 0.9))
+		for t in view.catalog.get("factory", {}).get("produces", []):
 			var c: Dictionary = view.catalog.get(t, {})
-			_button(_produce, "%s %d" % [str(c.get("name", t)), int(c.get("cost", 0))], func(): view.produce(t, drop_count))
+			if int(c.get("tier", 1)) > tier:
+				continue
+			var b := _button(_produce, "%s %s" % [str(c.get("name", t)), price(float(c.get("cost", 0)) * share, float(c.get("energy", 0)) * share)], func(): view.produce(t, drop_count))
+			b.tooltip_text = _unit_tip(t)
+		_upgrade_label = null
+		var tiers := int(view.catalog.get("factory", {}).get("tiers", 3))
+		if f.upgrade != null:
+			_upgrade_label = _label(_produce, "", 14, ENERGY)
+		elif tier < tiers:
+			var up: Dictionary = view.catalog.get("factory", {}).get("upgrade", {}).get(str(tier + 1), {})
+			var b := _button(_produce, "Upgrade to tier %d  %s" % [tier + 1, price(float(up.get("cost", 0)), float(up.get("energy", 0)))], func(): view.upgrade_factory(factory))
+			b.tooltip_text = "Tier %d makes the Mk %s units: bigger, faster and stronger. The factory makes nothing while it upgrades." % [tier + 1, "I".repeat(tier + 1)]
+	if _upgrade_label and f.upgrade != null:
+		_upgrade_label.text = "Upgrading to tier %d: %d%%" % [int(f.upgrade[0]), roundi(float(f.upgrade[1]) * 100.0)]
 
 
 # --- What the view tells the pilot ------------------------------------------------------------

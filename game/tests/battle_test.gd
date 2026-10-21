@@ -47,6 +47,7 @@ var _moved_from := {}
 var _end: Dictionary = {}
 var _drop_at := 0.0
 var _extractors := 0
+var _generators := 0 # Power Generators the engineer was told to build
 var _bought := 0
 var _attacking := false
 var _looked := false
@@ -328,7 +329,8 @@ func _steps() -> void:
 
 
 ## Keeps the attack going until the battle ends, as a player would against a dug-in base: the
-## engineer takes the mass points near the landing zone, the mass goes on tanks and artillery
+## engineer takes the mass points near the landing zone, a Power Generator by the landing zone after
+## each (units cost energy too), the mass and energy go on tanks and artillery
 ## gathered at the landing zone, and once the army is big enough (or nearly half the time is gone)
 ## it attack-moves on the Command Node as one, reinforcements following in groups.
 func _fight() -> void:
@@ -342,7 +344,7 @@ func _fight() -> void:
 		return
 	_drop_at = _clock
 	var engineers := _mine("engineer").filter(func(u): return not u.dropping())
-	if not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5:
+	if not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5 and _extractors <= _generators:
 		var e: Units.Unit = engineers[0]
 		var best = null
 		for p in _view.mass_points:
@@ -351,14 +353,23 @@ func _fight() -> void:
 		if best and Vector2(best.x, best.z).distance_to(e.to) < 700.0:
 			_view.order_units([e.id], "build", Vector2(best.x, best.z), false, -1, "extractor")
 			_extractors += 1
+	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _generators < 8:
+		# A row of generators behind the landing zone, on the side away from the enemy.
+		var lz: Dictionary = _view.info.get("lz", {"x": 800, "z": 170})
+		var back := -1.0 if float(lz.z) < 800.0 else 1.0
+		var spot := Vector2(float(lz.x) - 105.0 + 30.0 * _generators, float(lz.z) + back * 150.0)
+		if _view._site("generator", spot) != null:
+			_view.order_units([engineers[0].id], "build", spot, false, -1, "generator")
+		_generators += 1
 	var node: Units.Unit = _find("node")
 	if node == null:
 		return
 	if _view.my_unit_count() < 110:
 		var kind := "artillery" if _bought % 2 == 1 else "tank"
 		var cost := float(_view.catalog[kind].cost)
-		if _view.mass >= cost:
-			_view.call_in(kind, clampi(int(_view.mass / cost), 1, 10))
+		var energy := float(_view.catalog[kind].energy)
+		if _view.mass >= cost and _view.energy >= energy:
+			_view.call_in(kind, clampi(mini(int(_view.mass / cost), int(_view.energy / energy)), 1, 10))
 			_bought += 1
 	var army := 0.0
 	var idle := []
@@ -374,7 +385,7 @@ func _fight() -> void:
 	if _attacking and idle.size() >= 4:
 		_view.order_units(idle, "amove", node.to)
 	if int(_step_clock * 2.0) % 30 == 0:
-		print("t %.0f: mass %d, %d of mine (worth %d), node hp %d, enemy units seen %d, ours lost %d" % [_step_clock, int(_view.mass), _view.my_unit_count(), int(army), int(node.hp), _enemy_seen.size(), _lost])
+		print("t %.0f: mass %d, energy %d (+%d/s), %d of mine (worth %d), node hp %d, enemy units seen %d, ours lost %d" % [_step_clock, int(_view.mass), int(_view.energy), int(_view.energy_income), _view.my_unit_count(), int(army), int(node.hp), _enemy_seen.size(), _lost])
 	if _attacking and not _looked:
 		_looked = true
 		_view._dist_to = 260.0

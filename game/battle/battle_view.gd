@@ -55,6 +55,10 @@ var selected: Dictionary = {} # id -> true
 var pilots: Array = []
 var mass := 0.0
 var income := 0.0
+var energy := 0.0
+var energy_income := 0.0
+var factories := {} # your factories: id -> {"tier", "upgrade": [to, done] or null, "queued"}
+var economy := {} # battle_joined's economy: caps, the factory discount, what drops
 var ends_at := 0.0
 var ended := false
 var sim_rate := 1.0 # simulated seconds a real one (BATTLE_SPEED)
@@ -123,6 +127,8 @@ func _ready() -> void:
 	catalog = info.get("units", {})
 	mass_points = info.get("massPoints", [])
 	mass = float(info.get("mass", 0))
+	energy = float(info.get("energy", 0))
+	economy = info.get("economy", {})
 	ends_at = float(info.get("endsAt", 0))
 	_yaw = 0.0 if my_side == "a" else PI
 	_yaw_to = _yaw
@@ -421,6 +427,11 @@ func _snapshot(msg: Dictionary) -> void:
 	_snap_at = now
 	mass = float(msg.get("mass", mass))
 	income = float(msg.get("income", income))
+	energy = float(msg.get("energy", energy))
+	energy_income = float(msg.get("energyIncome", energy_income))
+	factories = {}
+	for f in msg.get("factories", []):
+		factories[int(f[0])] = {"tier": int(f[1]), "upgrade": f[2], "queued": int(f[3])}
 	ends_at = float(msg.get("endsAt", ends_at))
 	pilots = msg.get("pilots", pilots)
 	var names: Dictionary = info.get("names", {})
@@ -1018,8 +1029,9 @@ func call_in(type: String, count: int) -> void:
 	if ended:
 		return
 	var cost := int(catalog.get(type, {}).get("cost", 0)) * count
-	if mass + 0.01 < cost:
-		_hud.notice("Not enough mass: %d %s cost %d" % [count, _plural(type, count), cost], Color(1.0, 0.5, 0.42))
+	var need := int(catalog.get(type, {}).get("energy", 0)) * count
+	if mass + 0.01 < cost or energy + 0.01 < need:
+		_hud.notice("Not enough %s: %d %s cost %s" % ["mass" if mass + 0.01 < cost else "energy", count, _plural(type, count), _hud.price(cost, need)], Color(1.0, 0.5, 0.42))
 		return
 	Net.send({"type": "battle_drop", "battle": battle_id, "unit": type, "count": count})
 	_hud.feed("%d %s inbound by drop pod" % [count, _plural(type, count)], Color(0.45, 0.95, 0.88))
@@ -1038,6 +1050,12 @@ func produce(type: String, count: int) -> void:
 			Net.send({"type": "battle_produce", "battle": battle_id, "factory": u.id, "unit": type, "count": count})
 			_hud.feed("%s: %d %s queued" % [str(catalog.factory.name), count, _plural(type, count)], Color(0.45, 0.95, 0.88))
 			return
+
+
+## The factory's upgrade button: to its next tier.
+func upgrade_factory(id: int) -> void:
+	Net.send({"type": "battle_upgrade", "battle": battle_id, "factory": id})
+	_hud.feed("Factory upgrading", Color(1.0, 0.85, 0.3))
 
 
 # --- Taking control of a unit -------------------------------------------------------------------
