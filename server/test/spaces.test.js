@@ -13,6 +13,7 @@ function world() {
   const sp = SP.createSpaces({
     isStation: (id) => ['cinder', 'aster'].includes(id),
     isSurface: (id) => id === 'aster',
+    berthsOpen: (id) => (id === 'aster' ? world.berths : 0),
     factionOf: (name) => (name.startsWith('Ash') ? 'ashen' : 'compact'),
     people: () => people,
     send: (c, msg) => c.inbox.push(msg),
@@ -24,6 +25,8 @@ function world() {
   };
   return { sp, pilot, people };
 }
+
+world.berths = 2; // open at Aster's Star Port
 
 const last = (c, type) => c.inbox.filter((m) => m.type === type).at(-1);
 const all = (c, type) => c.inbox.filter((m) => m.type === type);
@@ -98,7 +101,7 @@ test('a station is shared by its copy: walkers come, move and go', () => {
   sp.leave(b);
   assert.deepStrictEqual(last(a, 'walker_left'), { type: 'walker_left', id: b.id });
   sp.enter(b, 'station:cinder');
-  sp.enter(b, 'surface:aster');
+  sp.enter(b, `ship:${b.name}`);
   assert.strictEqual(all(a, 'walker_left').length, 2);
   sp.enter(b, 'station:cinder');
   sp.undock(b);
@@ -113,7 +116,7 @@ test('a station is shared by its copy: walkers come, move and go', () => {
 
   assert.strictEqual(sp.enter(c, 'surface:mars').reason, 'no such base');
   assert.strictEqual(sp.enter(c, 'nowhere').reason, 'no such space');
-  assert.ok(sp.enter(c, 'surface:aster').ok, 'any pilot may walk a base');
+  assert.ok(sp.land(c, 'aster').ok && sp.enter(c, 'surface:aster').ok, 'a pilot who has landed may walk a base');
 });
 
 test("pilots in different copies of a station don't see each other", () => {
@@ -322,4 +325,32 @@ test('over the wire: entering spaces is limited to 10 a second per pilot', async
   } finally {
     await server.close();
   }
+});
+
+test("berths: the Star Port's open berths, one a ship; full, pilots shuttle down from the High Port", () => {
+  const { sp, pilot } = world();
+  world.berths = 2;
+  const [a, b, c] = ['Akane', 'Bo', 'Cy'].map(pilot);
+  assert.strictEqual(sp.enter(a, 'surface:aster').reason, 'land at the Star Port or dock at the High Port first');
+  sp.dock(a, 'aster'); // up at the High Port first
+  assert.deepStrictEqual(sp.land(a, 'aster'), { ok: true, base: 'aster', berth: 0 });
+  assert.deepStrictEqual(last(a, 'berth_granted'), { type: 'berth_granted', base: 'aster', berth: 0 });
+  assert.strictEqual(a.pad, null, 'the ship left its High Port pad');
+  assert.deepStrictEqual(sp.land(a, 'aster'), { ok: true, base: 'aster', berth: 0 }, 'asking again: the same berth');
+  assert.strictEqual(sp.land(b, 'aster').berth, 1);
+  assert.match(sp.land(c, 'aster').reason, /all 2 berths .* taken: take the shuttle down from the High Port/);
+  assert.ok(sp.enter(a, 'surface:aster').ok, 'landed: walk the base');
+  sp.dock(c, 'aster');
+  assert.ok(sp.enter(c, 'surface:aster').ok, 'shuttled down from the High Port');
+  assert.deepStrictEqual(sp.berths('aster'), ['Akane', 'Bo']);
+  // Flying back up frees the berth and takes you off the base; so does going away.
+  sp.dock(a, 'aster');
+  assert.strictEqual(a.berth, null);
+  assert.strictEqual(a.space, null);
+  assert.strictEqual(sp.land(c, 'aster').berth, 0);
+  sp.drop(b);
+  assert.deepStrictEqual(sp.berths('aster'), ['Cy', null]);
+  world.berths = 0;
+  assert.strictEqual(sp.land(b, 'aster').reason, 'there is no Star Port to land at');
+  world.berths = 2;
 });

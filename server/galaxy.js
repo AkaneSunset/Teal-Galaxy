@@ -58,6 +58,9 @@ const COMMAND_LEVELS = [
 const STORAGE_BASE = 500;
 const STORAGE_PER_LEVEL = 750;
 const POWER_BOOST = 0.1; // each Power Plant level: 10% more from the base's producing buildings
+// Pilots land on the Star Port's berths: two more open with each of its levels.
+const BERTHS_PER_LEVEL = 2;
+const BERTHS_MAX = 10;
 
 // Passive income, so a Builder progresses with no pilots online. A tick is 5 s.
 // Pilots' ice jobs still pay off: one delivery is 10 ice, an Ice Extractor takes 30 s per ice.
@@ -146,6 +149,7 @@ function newEconomy() {
     // The war: `faction` is set once by chooseFaction; merit comes from donations.
     merit: 0,
     market: {}, // the Carrier Dock's listings: item -> credits per unit
+    bids: {}, // the Star Port's buy orders: item -> {price, want}
     alerts: [], // [{at, text}] for the phone's toasts, the last 20
   };
 }
@@ -192,6 +196,7 @@ function claimBase(g, name) {
       navy: g.navy || newEconomy().navy,
       merit: 0,
       market: {},
+      bids: {},
       alerts: [],
     };
     S.locate(g);
@@ -246,6 +251,12 @@ function storageCap(g, planetId) {
   for (const p of g.system.planets)
     if (p.owner === owner && p.kind !== 'satellite') for (const b of p.buildings) if (b.type === 'warehouse') level = Math.max(level, b.level ?? 1);
   return STORAGE_BASE + STORAGE_PER_LEVEL * level;
+}
+
+// How many berths a base's Star Port has open (0 without a finished one).
+function berthsOpen(g, planetId) {
+  const port = planet(g, planetId)?.buildings.find((b) => b.type === 'spaceport' && (b.level ?? 1) >= 1);
+  return port ? Math.min(BERTHS_MAX, (port.level ?? 1) * BERTHS_PER_LEVEL) : 0;
 }
 
 // The planet's Power Plant level (0 without one).
@@ -719,6 +730,7 @@ function recoverRaids(g) {
   for (const e of Object.values(g.bases)) {
     e.merit ||= 0;
     e.market ||= {};
+    e.bids ||= {};
     e.alerts ||= [];
   }
   for (const name of Object.keys(g.pilots)) pilot(g, name);
@@ -903,6 +915,62 @@ function dockBuy(g, name, builder, item, qty) {
   return { ok: true, cost };
 }
 
+// The Star Port's buy orders: what the Builder will pay pilots for, a unit at a time, and how
+// many they want. Any pilot may sell (no faction needed). Selling from a ship on one of the Star
+// Port's berths pays the full price; selling from the High Port overhead, the platform keeps
+// TARIFF of it. Wants and want caps are whole numbers.
+const TARIFF = 0.2;
+const WANT_MAX = 10000;
+
+function setBid(g, builder, item, price, want) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('you have no home planet');
+  if (!hasBuilding(g, 'spaceport', home.id)) return fail('build a Star Port first');
+  if (!CONTRACT_ITEMS.includes(item)) return fail('the Star Port buys materials and supplies');
+  const e = econ(g, home.id);
+  e.bids ||= {};
+  if (price === 0 || price === null || price === undefined) {
+    delete e.bids[item];
+    return { ok: true, price: 0 };
+  }
+  if (!Number.isInteger(price) || price < 1 || price > PRICE_MAX) return fail(`a price is a whole number of credits from 1 to ${PRICE_MAX}`);
+  if (!Number.isInteger(want) || want < 1 || want > WANT_MAX) return fail(`want 1 to ${WANT_MAX}`);
+  e.bids[item] = { price, want };
+  return { ok: true, price, want };
+}
+
+// A pilot sells to a Builder's buy order, from their cargo first, then their war goods hold.
+// `tariffed`: they are selling from the High Port, not from a berth at the Star Port.
+function sellToBuilder(g, name, builder, item, qty, tariffed) {
+  const home = homeOf(g, builder);
+  if (!home) return fail('no such Builder');
+  if (!hasBuilding(g, 'spaceport', home.id)) return fail(`${builder} has no Star Port`);
+  if (name === builder) return fail("you can't sell to your own base");
+  const e = econ(g, home.id);
+  const bid = CONTRACT_ITEMS.includes(item) && Object.hasOwn(e.bids || {}, item) ? e.bids[item] : null;
+  if (!bid) return fail(`${builder} isn't buying that`);
+  if (!Number.isInteger(qty) || qty < 1) return fail('bad amount');
+  if (qty > bid.want) return fail(`${builder} only wants ${bid.want} more`);
+  const p = pilot(g, name);
+  const fromCargo = Math.min(qty, p.cargo[item] || 0);
+  const fromHold = qty - fromCargo;
+  if (fromHold > (p.hold[item] || 0)) return fail(`you only have ${fromCargo + (p.hold[item] || 0)}`);
+  const cost = bid.price * qty;
+  if (e.credits < cost) return fail(`${builder} can't pay for that many`);
+  const tariff = tariffed ? Math.round(cost * TARIFF) : 0;
+  e.credits -= cost;
+  p.credits += cost - tariff;
+  p.cargo[item] = (p.cargo[item] || 0) - fromCargo;
+  if (fromHold) p.hold[item] -= fromHold;
+  e.stock[item] = (e.stock[item] || 0) + qty;
+  bid.want -= qty;
+  if (bid.want <= 0) delete e.bids[item];
+  if (item === 'ice' && !e.unlocked.includes('hydroponics')) e.unlocked.push('hydroponics');
+  log(g, `${name} sold ${amountOf(item, qty)} to ${builder}'s Star Port`);
+  F.alert(e, `${name} sold you ${amountOf(item, qty)} for ${cost} credits${tariffed ? ' from the High Port' : ''}`);
+  return { ok: true, paid: cost - tariff, tariff };
+}
+
 // A pilot asks Builders of their faction for goods. The reward is held from their credits and
 // paid out as the contract fills.
 function postContract(g, name, item, amount, reward) {
@@ -1012,6 +1080,9 @@ module.exports = {
   STORAGE_PER_LEVEL,
   POWER_BOOST,
   commandLevel,
+  berthsOpen,
+  BERTHS_PER_LEVEL,
+  BERTHS_MAX,
   setCommandLevel,
   storageCap,
   BUILD_S,
@@ -1049,6 +1120,10 @@ module.exports = {
   chooseFaction,
   demoCapture,
   setPrice,
+  setBid,
+  sellToBuilder,
+  TARIFF,
+  WANT_MAX,
   dockBuy,
   postContract,
   fillContract,

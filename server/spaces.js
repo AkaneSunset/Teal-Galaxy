@@ -9,6 +9,10 @@
 // holds PADS ships; when every pad is taken a new copy opens, so the pads are what decide how many
 // pilots a station holds. Ships and surfaces have one copy each.
 //
+// A Builder base has berths at its Star Port, as many as its level opens (berthsOpen). A pilot
+// lands on one with their ship; when they're all taken, pilots docked at the base's High Port take
+// the shuttle down on foot instead. Either way they may walk the base.
+//
 // People aboard someone's carrier are its crew: they stay aboard when its owner undocks and flies,
 // and can only step off into a station the owner is docked at.
 //
@@ -36,8 +40,9 @@ function position(pos) {
 // `isStation(id)` and `isSurface(id)` say which planet ids have a station or a base to walk;
 // `factionOf(name)` is a pilot's faction or null; `people()` lists the pilots' connection records;
 // `send(me, msg)` sends one of them a message.
-function createSpaces({ isStation, isSurface, factionOf, people, send }) {
+function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, people, send }) {
   const stations = new Map(); // station id -> its copies, each an array of PADS holders (connection ids, or null)
+  const bases = new Map(); // base (planet id) -> its Star Port's berths, connection ids or null
 
   // The connection of the pilot called `name`, if they're on.
   function pilot(name) {
@@ -66,6 +71,7 @@ function createSpaces({ isStation, isSurface, factionOf, people, send }) {
     if (!isStation(station)) return fail('no such station');
     if (me.pad?.station === station) return grant(me);
     if (me.pad) undock(me);
+    unberth(me); // the ship has lifted off from a base to come up here
     if (!stations.has(station)) stations.set(station, []);
     const copies = stations.get(station);
     let copy = copies.findIndex((pads) => pads.includes(null));
@@ -90,6 +96,48 @@ function createSpaces({ isStation, isSurface, factionOf, people, send }) {
     me.pad = null;
     if (me.space === `station:${station}`) leave(me);
     return { ok: true, station };
+  }
+
+  // The ship lands at a base: on a free berth of its Star Port, or not at all (the pilot docks at
+  // the High Port and shuttles down instead). Asking again at the same base gives the same berth.
+  // Landing gives up the pilot's High Port pad: the ship has left it.
+  function land(me, base) {
+    base = String(base ?? '');
+    if (!isSurface(base)) return fail('no such base');
+    if (me.berth?.base === base) return granted(me);
+    const open = berthsOpen(base);
+    if (open < 1) return fail('there is no Star Port to land at');
+    if (!bases.has(base)) bases.set(base, []);
+    const berths = bases.get(base);
+    const free = [...Array(open).keys()].find((i) => !berths[i]);
+    if (free === undefined) return fail(`all ${open} berths at the Star Port are taken: take the shuttle down from the High Port`);
+    unberth(me);
+    if (me.pad) undock(me);
+    berths[free] = me.id;
+    me.berth = { base, berth: free };
+    return granted(me);
+  }
+
+  function granted(me) {
+    send(me, { type: 'berth_granted', ...me.berth });
+    return { ok: true, ...me.berth };
+  }
+
+  // Gives up the pilot's berth, and walks them off the base if they were on it with their ship.
+  function unberth(me) {
+    if (!me.berth) return { ok: true };
+    const { base, berth } = me.berth;
+    const berths = bases.get(base);
+    if (berths && berths[berth] === me.id) berths[berth] = null;
+    me.berth = null;
+    if (me.space === `surface:${base}` && me.pad?.station !== base) leave(me);
+    return { ok: true, base };
+  }
+
+  // Who holds each berth at a base: [name or null, ...].
+  function berths(base) {
+    const byId = new Map([...people()].map((c) => [c.id, c.name]));
+    return (bases.get(base) || []).map((id) => (id ? byId.get(id) ?? null : null));
   }
 
   // Who holds which pad in each copy of a station: [[name or null, ...], ...].
@@ -135,6 +183,8 @@ function createSpaces({ isStation, isSurface, factionOf, people, send }) {
     }
     if (kind === 'surface') {
       if (!isSurface(id)) return fail('no such base');
+      // Landed on a berth, or shuttled down from the High Port overhead.
+      if (me.berth?.base !== id && me.pad?.station !== id) return fail('land at the Star Port or dock at the High Port first');
       return { ok: true, copy: ONE_COPY };
     }
     return fail('no such space');
@@ -201,9 +251,10 @@ function createSpaces({ isStation, isSurface, factionOf, people, send }) {
   function drop(me) {
     leave(me);
     undock(me);
+    unberth(me);
   }
 
-  return { dock, undock, pads, enter, leave, walk, setOpen, drop, members, admit };
+  return { dock, undock, pads, land, unberth, berths, enter, leave, walk, setOpen, drop, members, admit };
 }
 
 module.exports = { PADS, SHIP_MAX, WALK_PER_S, POS_MAX, ANIMS, createSpaces };
