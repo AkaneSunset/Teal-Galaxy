@@ -11,9 +11,10 @@ function base({ dock = true, faction = 'compact', pilots = {} } = {}) {
   g.buildSpeed = Infinity;
   G.claimBase(g, 'Akane');
   G.demoTopUp(g.bases.Akane);
+  G.setCommandLevel(g, 'aster', 4); // the Carrier Dock opens at level 4
   if (faction) G.chooseFaction(g, 'builder', 'Akane', faction);
   assert.ok(G.build(g, 'aster', 0, 'spaceport').ok);
-  if (dock) assert.ok(G.build(g, 'aster', 1, 'dock').ok);
+  if (dock) assert.ok(G.build(g, 'aster', 7, 'dock').ok);
   for (const [name, f] of Object.entries(pilots)) {
     G.chooseFaction(g, 'explorer', name, f);
     g.pilots[name].credits = 1000;
@@ -21,21 +22,24 @@ function base({ dock = true, faction = 'compact', pilots = {} } = {}) {
   return { g, e: g.bases.Akane };
 }
 
-test('the Carrier Dock: after a Spaceport, one per base, 3 minutes to build', () => {
+test('the Carrier Dock: Command Centre level 4, after a Star Port, one per base, 3 minutes to build', () => {
   const g = G.newGalaxy();
   G.claimBase(g, 'Akane');
   G.demoTopUp(g.bases.Akane);
   g.buildSpeed = 1;
-  assert.match(G.build(g, 'aster', 0, 'dock').reason, /Spaceport first/);
+  G.setCommandLevel(g, 'aster', 3);
+  assert.match(G.build(g, 'aster', 7, 'dock').reason, /Command Centre to level 4/);
+  G.setCommandLevel(g, 'aster', 4);
+  assert.match(G.build(g, 'aster', 7, 'dock').reason, /Star Port first/);
   g.buildSpeed = Infinity;
   G.build(g, 'aster', 0, 'spaceport');
   g.buildSpeed = 1;
   const metal = g.bases.Akane.stock.metal;
   const alloy = g.bases.Akane.stock.alloy;
-  assert.ok(G.build(g, 'aster', 1, 'dock', 0).ok);
+  assert.ok(G.build(g, 'aster', 7, 'dock', 0).ok);
   assert.deepStrictEqual([metal - g.bases.Akane.stock.metal, alloy - g.bases.Akane.stock.alloy], [80, 10]);
-  assert.strictEqual(g.system.planets[0].buildings[1].readyAt, 180_000);
-  assert.match(G.build(g, 'aster', 2, 'dock').reason, /already have a Carrier Dock/);
+  assert.strictEqual(g.system.planets[0].buildings.find((b) => b.type === 'dock').readyAt, 180_000);
+  assert.match(G.build(g, 'aster', 7, 'dock').reason, /already there/);
   assert.strictEqual(G.setPrice(g, 'Akane', 'metal', 5).reason, 'build a Carrier Dock first', 'not until it is finished');
   G.tick(g, 180_000);
   assert.ok(G.setPrice(g, 'Akane', 'metal', 5).ok);
@@ -44,7 +48,7 @@ test('the Carrier Dock: after a Spaceport, one per base, 3 minutes to build', ()
 test('the dock market: list anything in stock at a whole-credit price, or take it off', () => {
   const { g, e } = base({ dock: false });
   assert.strictEqual(G.setPrice(g, 'Akane', 'fuel', 10).reason, 'build a Carrier Dock first');
-  G.build(g, 'aster', 1, 'dock');
+  G.build(g, 'aster', 7, 'dock');
   assert.ok(G.setPrice(g, 'Akane', 'fuel', 10).ok);
   assert.ok(G.setPrice(g, 'Akane', 'metal', 3).ok);
   assert.ok(G.setPrice(g, 'Akane', 'ice', 100000).ok);

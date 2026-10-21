@@ -419,7 +419,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES },
         ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX,
         items: H.ITEMS, facilities: H.FACILITIES, security: H.SECURITY, heatLevels: H.HEAT_LEVELS, alarmCost: H.ALARM_COST, fenceRate: H.FENCE_RATE,
-        buildings: G.BUILDINGS, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH,
+        buildings: G.BUILDINGS, nodes: G.NODES, commandSlot: G.COMMAND_SLOT, commandLevels: G.COMMAND_LEVELS,
+        storage: { base: G.STORAGE_BASE, perLevel: G.STORAGE_PER_LEVEL }, powerBoost: G.POWER_BOOST, produces: G.PRODUCES, autoShipMs: G.AUTO_SHIP_MS, buildTimes: G.BUILD_S, maxLevel: G.MAX_LEVEL, levelGrowth: G.LEVEL_GROWTH,
         buildSpeed: Number.isFinite(galaxy.buildSpeed) ? galaxy.buildSpeed : 0,
         // The faction war
         factions: F.FACTIONS,

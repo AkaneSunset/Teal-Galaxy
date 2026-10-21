@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('crypto');
 const WebSocket = require('ws');
+const G = require('../galaxy');
 const { startServer, adminCheck } = require('../server');
 
 // An app's connection. `raw` keeps every message as it came over the wire.
@@ -54,7 +55,7 @@ test('builder and two pilots complete the ice job', async () => {
 
     // Posting a job before a Spaceport exists is refused.
     phone.send({ type: 'post_job', resource: 'ice', amount: 10, reward: 100 });
-    assert.match((await phone.next((m) => m.type === 'error')).reason, /Spaceport/);
+    assert.match((await phone.next((m) => m.type === 'error')).reason, /Star Port/);
 
     // Phone builds a Spaceport; both PCs see it appear.
     phone.send({ type: 'build', planet: 'aster', slot: 0, building: 'spaceport' });
@@ -137,6 +138,7 @@ test('the faction war over the wire: factions, outposts, fleets, the dock, contr
     await pilotA.next((m) => m.type === 'welcome');
     pilotB.send({ type: 'hello', role: 'explorer', name: 'Pilot B' });
     await pilotB.next((m) => m.type === 'welcome');
+    for (const name of ['Akane', 'Rin']) G.setCommandLevel(server.galaxy, G.claimBase(server.galaxy, name).id, 5); // everything open
 
     // The catalog carries the war's rules; the old fleet attacks are gone.
     const cat = welcome.catalog;
@@ -219,7 +221,7 @@ test('the faction war over the wire: factions, outposts, fleets, the dock, contr
     akane.send({ type: 'set_price', item: 'fuel', price: 12 });
     await akane.next(isError(/build a Carrier Dock first/));
     akane.send({ type: 'build', planet: 'aster', slot: 0, building: 'spaceport' });
-    akane.send({ type: 'build', planet: 'aster', slot: 1, building: 'dock' });
+    akane.send({ type: 'build', planet: 'aster', slot: 7, building: 'dock' });
     await rin.next(isState((s) => s.system.planets[0].buildings.some((b) => b.type === 'dock')));
     server.galaxy.bases.Akane.stock.fuel = 30;
     akane.send({ type: 'set_price', item: 'fuel', price: 12 });
@@ -467,11 +469,11 @@ test('only apps the server welcomed hear the galaxy; a Coma character is the key
     // Mio's pilot and Zed's Builder are other characters: they can't run Mio's base or Zed's cargo.
     const aster = server.galaxy.system.planets.find((p) => p.owner === 'Mio');
     const mioPilot = await hello('explorer', 'Mio');
-    for (const [type, fields] of [['build', { slot: 0, building: 'mine' }], ['post_job', { resource: 'ice', amount: 1, reward: 1 }], ['queue_ship', { slot: 0, ship: 'corvette' }], ['upgrade_building', { slot: 0 }], ['remove_piece', { piece: 1 }], ['clear_obstacle', { obstacle: 1 }]]) {
+    for (const [type, fields] of [['build', { slot: 1, building: 'extractor' }], ['post_job', { resource: 'ice', amount: 1, reward: 1 }], ['queue_ship', { slot: 0, ship: 'corvette' }], ['upgrade_building', { slot: 0 }], ['remove_piece', { piece: 1 }], ['clear_obstacle', { obstacle: 1 }]]) {
       mioPilot.send({ type, planet: aster.id, ...fields });
       assert.strictEqual(await error(mioPilot), 'only Builders run a base', type);
     }
-    assert.deepStrictEqual(aster.buildings, []);
+    assert.deepStrictEqual(aster.buildings.map((b) => b.type), ['command'], 'nothing built');
     server.galaxy.pilots.Zed.stash.push({ item: 'drive', qty: 1, fih: false });
     const zedBuilder = await hello('builder', 'Zed');
     for (const [type, fields, reason] of [['collect', { resource: 'ice', amount: 5 }, 'only pilots carry cargo'], ['deliver', { job: 1 }, 'only pilots carry cargo'], ['sell', {}, 'only pilots sell to the Fence']]) {

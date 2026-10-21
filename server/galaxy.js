@@ -11,12 +11,17 @@ const N = require('./navy');
 const S = require('./sites');
 const W = require('./war');
 
+// A home base is a Command Centre with eight nodes around it in a square, each for one building
+// (NODES). The Command Centre's level decides which nodes can be built, how high they can level
+// and what else the Builder has unlocked (COMMAND_LEVELS).
 const BUILDINGS = {
-  mine: { name: 'Mine', cost: { metal: 10 }, needs: null },
-  extractor: { name: 'Ice Extractor', cost: { metal: 15 }, needs: null },
+  command: { name: 'Command Centre', cost: { metal: 60, ice: 10 } },
+  spaceport: { name: 'Star Port', cost: { metal: 30 }, needs: null },
+  extractor: { name: 'Extractor', cost: { metal: 15 }, needs: null },
   habitat: { name: 'Habitat', cost: { metal: 20 }, needs: null },
-  spaceport: { name: 'Spaceport', cost: { metal: 30 }, needs: null },
-  hydroponics: { name: 'Hydroponics', cost: { metal: 20, ice: 10 }, needs: 'ice' },
+  hydroponics: { name: 'Hydroponics Lab', cost: { metal: 20, ice: 10 }, needs: 'ice' },
+  warehouse: { name: 'Warehouse', cost: { metal: 40 } },
+  power: { name: 'Power Plant', cost: { metal: 50, ice: 10 } },
   // Outposts: facilities that fill a vault with goods the Builder ships home, and Explorers can raid
   // them. Each is founded on its own site in a sector the Builder's faction holds (sites.js).
   refinery: { name: 'Extractor', cost: { metal: 40 }, facility: true },
@@ -28,18 +33,36 @@ const BUILDINGS = {
   drones: { name: 'Drone Yard', cost: { metal: 50, alloy: 15 }, facility: true },
   landers: { name: 'Lander Yard', cost: { metal: 60, alloy: 15 }, facility: true },
   haulers: { name: 'Hauler Yard', cost: { metal: 70, alloy: 20 }, facility: true },
-  // Builds warships for the Builder's navy (navy.js). One per base, after a Spaceport.
+  // Builds warships for the Builder's navy (navy.js). One per base, after a Star Port.
   foundry: { name: 'Ship Foundry', cost: { metal: 60, ice: 10 }, needsBuilding: 'spaceport', limit: 1 },
   // Where carriers will dock (phase 4); for now it hosts the dock market. One per base.
   dock: { name: 'Carrier Dock', cost: { metal: 80, alloy: 10 }, needsBuilding: 'spaceport', limit: 1 },
 };
 const OUTPOSTS = Object.keys(BUILDINGS).filter((t) => BUILDINGS[t].facility);
 
+// The home base's nodes, by slot: 0-7 around the Command Centre, which stands on COMMAND_SLOT.
+const NODES = ['spaceport', 'extractor', 'habitat', 'hydroponics', 'warehouse', 'power', 'foundry', 'dock'];
+const COMMAND_SLOT = 8;
+// What each Command Centre level adds: the nodes it opens, how many outposts it allows in all, and
+// what that means for the Builder, for the phone to show. Nodes can't level past the Command Centre.
+const COMMAND_LEVELS = [
+  null,
+  { nodes: ['spaceport', 'extractor', 'habitat'], outposts: 0, about: ['Star Port, Extractor and Habitat', 'Pilots land at your Star Port and fly your jobs'] },
+  { nodes: ['hydroponics', 'warehouse', 'power'], outposts: 1, about: ['Hydroponics Lab, Warehouse and Power Plant', 'Your first outpost, on a sector your faction holds'] },
+  { nodes: ['foundry'], outposts: 2, about: ['Ship Foundry: build warships and send fleets to the war', 'A second outpost'] },
+  { nodes: ['dock'], outposts: 3, about: ['Carrier Dock: the dock market, for carriers of your faction', 'A third outpost'] },
+  { nodes: [], outposts: 5, about: ['Five outposts', 'Turrets on every stretch of the wall'] },
+];
+// The Warehouse: metal and ice stop coming in from the base's own buildings once stock reaches
+// this (pilots' deliveries, freighters and loot still arrive).
+const STORAGE_BASE = 500;
+const STORAGE_PER_LEVEL = 750;
+const POWER_BOOST = 0.1; // each Power Plant level: 10% more from the base's producing buildings
+
 // Passive income, so a Builder progresses with no pilots online. A tick is 5 s.
 // Pilots' ice jobs still pay off: one delivery is 10 ice, an Ice Extractor takes 30 s per ice.
 const PRODUCES = {
-  mine: { metal: 1 }, // 12 metal a minute
-  extractor: { ice: 1 / 6 }, // 2 ice a minute
+  extractor: { metal: 1, ice: 1 / 6 }, // 12 metal and 2 ice a minute
   habitat: { credits: 1 }, // rent: 12 credits a minute
   hydroponics: { credits: 2 }, // sells food: 24 credits a minute
 };
@@ -47,7 +70,7 @@ const PRODUCES = {
 // takes twice what the one before did, and produces more (see levelled effects in tick()).
 // A building under construction or being upgraded does nothing until it's done.
 const BUILD_S = {
-  mine: 20, extractor: 30, habitat: 40, spaceport: 60, hydroponics: 60, foundry: 120, dock: 180,
+  command: 120, extractor: 30, habitat: 40, spaceport: 60, hydroponics: 60, warehouse: 60, power: 90, foundry: 120, dock: 180,
   refinery: 90, lab: 120, spire: 150, fuel: 60, munitions: 90, ordnance: 120, drones: 150, landers: 150, haulers: 180,
 };
 const MAX_LEVEL = 5;
@@ -79,14 +102,15 @@ const AUTO_SHIP_MS = 5 * 60_000; // a facility's freighter takes the vault home 
 const POPULATION_PER_HABITAT = 50;
 
 // Unlocked from the start: everything but Hydroponics, which the first ice unlocks.
-const UNLOCKED = ['mine', 'extractor', 'habitat', 'spaceport', ...OUTPOSTS, 'foundry', 'dock'];
+// (The Command Centre's level decides the rest: COMMAND_LEVELS.)
+const UNLOCKED = ['extractor', 'habitat', 'spaceport', 'warehouse', 'power', ...OUTPOSTS, 'foundry', 'dock'];
 
 function newGalaxy() {
   const g = {
     system: {
       id: 'teal-prime',
       name: 'Teal Prime',
-      planets: [{ id: 'aster', name: 'Aster', slots: 6, buildings: [] }],
+      planets: [{ id: 'aster', name: 'Aster', slots: NODES.length, buildings: [newCommand()] }],
     },
     stock: { metal: 60, ice: 0 },
     credits: 500,
@@ -176,12 +200,57 @@ function claimBase(g, name) {
   }
   const taken = new Set(g.system.planets.map((p) => p.name));
   const pname = PLANET_NAMES.find((n) => !taken.has(n)) || `Colony ${g.system.planets.length + 1}`;
-  const p = { id: pname.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name: pname, owner: name, slots: 6, buildings: [] };
+  const p = { id: pname.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name: pname, owner: name, slots: NODES.length, buildings: [newCommand()] };
   g.system.planets.push(p);
   S.locate(g);
   g.bases[name] = newEconomy();
   log(g, `${name} founded a base on ${pname}`);
   return p;
+}
+
+// Every home base starts with its Command Centre at level 1.
+function newCommand() {
+  return { slot: COMMAND_SLOT, type: 'command', level: 1 };
+}
+
+// A home planet's Command Centre level (finished levels; 1 if it has none).
+function commandLevel(p) {
+  const b = p?.buildings.find((x) => x.type === 'command');
+  return Math.max(1, b?.level ?? 1);
+}
+
+// Sets a home planet's Command Centre to `level` at once (tests, and admins trying things out).
+function setCommandLevel(g, planetId, level) {
+  const b = planet(g, planetId)?.buildings.find((x) => x.type === 'command');
+  if (!b) return fail('no Command Centre there');
+  b.level = Math.max(1, Math.min(MAX_LEVEL, level));
+  delete b.readyAt;
+  return { ok: true };
+}
+
+// The Command Centre level that opens a node.
+function nodeLevel(type) {
+  return COMMAND_LEVELS.findIndex((l) => l && l.nodes.includes(type));
+}
+
+// How many outposts a Builder's Command Centre allows.
+function outpostsAllowed(g, owner) {
+  const home = g.system.planets.find((p) => p.owner === owner && p.kind !== 'satellite');
+  return COMMAND_LEVELS[commandLevel(home)].outposts;
+}
+
+// How much metal and ice a planet's economy holds before its own buildings stop adding more.
+function storageCap(g, planetId) {
+  const owner = planet(g, planetId)?.owner;
+  let level = 0;
+  for (const p of g.system.planets)
+    if (p.owner === owner && p.kind !== 'satellite') for (const b of p.buildings) if (b.type === 'warehouse') level = Math.max(level, b.level ?? 1);
+  return STORAGE_BASE + STORAGE_PER_LEVEL * level;
+}
+
+// The planet's Power Plant level (0 without one).
+function powerLevel(p) {
+  return p.buildings.reduce((n, b) => (b.type === 'power' ? Math.max(n, b.level ?? 1) : n), 0);
 }
 
 function fail(reason) {
@@ -209,11 +278,15 @@ function build(g, planetId, slot, type, now = Date.now()) {
   if (!p) return fail('no such planet');
   if (!def) return fail('no such building');
   const e = econ(g, planetId);
+  if (type === 'command') return fail('the Command Centre is already there');
   if (!e.unlocked.includes(type)) return fail(`${def.name} is locked`);
   if (p.kind === 'satellite') return fail('an outpost holds one facility; place defences instead');
   if (def.facility) return fail(`the ${def.name} is an outpost: found it on a sector your faction holds`);
-  if (!Number.isInteger(slot) || slot < 0 || slot >= p.slots) return fail('bad slot');
-  if (p.buildings.some((b) => b.slot === slot)) return fail('slot taken');
+  if (!Number.isInteger(slot) || slot < 0 || slot >= NODES.length) return fail('bad slot');
+  if (NODES[slot] !== type) return fail(`that node is for the ${BUILDINGS[NODES[slot]].name}`);
+  if (p.buildings.some((b) => b.slot === slot)) return fail(`the ${def.name} is already there`);
+  const needs = nodeLevel(type);
+  if (needs > commandLevel(p)) return fail(`upgrade your Command Centre to level ${needs} for the ${def.name}`);
   if (def.needsBuilding && !hasBuilding(g, def.needsBuilding, planetId)) return fail(`build a ${BUILDINGS[def.needsBuilding].name} first`);
   if (def.limit && g.system.planets.reduce((n, q) => n + (q.owner === p.owner ? q.buildings.filter((x) => x.type === type).length : 0), 0) >= def.limit)
     return fail(`you already have a ${def.name}`);
@@ -252,6 +325,8 @@ function upgradeBuilding(g, planetId, slot, now = Date.now()) {
   if (!def) return fail('nothing to upgrade there');
   if (busy(b, now)) return fail(`the ${def.name} is still ${b.level ? 'upgrading' : 'being built'}`);
   if (b.level >= MAX_LEVEL) return fail(`the ${def.name} is at the top level`);
+  if (p.kind !== 'satellite' && b.type !== 'command' && b.level >= commandLevel(p))
+    return fail(`upgrade your Command Centre to level ${b.level + 1} first`);
   if (p.dormant) return fail('the outpost is dormant');
   if (g.raids.some((r) => r.planet === planetId && r.slot === slot)) return fail('not during a raid');
   const err = pay(econ(g, planetId), levelCost(b.type, b.level));
@@ -263,7 +338,7 @@ function upgradeBuilding(g, planetId, slot, now = Date.now()) {
 }
 
 function postJob(g, resource, amount, reward, planetId = g.system.planets[0].id) {
-  if (!hasBuilding(g, 'spaceport', planetId)) return fail('build a Spaceport first');
+  if (!hasBuilding(g, 'spaceport', planetId)) return fail('build a Star Port first');
   if (!(amount > 0) || !(reward > 0)) return fail('bad job');
   const e = econ(g, planetId);
   if (e.credits < reward) return fail('not enough credits');
@@ -359,14 +434,18 @@ function tick(g, now = Date.now()) {
       const makes = PRODUCES[b.type];
       if (makes) {
         const e = econ(g, p.id);
+        const boost = 1 + POWER_BOOST * powerLevel(p);
+        const cap = storageCap(g, p.id);
+        b.carry = typeof b.carry === 'object' ? b.carry : {}; // per resource
         for (const [res, rate] of Object.entries(makes)) {
+          if (res !== 'credits' && (e.stock[res] || 0) >= cap) continue; // the Warehouse is full
           // Fractional rates build up in b.carry and pay out whole units.
-          b.carry = (b.carry || 0) + rate * level; // each level adds the base rate again
-          const whole = Math.floor(b.carry + 1e-9);
+          b.carry[res] = (b.carry[res] || 0) + rate * level * boost; // each level adds the base rate again
+          const whole = Math.floor(b.carry[res] + 1e-9);
           if (whole < 1) continue;
-          b.carry -= whole;
+          b.carry[res] -= whole;
           if (res === 'credits') e.credits += whole;
-          else e.stock[res] = (e.stock[res] || 0) + whole;
+          else e.stock[res] = Math.min(cap, (e.stock[res] || 0) + whole);
         }
         changed = true;
       }
@@ -435,6 +514,10 @@ function foundSite(g, owner, type, planetId, sectorId, now = Date.now()) {
   const e = econ(g, home.id);
   if (!e.faction) return fail('choose a faction first');
   if (!e.unlocked.includes(type)) return fail(`${def.name} is locked`);
+  const allowed = outpostsAllowed(g, owner);
+  if (!allowed) return fail('upgrade your Command Centre to level 2 to found outposts');
+  if (g.system.planets.filter((p) => p.owner === owner && p.kind === 'satellite').length >= allowed)
+    return fail(`your Command Centre allows ${allowed} outpost${allowed === 1 ? '' : 's'}: upgrade it for more`);
   const wp = W.planet(g, planetId);
   if (!wp || wp.system !== g.system.id) return fail(`outposts go on the contested planets of ${g.system.name}`);
   if (wp.owner !== e.faction) return fail(`${F.the(e.faction)} doesn't hold ${wp.name}`);
@@ -496,8 +579,8 @@ function removePiece(g, siteId, pieceId) {
   return S.remove(st, pieceId, econ(g, siteId));
 }
 
-// The automatic freighter comes more often the higher the owner's Spaceport level: every
-// AUTO_SHIP_MS at level 1 (or with no Spaceport), divided by the level.
+// The automatic freighter comes more often the higher the owner's Star Port level: every
+// AUTO_SHIP_MS at level 1 (or with no Star Port), divided by the level.
 function autoShipMs(g, planetId) {
   const owner = planet(g, planetId)?.owner;
   let level = 1;
@@ -631,7 +714,7 @@ function recoverRaids(g) {
   g.nextContractId ||= 1;
   for (const e of [g, ...Object.values(g.bases)]) {
     N.ensure(e);
-    for (const type of ['extractor', ...OUTPOSTS, 'foundry', 'dock']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
+    for (const type of ['extractor', 'warehouse', 'power', ...OUTPOSTS, 'foundry', 'dock']) if (!e.unlocked.includes(type)) e.unlocked.push(type);
   }
   for (const e of Object.values(g.bases)) {
     e.merit ||= 0;
@@ -639,10 +722,11 @@ function recoverRaids(g) {
     e.alerts ||= [];
   }
   for (const name of Object.keys(g.pilots)) pilot(g, name);
-  // Buildings from other versions of the game: the Ice Well is an Ice Extractor here, anything else
+  // Buildings from other versions of the game: the Ice Well is an Extractor here, anything else
   // this version doesn't know is dropped rather than left to break whoever taps it.
   for (const p of g.system.planets) {
     for (const b of p.buildings) if (b.type === 'icewell') b.type = 'extractor';
+    if (p.kind !== 'satellite') layOutBase(g, p);
     p.buildings = p.buildings.filter((b) => BUILDINGS[b.type]);
   }
   for (const p of g.system.planets) for (const b of p.buildings) if (b.type === 'foundry') b.queue ||= [];
@@ -657,6 +741,31 @@ function recoverRaids(g) {
   returnAttacks(g);
   W.ensureWar(g); // the war map for saves from before it; outposts' dormancy either way
   D.ensureDirector(g); // and the Coma director for saves from before it
+}
+
+// A home base from before the Command Centre (six pads, any building on any pad) moves onto the
+// nodes: each type to its own node, keeping the highest level when there were two (a Mine becomes
+// the Extractor, which digs metal now). The Command Centre comes in at the level that keeps
+// everything already built, outposts included.
+function layOutBase(g, p) {
+  if (p.buildings.some((b) => b.type === 'command')) return;
+  const best = {};
+  for (const b of p.buildings) {
+    if (b.type === 'mine') b.type = 'extractor';
+    if (!NODES.includes(b.type)) continue;
+    const have = best[b.type];
+    if (!have || (b.level ?? 1) > (have.level ?? 1)) best[b.type] = b;
+  }
+  const sites = g.system.planets.filter((q) => q.kind === 'satellite' && p.owner && q.owner === p.owner).length;
+  let level = sites ? COMMAND_LEVELS.findIndex((l) => l && l.outposts >= sites) : 1;
+  if (level < 0) level = MAX_LEVEL;
+  p.buildings = Object.values(best).map((b) => {
+    b.slot = NODES.indexOf(b.type);
+    level = Math.max(level, nodeLevel(b.type), b.level ?? 1);
+    return b;
+  });
+  p.buildings.push({ ...newCommand(), level: Math.min(MAX_LEVEL, level) });
+  p.slots = NODES.length;
 }
 
 // Fleet attacks on satellite sites are retired: fleets still out when a save from before the war
@@ -882,9 +991,9 @@ function donate(g, builder, item, qty) {
   return { ok: true, merit: e.merit, rank: after.name };
 }
 
-// The Fence at the Spaceport buys everything in a pilot's stash.
+// The Fence at the Star Port buys everything in a pilot's stash.
 function sell(g, name) {
-  if (!hasBuilding(g, 'spaceport')) return fail('no Spaceport to sell at');
+  if (!hasBuilding(g, 'spaceport')) return fail('no Star Port to sell at');
   const p = pilot(g, name);
   if (!p.stash.length) return fail('nothing to sell');
   const total = Math.round(H.value(p.stash) * H.FENCE_RATE);
@@ -896,6 +1005,15 @@ function sell(g, name) {
 
 module.exports = {
   BUILDINGS,
+  NODES,
+  COMMAND_SLOT,
+  COMMAND_LEVELS,
+  STORAGE_BASE,
+  STORAGE_PER_LEVEL,
+  POWER_BOOST,
+  commandLevel,
+  setCommandLevel,
+  storageCap,
   BUILD_S,
   MAX_LEVEL,
   LEVEL_GROWTH,

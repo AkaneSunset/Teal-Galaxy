@@ -6,6 +6,7 @@ const G = require('../galaxy');
 
 // `owner`'s outpost on Cinder, which their faction (the Terran Compact) holds. Each sector takes 3.
 function outpost(g, owner, type, sector = 'cinder-1') {
+  G.setCommandLevel(g, G.claimBase(g, owner).id, 5); // room for every outpost
   if (!g.bases[owner].faction) G.chooseFaction(g, 'builder', owner, 'compact');
   const r = G.foundSite(g, owner, type, 'cinder', sector);
   assert.ok(r.ok, r.reason);
@@ -35,17 +36,18 @@ test('each base pays for, builds and earns on its own planet only', () => {
   assert.ok(G.owns(g, 'Rin', rin.id));
   assert.ok(!G.owns(g, 'Rin', 'aster'));
 
-  assert.ok(G.build(g, rin.id, 0, 'mine').ok);
-  assert.strictEqual(g.bases.Rin.stock.metal, 50);
+  assert.ok(G.build(g, rin.id, 1, 'extractor').ok);
+  assert.strictEqual(g.bases.Rin.stock.metal, 45);
   assert.strictEqual(g.bases.Akane.stock.metal, 60);
   G.tick(g);
-  assert.strictEqual(g.bases.Rin.stock.metal, 51);
+  assert.strictEqual(g.bases.Rin.stock.metal, 46);
   assert.strictEqual(g.bases.Akane.stock.metal, 60);
 
   // A Spaceport on Aster doesn't let Rin build a Foundry or post jobs.
   assert.ok(G.build(g, 'aster', 0, 'spaceport').ok);
-  assert.match(G.build(g, rin.id, 1, 'foundry').reason, /Spaceport first/);
-  assert.match(G.postJob(g, 'ice', 10, 100, rin.id).reason, /Spaceport first/);
+  G.setCommandLevel(g, rin.id, 3);
+  assert.match(G.build(g, rin.id, 6, 'foundry').reason, /Star Port first/);
+  assert.match(G.postJob(g, 'ice', 10, 100, rin.id).reason, /Star Port first/);
 });
 
 test('deliveries land in the stock of the base that posted the job', () => {
@@ -98,7 +100,7 @@ test('outposts go on their own sites, with a free grid of defences', () => {
 
   e.stock.metal = 500;
   for (const [type, sector] of [['lab', 'cinder-1'], ['spire', 'cinder-1'], ['fuel', 'cinder-2'], ['munitions', 'cinder-2']]) outpost(g, 'Akane', type, sector);
-  assert.match(G.foundSite(g, 'Akane', 'refinery', 'cinder', 'cinder-3').reason, /already have 5/);
+  assert.match(G.foundSite(g, 'Akane', 'refinery', 'cinder', 'cinder-3').reason, /allows 5 outposts/);
   // Someone else can't touch Akane's site.
   G.claimBase(g, 'Rin');
   assert.ok(!G.owns(g, 'Rin', site.id));

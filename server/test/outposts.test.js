@@ -13,7 +13,7 @@ function galaxy(builders) {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity;
   for (const [name, faction] of Object.entries(builders)) {
-    G.claimBase(g, name);
+    G.setCommandLevel(g, G.claimBase(g, name).id, 5); // room for every outpost
     G.demoTopUp(g.bases[name]);
     G.chooseFaction(g, 'builder', name, faction, 0, { admin: true });
   }
@@ -40,6 +40,8 @@ test('outposts need a faction, a planet it holds in Teal Prime, and a sector it 
   G.demoTopUp(g.bases.Akane);
   assert.strictEqual(G.foundSite(g, 'Akane', 'fuel', 'cinder', 'cinder-1').reason, 'choose a faction first');
   G.chooseFaction(g, 'builder', 'Akane', 'compact');
+  assert.strictEqual(G.foundSite(g, 'Akane', 'fuel', 'cinder', 'cinder-1').reason, 'upgrade your Command Centre to level 2 to found outposts');
+  G.setCommandLevel(g, 'aster', 2);
   assert.strictEqual(G.foundSite(g, 'Akane', 'mine', 'cinder', 'cinder-1').reason, 'that is not an outpost');
   assert.strictEqual(G.foundSite(g, 'Akane', 'fuel', 'vesper', 'vesper-1').reason, "the Terran Compact doesn't hold Vesper");
   assert.strictEqual(G.foundSite(g, 'Akane', 'fuel', 'bastion', 'bastion-1').reason, 'outposts go on the contested planets of Teal Prime');
@@ -74,7 +76,7 @@ test('five outposts a Builder, three a sector between all Builders', () => {
   assert.strictEqual(G.foundSite(g, 'Rin', 'fuel', 'cinder', 'cinder-1').reason, 'Cinder 1 already has 3 outposts');
   assert.deepStrictEqual(g.system.planets.filter((p) => p.sector === 'cinder-1').map((p) => p.id), ['cinder-op-1', 'cinder-op-2', 'cinder-op-3']);
   for (const type of ['fuel', 'munitions', 'ordnance']) found(g, 'Akane', type, 'cinder', 'cinder-2');
-  assert.strictEqual(G.foundSite(g, 'Akane', 'drones', 'cinder', 'cinder-3').reason, 'you already have 5 outposts');
+  assert.strictEqual(G.foundSite(g, 'Akane', 'drones', 'cinder', 'cinder-3').reason, 'your Command Centre allows 5 outposts: upgrade it for more');
   found(g, 'Rin', 'drones', 'cinder', 'cinder-3');
 });
 
