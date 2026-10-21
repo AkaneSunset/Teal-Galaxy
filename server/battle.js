@@ -81,6 +81,8 @@ const AI_HOME = 400; // a wave with nothing left to fight further than this from
 const AI_MIX = ['striker', 'tank', 'striker', 'aa', 'tank', 'artillery', 'striker', 'tank'];
 const MILITIA_K = 0.6; // an unclaimed sector's militia earns this much of a faction's AI
 const CELL = 40; // metres per cell of the grid used to find what's near
+const CAMPAIGN_SIDE = 8; // commanders a side in a campaign match
+const CAMPAIGN_BONUS = { mining: { mass: 1.15 } }; // planet bonuses that touch sector battles (campaign.js BONUSES)
 
 // Every unit and structure. `hits`: what it can shoot (land, air, structure). Both sides use one
 // roster; it goes to the clients in battle_joined.
@@ -1097,7 +1099,10 @@ function sideName(f) {
 // The battles a server runs. `galaxy()` is its galaxy; `send(me, msg)` sends one connection a
 // message; `changed()` is called when the galaxy changed (a sector taken, the war log, who
 // fights where); `speed` is BATTLE_SPEED. A pilot's connection record (`me`) notes their battle.
-function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
+// Campaign matches (`b.campaign`, started by matchmaking in campaign.js) are fought on a notional
+// sector: the winner scores campaign points through `onCampaignEnd(b, winner, vsAi)` instead of
+// taking the sector, and the war rules (locks, shares) don't call them off.
+function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCampaignEnd = null }) {
   const battles = new Map(); // id -> battle
   const conns = new Map(); // battle id -> Map(name -> connection)
   let nextId = 1;
@@ -1147,7 +1152,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     if (!b || b.result) return fail('no such battle');
     const side = faction && faction === b.attacker ? 'a' : faction && faction === b.defender ? 'd' : null;
     if (!side) return fail(`a battle between ${sideName(b.attacker)} and ${sideName(b.defender)} is already on there`);
-    if (side === 'a') {
+    if (side === 'a' && !b.campaign) {
       const can = W.canAttack(galaxy(), faction, b.planet, now());
       if (!can.ok) return can;
     }
@@ -1215,12 +1220,21 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     }
   }
 
-  // The battle is decided: the sector changes hands if the attackers won, everyone hears, and the
-  // battle is forgotten END_KEEP_MS later.
+  // The battle is decided: the sector changes hands if the attackers won (a campaign match scores
+  // for its winner instead), everyone hears, and the battle is forgotten END_KEEP_MS later.
   function finish(b) {
     const g = galaxy();
     let text;
-    if (b.result === 'a') {
+    if (b.campaign) {
+      const winner = b.result === 'a' ? b.attacker : b.defender;
+      const loser = b.result === 'a' ? 'd' : 'a';
+      const vsAi = ![...b.pilots.values()].some((p) => p.side === loser);
+      const pts = winner && onCampaignEnd ? onCampaignEnd(b, winner, vsAi) : 0;
+      text = winner
+        ? `${F.FACTIONS[winner].name} won the match${b.how === 'abandoned' ? ' (the attackers abandoned it)' : ''}: +${pts} campaign points on ${b.planetName}`
+        : `The militia held: no campaign points`;
+      W.warLog(g, `${winner ? F.FACTIONS[winner].name : 'The militia'} won a Sector Battle on ${b.planetName}${pts ? ` (+${pts})` : ''}`, now());
+    } else if (b.result === 'a') {
       const r = W.capture(g, b.planet, b.sector, b.attacker, now());
       text = r.ok ? `Sector taken: ${b.sectorName} falls to ${F.the(b.attacker)}` : `The Command Node fell, but ${b.sectorName} can't be taken: ${r.reason}`;
     } else if (b.how === 'void') {
@@ -1265,7 +1279,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
       if (b.result) continue;
       // The planet locked (another sector's battle took it) or the attackers lost their share:
       // this attack can't take anything any more.
-      const can = recheck ? W.canAttack(galaxy(), b.attacker, b.planet, now()) : { ok: true };
+      const can = recheck && !b.campaign ? W.canAttack(galaxy(), b.attacker, b.planet, now()) : { ok: true };
       if (!can.ok) {
         end(b, 'void', can.reason);
         continue;
@@ -1286,7 +1300,42 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
   function list() {
     return [...battles.values()]
       .filter((b) => !b.result)
-      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt }));
+      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt, campaign: b.campaign || undefined }));
+  }
+
+  // --- Campaign matches (campaign.js) ---
+
+  // A new match on planet `wp` between `attacker` and `defender` (null: the militia), on one of its
+  // sectors' maps in turn. Matchmaking puts the pilots in.
+  function startCampaign(wp, attacker, defender) {
+    const n = nextId++;
+    const sector = wp.sectors[n % wp.sectors.length];
+    const b = newBattle({ id: `b${n}`, wp, sector, attacker, defender, k: aiRate(galaxy(), attacker, defender), now: now(), speed });
+    b.campaign = true;
+    b.sectorName = `${wp.name} match ${n}`;
+    battles.set(b.id, b);
+    conns.set(b.id, new Map());
+    return b;
+  }
+
+  // A pilot into a campaign match on `side`. The planet's holder starts with the planet's bonus
+  // (a mining world's extra mass).
+  function enlistCampaign(me, b, side, faction) {
+    const first = !b.pilots.has(me.name);
+    const r = enlist(me, b, side, faction);
+    const c = galaxy().war.campaigns?.[b.planet];
+    const bonus = c && CAMPAIGN_BONUS[c.bonus];
+    if (first && bonus?.mass && faction === W.planet(galaxy(), b.planet)?.owner) b.pilots.get(me.name).mass *= bonus.mass;
+    return r;
+  }
+
+  function campaignMatches(planetId) {
+    return [...battles.values()].filter((b) => b.campaign && !b.result && b.planet === planetId);
+  }
+
+  // Whether a side of a match has room for another commander.
+  function room(b, side) {
+    return present(b, side).length < CAMPAIGN_SIDE && present(b).length < PILOTS_MAX;
   }
 
   function close() {
@@ -1294,7 +1343,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     for (const t of timers) clearTimeout(t);
   }
 
-  return { battles, start, join, leave, handle, list, tick: tickAll, close };
+  return { battles, start, join, leave, handle, list, tick: tickAll, close, startCampaign, enlistCampaign, campaignMatches, room };
 }
 
 module.exports = {

@@ -239,6 +239,28 @@ system counts as wholly its faction's). Once it holds a sector of a planet, the 
 one it holds. Capital worlds can't be attacked at all. Builders with outposts on a planet get an alert
 when one of their faction's sectors there falls.
 
+### Planet campaigns
+
+Every contested planet (not the capital worlds) is also fought over in **week-long campaigns**, in the
+spirit of Helldivers 2. A campaign runs from Monday 12:00 US Eastern time to the next (the demo war runs
+one every 30 minutes); its last day (the demo's last 5 minutes) is the **final push**, when wins count
+double. The planet's holder and every faction with 25% of its system's orbit when the campaign starts are
+in it. Pilots of those factions queue for a game mode from the **Sector Battles** screen (the carrier's
+holo table, or the War terminal), aboard a carrier over the planet. Every match their faction wins scores
+**campaign points** by how long the mode takes (Sector Battles 10; a win against AI only scores half), and
+when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
+points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
+commanders start Sector Battles with 15% more mass (shipyard and fortress worlds' bonuses come with Space
+Battles and Sector Defense).
+
+Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
+matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
+in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
+whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
+match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
+RTS view opens by itself when a match starts, wherever you are. Supremacy, Space Battles, Facility Battles
+and Sector Defense show on the screen as coming.
+
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
 *Take sector (demo)*, and every rule above applies.

@@ -1916,6 +1916,10 @@ func _update_hud(delta: float) -> void:
 			lines.append("Boost in %.1f s" % flight.boost_cooldown if flight.boost_cooldown > 0.0 else "Boost: low engine power")
 	if _flight_env().mass_locked:
 		lines.append("MASS LOCKED")
+	var menu = _battle_script("battle_menu")
+	if menu and not menu.queued.is_empty():
+		var q: Dictionary = menu.queued
+		lines.append("In the %s queue at %s: %s" % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(q.mode), {}).get("name", "match"), WarInfo.planet(str(q.planet)).get("name", ""), menu.time_text(Net.now_ms() - float(q.since))])
 	_flight_info.text = "\n".join(lines)
 
 	_hint.text = "%s map   %s chat   %s settings   %s phase-shift   %s drift" % [
@@ -2208,11 +2212,35 @@ func _rejoin() -> void:
 		_space_id = was
 
 
+## One of the sector battles' scripts (game/battle/<name>.gd), loaded by path so the explorer still
+## runs if they fail to load; null then.
+var _battle_scripts := {}
+func _battle_script(name: String):
+	if not _battle_scripts.has(name):
+		var path := "res://battle/%s.gd" % name
+		var s = load(path) if ResourceLoader.exists(path) else null
+		_battle_scripts[name] = s if s is GDScript and s.can_instantiate() else null
+	return _battle_scripts[name]
+
+
 ## Server messages for the carrier and the shared spaces (Net.message).
 func _on_net_message(msg: Dictionary) -> void:
 	match str(msg.get("type", "")):
 		"welcome":
 			_rejoin()
+		"campaign_queued":
+			var menu = _battle_script("battle_menu")
+			if menu:
+				menu.queued = msg if msg.get("planet") != null else {}
+		"battle_joined":
+			# Matchmaking put us in a match: the RTS view takes over, wherever we are. (The Sector
+			# Battles screen, if it's open, closes itself.)
+			var menu = _battle_script("battle_menu")
+			var view = _battle_script("battle_view")
+			if menu:
+				menu.queued = {}
+			if view and not view.active:
+				view.open(self, msg)
 		"dock_granted":
 			var st := str(msg.get("station", ""))
 			if not _stations.has(st):
