@@ -1624,7 +1624,10 @@ func _refresh_selection(state: Dictionary) -> void:
 	_select_name.text = _pad_name(_selected)
 	var b := _building_at(_selected)
 	var acts := []
-	if b.is_empty() and _view == "":
+	if b.is_empty() and _view == "" and _selected == Layout.COMMAND_SLOT:
+		# Every base starts with its Command Centre; a server without one is from before it.
+		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
+	elif b.is_empty() and _view == "":
 		var type := _node_type(_selected)
 		var blocked := _node_blocked(type)
 		var cost: Dictionary = BUILDING_INFO[type].cost
@@ -1930,6 +1933,9 @@ func _refresh_info(state: Dictionary) -> void:
 		return
 	_drawer_title.text = _pad_name(_selected)
 	var b := _building_at(_selected)
+	if b.is_empty() and _view == "" and _selected == Layout.COMMAND_SLOT:
+		_info.text = "Your base starts with its Command Centre, but this server has none: it's running older code. Update the server (git pull, then npm start) and it adds the Command Centre to your base."
+		return
 	if b.is_empty() and _view == "":
 		var type := _node_type(_selected)
 		var blocked := _node_blocked(type)
