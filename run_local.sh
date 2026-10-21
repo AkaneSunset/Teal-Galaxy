@@ -4,6 +4,8 @@
 set -e
 cd "$(dirname "$0")"
 GODOT="${GODOT:-godot}"
+# Registers the game's classes (the battle screens and the rest) so a fresh checkout runs.
+"$GODOT" --headless --path game --import >/dev/null 2>&1 || true
 (cd server && npm install --silent && node server.js) &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null' EXIT

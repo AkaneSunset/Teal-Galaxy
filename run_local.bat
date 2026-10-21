@@ -3,6 +3,8 @@ rem Starts the galaxy server plus three game windows: one phone-shaped Builder, 
 rem Usage: set GODOT=C:\path\to\Godot.exe  then  run_local.bat
 cd /d "%~dp0"
 if "%GODOT%"=="" set GODOT=godot
+rem Registers the game's classes (the battle screens and the rest) so a fresh checkout runs.
+"%GODOT%" --headless --path game --import >nul 2>&1
 pushd server
 call npm install --silent
 start "Galaxy server" node server.js

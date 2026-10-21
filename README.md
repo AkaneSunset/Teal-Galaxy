@@ -21,7 +21,9 @@ ground, in real-time sector battles commanded from a walkable fleet carrier.
 You need [Godot 4.5](https://godotengine.org/download) and [Node.js 20+](https://nodejs.org).
 
 **Quick way:** set `GODOT` to your Godot program and run the launcher. It starts the server,
-a phone-shaped Builder window, and two Explorer windows.
+a phone-shaped Builder window, and two Explorer windows. It re-imports the project first, which
+Godot needs after new scripts arrive (the battle screens, say); if you start the game another way after
+pulling, run `godot --headless --path game --import` once.
 
 ```bash
 GODOT=/path/to/godot ./run_local.sh        # Mac / Linux
