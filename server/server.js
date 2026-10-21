@@ -125,11 +125,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   function playerView() {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list() };
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list() };
+    return { ...galaxy, battles: battles.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -189,11 +189,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   function space(ws, me, msg) {
     let result = { ok: true };
     if (msg.type === 'dock_request') result = spaces.dock(me, msg.station);
-    else if (msg.type === 'land_request') result = spaces.land(me, msg.base);
+    else if (msg.type === 'land_request') result = spaces.land(me, msg.base, msg.lander === true);
     else if (msg.type === 'enter_space') result = spaces.enter(me, msg.space, msg);
     else if (msg.type === 'leave_space') spaces.leave(me);
     else spaces.setOpen(me, msg.open);
     if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+    else if (msg.type === 'land_request' || msg.type === 'dock_request') broadcastState(); // the berths changed
   }
 
   function pilotFaction(me) {
@@ -667,10 +668,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       seen(me);
     });
     ws.on('close', () => {
+      const berthed = Boolean(me.berth);
       spaces.drop(me);
       battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
+      if (berthed) broadcastState(); // a Star Port berth came free
     });
   });
 

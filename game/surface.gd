@@ -15,6 +15,7 @@ const Layout := preload("res://base_layout.gd")
 const Terrain := preload("res://terrain.gd")
 
 var berth := 0 # the Star Port berth your ship is on (from 0)
+var shuttle := false # came down on the shuttle from the High Port, on foot: your ship stayed up there
 var _owner := ""
 var _base: Node3D
 var _pads := [] # per slot (base_layout.gd): {"root", "key", "model", "label", "solid"}
@@ -98,14 +99,35 @@ func _build_world() -> void:
 		_pads.append({"root": root, "key": "", "model": null, "label": label, "solid": null})
 	_refresh_layout()
 
-	# Your ship, on its berth: nose toward the Command Centre, so from the pilot's seat you look up
-	# the avenue across the base.
-	var land := Layout.berth_pos(berth)
-	var yaw := rad_to_deg(atan2(land.x, land.z))
-	_landed_ship(self, land, yaw, Net.my_name, true, true, berth + 1)
-	_light(self, land + Vector3(0, 8.0, 0), Color(0.9, 0.95, 1.0), 1.0, 16.0)
+	if shuttle:
+		_build_shuttle_stop()
+	else:
+		# Your ship, on its berth: nose toward the Command Centre, so from the pilot's seat you look up
+		# the avenue across the base.
+		var land := Layout.berth_pos(berth)
+		var yaw := rad_to_deg(atan2(land.x, land.z))
+		_landed_ship(self, land, yaw, Net.my_name, true, true, berth + 1)
+		_light(self, land + Vector3(0, 8.0, 0), Color(0.9, 0.95, 1.0), 1.0, 16.0)
 	if _owner != "":
 		_tag(Vector3(0, 70.0, 0), "%s's Command Centre" % _owner, Color(0.85, 0.95, 1.0))
+
+
+## The shuttle stop on the avenue inside the gate, where the High Port's shuttle sets you down: its
+## console has the ship's menu (the Star Port's buy orders, the shuttle back up).
+func _build_shuttle_stop() -> void:
+	var stop := Vector3(0, 0, Layout.WALL - 14.0)
+	var pad := BaseModels.landing_pad(6.0, true)
+	pad.position = stop + Vector3(0, 0.0, 0)
+	add_child(pad)
+	_arrival = Marker3D.new()
+	_arrival.position = stop + Vector3(0, 0.1, -3.0)
+	_arrival.rotation.y = PI # facing up the avenue, toward the Command Centre
+	add_child(_arrival)
+	var at := stop + Vector3(5.0, 0, -4.0)
+	var facing := Vector3(-1, 0, 0)
+	_console(self, at, facing, "SHUTTLE", "To the High Port\nPress F.", 1.6)
+	_light(self, at + Vector3(0, 3.0, 0), Color(0.85, 0.92, 1.0), 0.8, 6.0)
+	_use(self, at + facing * 0.7 + Vector3(0, 1.0, 0), func(): return "Press %s for the shuttle and the Star Port" % _key(), func(): wants_menu.emit())
 
 
 ## The wall's turrets and the berths, as the Command Centre's and Star Port's levels have them.

@@ -100,8 +100,9 @@ function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, p
 
   // The ship lands at a base: on a free berth of its Star Port, or not at all (the pilot docks at
   // the High Port and shuttles down instead). Asking again at the same base gives the same berth.
-  // Landing gives up the pilot's High Port pad: the ship has left it.
-  function land(me, base) {
+  // Landing gives up the pilot's High Port pad: the ship has left it. A carrier's lander doesn't:
+  // the carrier stays docked up there.
+  function land(me, base, lander = false) {
     base = String(base ?? '');
     if (!isSurface(base)) return fail('no such base');
     if (me.berth?.base === base) return granted(me);
@@ -112,7 +113,7 @@ function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, p
     const free = [...Array(open).keys()].find((i) => !berths[i]);
     if (free === undefined) return fail(`all ${open} berths at the Star Port are taken: take the shuttle down from the High Port`);
     unberth(me);
-    if (me.pad) undock(me);
+    if (me.pad && !lander) undock(me);
     berths[free] = me.id;
     me.berth = { base, berth: free };
     return granted(me);
@@ -138,6 +139,13 @@ function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, p
   function berths(base) {
     const byId = new Map([...people()].map((c) => [c.id, c.name]));
     return (bases.get(base) || []).map((id) => (id ? byId.get(id) ?? null : null));
+  }
+
+  // Who holds the berths at every base with any taken: {base: [name or null, ...]}.
+  function allBerths() {
+    const out = {};
+    for (const base of bases.keys()) if (berths(base).some(Boolean)) out[base] = berths(base);
+    return out;
   }
 
   // Who holds which pad in each copy of a station: [[name or null, ...], ...].
@@ -254,7 +262,7 @@ function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, p
     unberth(me);
   }
 
-  return { dock, undock, pads, land, unberth, berths, enter, leave, walk, setOpen, drop, members, admit };
+  return { dock, undock, pads, land, unberth, berths, allBerths, enter, leave, walk, setOpen, drop, members, admit };
 }
 
 module.exports = { PADS, SHIP_MAX, WALK_PER_S, POS_MAX, ANIMS, createSpaces };

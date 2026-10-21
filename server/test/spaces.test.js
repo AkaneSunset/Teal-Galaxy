@@ -350,6 +350,12 @@ test("berths: the Star Port's open berths, one a ship; full, pilots shuttle down
   assert.strictEqual(sp.land(c, 'aster').berth, 0);
   sp.drop(b);
   assert.deepStrictEqual(sp.berths('aster'), ['Cy', null]);
+  assert.deepStrictEqual(sp.allBerths(), { aster: ['Cy', null] });
+  // A carrier's lander takes a berth, and the carrier keeps its pad up at the High Port.
+  const d = pilot('Di');
+  sp.dock(d, 'aster');
+  assert.strictEqual(sp.land(d, 'aster', true).berth, 1);
+  assert.strictEqual(d.pad.station, 'aster');
   world.berths = 0;
   assert.strictEqual(sp.land(b, 'aster').reason, 'there is no Star Port to land at');
   world.berths = 2;

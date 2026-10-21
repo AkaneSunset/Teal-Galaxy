@@ -109,6 +109,10 @@ var _carrier := false # flying a fleet carrier (Net.catalog.carrier, the demo)
 var _berth := {} # the pad the server gave us: {"station", "copy", "pad"}, "local" when it didn't answer
 var _dock_wait := "" # the station we asked to dock at, waiting for dock_granted
 var _dock_wait_time := 0.0
+var _land_wait := "" # the base we asked for a Star Port berth at, waiting for berth_granted
+var _land_wait_time := 0.0
+var _land_problem := "" # why the last land_request was refused (the berths are full, say)
+var _sell_qty := 1 # how many to sell to a Builder at once
 var _approach := {} # the automated docking approach while it flies: {"station", "t", "legs"}
 var _hold_rate := 0.0 # m/s² the carrier sheds its speed at while you're out of the chair
 var _space_id := "" # the shared space the server has us in ("ship:Akane", "station:cinder", ...)
@@ -688,6 +692,10 @@ func _refresh_focus() -> void:
 func _process(delta: float) -> void:
 	_check_battle()
 	_sync_space(delta)
+	if _land_wait != "":
+		_land_wait_time -= delta
+		if _land_wait_time <= 0.0:
+			_berth_granted(_land_wait, 0) # no answer (an older server): land on the first berth, alone
 	if _battle:
 		_send_ship(delta)
 		return
@@ -1434,11 +1442,43 @@ func _close_standing_menu() -> void:
 		_station.set_menu_open(false)
 
 
-## Your ship flies down to the planet's surface and lands at its Builder's base, beside the Star Port.
+## Ask the Star Port for a berth (land_request); the ship flies down when it's granted
+## (_berth_granted). A carrier stays docked up here and sends its lander down instead.
 func _fly_to_base() -> void:
+	if _land_wait != "":
+		return
+	_land_problem = ""
+	_land_wait = _docked
+	_land_wait_time = 4.0
+	Net.send({"type": "land_request", "base": _docked, "lander": _carrier})
+	_refresh_dock()
+
+
+## The Star Port gave us berth `berth`: your ship flies down to the planet's surface and lands on it.
+func _berth_granted(base: String, berth: int) -> void:
+	_land_wait = ""
+	if base != _docked or _at_spaceport:
+		return
 	var p := Net.planet(_docked)
-	_land_in(Surface.new(_docked), true)
-	_say("Landed at %s's base on %s." % [p.get("owner", "the Builder"), p.get("name", _docked)])
+	if not _carrier:
+		_berth = {} # the ship left its High Port pad (flying back up asks for one again)
+	var place := Surface.new(_docked)
+	place.berth = berth
+	_land_in(place, true)
+	_say("Landed on berth %d at %s's Star Port on %s." % [berth + 1, p.get("owner", "the Builder"), p.get("name", _docked)])
+
+
+## The shuttle down from the High Port, when the Star Port's berths are full: your ship stays on its
+## pad up here, and you arrive on foot at the base's shuttle stop.
+func _shuttle_to_base() -> void:
+	var p := Net.planet(_docked)
+	var place := Surface.new(_docked)
+	place.shuttle = true
+	_close_standing_menu()
+	_land_in(place, true)
+	_dock_panel.visible = false
+	_station.stand()
+	_say("The shuttle sets you down at %s's base on %s. Your ship waits at the High Port." % [p.get("owner", "the Builder"), p.get("name", _docked)])
 
 
 ## Back up to orbit: from a base to the High Port's hangar.
@@ -1508,10 +1548,15 @@ func _refresh_dock() -> void:
 		else:
 			_dock_button("Sell %d raided items to the Fence for %d credits" % [stash.size(), _stash_value() / 2],
 				func(): Net.send({"type": "sell"}))
+		_star_port_bids(owner, _station != null and _station.get("shuttle") == true)
 		_dock_market_entry(owner)
 		_war_row()
-		_dock_button("Leave your seat and walk around the base", _leave_seat)
-		_dock_button(("Lift off, back up to your carrier at %s" if _carrier else "Fly back up to %s") % _stations[_docked].name, _fly_to_station)
+		if _station and _station.get("shuttle"):
+			_dock_button("Take the shuttle back up to %s" % _stations[_docked].name, _fly_to_station)
+			_dock_button("Close", _close_standing_menu)
+		else:
+			_dock_button("Leave your seat and walk around the base", _leave_seat)
+			_dock_button(("Lift off, back up to your carrier at %s" if _carrier else "Fly back up to %s") % _stations[_docked].name, _fly_to_station)
 	else:
 		if _menu_standing:
 			_dock_title.text = "Surface Transit, %s" % _stations[_docked].name
@@ -1527,7 +1572,16 @@ func _refresh_dock() -> void:
 			where = wp.get("name", _docked)
 			_dock_note(_front_note(wp), WarInfo.faction_color(wp.get("owner")).lightened(0.2))
 		elif Net.has_building("spaceport", _docked):
-			_dock_button(("Take a lander down to %s's base, to the Star Port" if _carrier else "Fly down to %s's base and land at the Star Port") % owner, _fly_to_base)
+			var open := _berths_open(_docked)
+			var taken: int = Net.state.get("berths", {}).get(_docked, []).filter(func(n): return n != null).size()
+			if _land_wait != "":
+				_dock_note("Asked %s's Star Port for a berth..." % owner)
+			elif open > 0:
+				_dock_button(("Take a lander down to %s's base, to the Star Port (%d of %d berths free)" if _carrier else "Fly down to %s's base and land at the Star Port (%d of %d berths free)") % [owner, maxi(0, open - taken), open], _fly_to_base)
+			if _land_problem != "":
+				_dock_note("The Star Port: %s." % _land_problem, Color(1.0, 0.75, 0.4))
+			_dock_button("Take the shuttle down to %s's base (your ship stays here)" % owner, _shuttle_to_base)
+			_star_port_bids(owner, true)
 		else:
 			_dock_note("%s has no Star Port yet." % where)
 		var facs := facilities_on(_docked)
@@ -1587,6 +1641,45 @@ func _front_note(wp: Dictionary) -> String:
 	var lock := WarInfo.lock_left(wp)
 	return "%s is a contested world, %s: %s%s. No Builder lives here; their outposts stand in its sectors." % [
 		wp.name, held, WarInfo.contention(wp), (", locked for " + lock) if lock != "" else ""]
+
+
+## How many berths a planet's Star Port has open, by its level (the server's berthsOpen).
+func _berths_open(planet_id: String) -> int:
+	for b in Net.planet(planet_id).get("buildings", []):
+		if b.type == "spaceport" and int(b.get("level", 1)) >= 1:
+			return mini(int(Net.catalog.get("berthsMax", 10)), int(b.level) * int(Net.catalog.get("berthsPerLevel", 2)))
+	return 0
+
+
+## The Builder's Star Port buy orders: sell them what you carry. Landed on a berth you're paid in
+## full; from the High Port (`tariffed`) the platform keeps its tariff.
+func _star_port_bids(builder: String, tariffed: bool) -> void:
+	if builder == Net.my_name or builder == "nobody":
+		return
+	var bids: Dictionary = Net.state.get("bases", {}).get(builder, {}).get("bids", {})
+	if bids.is_empty():
+		_dock_note("%s's Star Port isn't buying anything right now." % builder)
+		return
+	var tariff: float = float(Net.catalog.get("tariff", 0.2)) if tariffed else 0.0
+	var hold: Dictionary = _me().get("hold", {})
+	var any := false
+	for item in bids:
+		var bid: Dictionary = bids[item]
+		var have := _cargo(item) + int(hold.get(item, 0))
+		var qty := mini(have, int(bid.want))
+		var label := "%s buys %s at %d credits each (wants %d)" % [builder, WarInfo.goods_name(item), int(bid.price), int(bid.want)]
+		if qty <= 0:
+			_dock_note(label + ": you have none")
+			continue
+		any = true
+		var pay := int(bid.price) * qty
+		var cut := roundi(pay * tariff)
+		var text := "Sell %d %s to %s for %d credits" % [qty, WarInfo.goods_name(item), builder, pay - cut]
+		if cut > 0:
+			text += " (the High Port's tariff takes %d)" % cut
+		_dock_button(text, func(): Net.send({"type": "sell_to_builder", "builder": builder, "item": item, "qty": qty}))
+	if tariffed and any:
+		_dock_note("Land at the Star Port to sell without the High Port's %d%% tariff." % roundi(tariff * 100.0))
 
 
 ## At a Builder's base: their Carrier Dock market, if it's finished and trades with your side.
@@ -2229,6 +2322,9 @@ func _on_net_message(msg: Dictionary) -> void:
 					_update_carrier(_station)
 				if _dock_panel.visible:
 					_refresh_dock()
+		"berth_granted":
+			if _land_wait != "" and str(msg.get("base", "")) == _land_wait:
+				_berth_granted(_land_wait, int(msg.get("berth", 0)))
 		"space_joined":
 			if _boarding != "" and str(msg.get("space", "")) == "ship:" + _boarding:
 				_boarded(msg)
@@ -2239,6 +2335,11 @@ func _on_net_message(msg: Dictionary) -> void:
 				_boarding = ""
 			elif _dock_wait != "":
 				_berth_anyway(_dock_wait)
+			elif _land_wait != "":
+				_land_wait = ""
+				_land_problem = str(msg.get("reason", ""))
+				if _dock_panel.visible:
+					_refresh_dock()
 		"ship":
 			if _others.has(int(msg.get("id", -1))):
 				_others[int(msg.id)].over = str(msg.get("over", ""))
