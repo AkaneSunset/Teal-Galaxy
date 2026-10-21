@@ -15,7 +15,7 @@ const W = require('./war');
 // (NODES). The Command Centre's level decides which nodes can be built, how high they can level
 // and what else the Builder has unlocked (COMMAND_LEVELS).
 const BUILDINGS = {
-  command: { name: 'Command Centre', cost: { metal: 60, ice: 10 } },
+  command: { name: 'Command Centre', cost: { metal: 60, ice: 5 } },
   spaceport: { name: 'Star Port', cost: { metal: 30 }, needs: null },
   extractor: { name: 'Extractor', cost: { metal: 15 }, needs: null },
   habitat: { name: 'Habitat', cost: { metal: 20 }, needs: null },

@@ -1,7 +1,8 @@
 extends Control
 ## Builder mode (phone): a base-builder view of the home planet, like Clash of Clans.
 ## The base is a 3D scene seen from above at an angle: drag to pan, pinch or scroll to zoom,
-## tap a pad to select it. Buildings sit on fixed pads around the command centre.
+## tap a node to select it. The Command Centre stands in the middle with eight nodes around it,
+## each for one building (base_layout.gd); its level opens the nodes, outposts and the rest.
 ## The HUD sits around the edges: system, faction and resources at the top, Jobs / Raids / Chat /
 ## Sites / War buttons bottom left, the Build shop bottom right, and the selected building's actions
 ## bottom centre. Outposts stand on sectors the Builder's faction holds and fill vaults with goods
@@ -10,20 +11,24 @@ extends Control
 ## and for server admins the Coma Conglomerate's AI director.
 
 const BaseModels := preload("res://base_models.gd")
+const Layout := preload("res://base_layout.gd")
 const BuilderWar := preload("res://builder_war.gd")
 const SiteView := preload("res://site_view.gd")
 const Terrain := preload("res://terrain.gd")
 const ICONS := "res://ui/icons/"
 
 const BUILDING_INFO := {
-	"mine": {"name": "Mine", "cost": {"metal": 10}, "about": "Digs 12 metal a minute."},
-	"extractor": {"name": "Ice Extractor", "cost": {"metal": 15}, "about": "Melts 2 ice a minute out of the crust. Pilots' ice jobs are faster."},
+	"command": {"name": "Command Centre", "cost": {"metal": 60, "ice": 5},
+		"about": "The heart of your base. Each level opens more of it: new nodes, outposts, and higher levels for everything else."},
+	"spaceport": {"name": "Star Port", "cost": {"metal": 30}, "about": "Pilots land here. Post jobs for them to fly."},
+	"extractor": {"name": "Extractor", "cost": {"metal": 15}, "about": "Digs 12 metal and melts 2 ice a minute out of the crust. Pilots' ice jobs are faster."},
 	"habitat": {"name": "Habitat", "cost": {"metal": 20}, "about": "Houses 50 people, who pay 12 credits a minute in rent."},
-	"spaceport": {"name": "Spaceport", "cost": {"metal": 30}, "about": "Pilots land here. Post jobs for them to fly."},
-	"hydroponics": {"name": "Hydroponics", "cost": {"metal": 20, "ice": 10}, "about": "Grows food and sells it: 24 credits a minute."},
-	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport", "limit": 1,
+	"hydroponics": {"name": "Hydroponics Lab", "cost": {"metal": 20, "ice": 10}, "needs_ice": true, "about": "Grows food and sells it: 24 credits a minute."},
+	"warehouse": {"name": "Warehouse", "cost": {"metal": 40}, "about": "Room for more metal and ice. Your Extractor stops when the stores are full; deliveries and freighters still come in."},
+	"power": {"name": "Power Plant", "cost": {"metal": 50, "ice": 10}, "about": "Powers the base: every level makes your Extractor, Habitat and Hydroponics Lab 10% more productive."},
+	"foundry": {"name": "Ship Foundry", "cost": {"metal": 60, "ice": 10}, "needs": "spaceport",
 		"about": "Builds warships for your navy. Open the Shipyard to queue them."},
-	"dock": {"name": "Carrier Dock", "cost": {"metal": 80, "alloy": 10}, "needs": "spaceport", "limit": 1,
+	"dock": {"name": "Carrier Dock", "cost": {"metal": 80, "alloy": 10}, "needs": "spaceport",
 		"about": "Where your faction's carriers will dock. Its Dock market sells goods from your stock to pilots of your faction, at your prices."},
 	# Outposts: each stands on its own site in a sector your faction holds.
 	"refinery": {"name": "Extractor", "cost": {"metal": 40}, "about": "An outpost that extracts alloy plates, isotope cells and rare exotic matter."},
@@ -40,11 +45,12 @@ const BUILDING_INFO := {
 const OUTPOST_ABOUT := "A freighter brings the goods home every 5 minutes; until then pilots of other factions can raid the vault."
 ## What each level adds, for the Info page.
 const LEVEL_EFFECT := {
-	"mine": "Each level digs another 12 metal a minute.",
-	"extractor": "Each level melts another 2 ice a minute.",
+	"extractor": "Each level digs another 12 metal and melts another 2 ice a minute.",
+	"warehouse": "Each level holds 750 more metal and 750 more ice.",
+	"power": "Each level adds another 10% to the base's production.",
 	"habitat": "Each level houses 50 more people paying another 12 credits a minute.",
 	"hydroponics": "Each level sells another 24 credits of food a minute.",
-	"spaceport": "Each level makes your facilities' freighters come sooner (every 5 minutes divided by the level).",
+	"spaceport": "Each level opens two more berths for pilots' ships, and makes your outposts' freighters come sooner (every 5 minutes divided by the level).",
 	"foundry": "Each level builds warships 25% faster.",
 }
 const OUTPOST_LEVEL := "Each level makes more per batch and holds more in the vault."
@@ -55,13 +61,12 @@ const CARD_ICON := {"foundry": "ship_emblem", "extractor": "ice", "dock": "econo
 const JOB := {"resource": "ice", "amount": 10, "reward": 100}
 const ALERTS_SEEN := "user://builder_alerts.cfg" # the last alert each Builder on this phone has seen
 
-const PAD_RING := 34.0 # metres from the command centre to each pad
-const PAD_RADIUS := 9.5
 const YAW := deg_to_rad(45.0)
 const PITCH := deg_to_rad(52.0)
-const ZOOM_MIN := 45.0
-const ZOOM_MAX := 170.0
-const PAN_LIMIT := 60.0
+const ZOOM := Vector2(140.0, 620.0) # nearest and farthest on the home base
+const SITE_ZOOM := Vector2(45.0, 170.0) # and on an outpost's site
+const HOME_ZOOM := 430.0 # the whole base on screen
+const PAN_LIMIT := 170.0
 const SITE_PAN_LIMIT := 26.0
 const TAP_SLOP := 14.0 # pixels a finger can move and still count as a tap
 
@@ -85,9 +90,13 @@ var _build_btn: Button
 var _sites_list: VBoxContainer
 var _sites_key := ""
 var _site_count := -1 # this Builder's sites at the last refresh, to follow a newly founded one
-var _focus := Vector3(0, 0, 4)
-var _zoom := 120.0
-var _pads := [] # per slot: {"root", "pos", "key", "model", "label", "ring", "plus", "light"}
+var _focus := Vector3(0, 0, 10)
+var _zoom := HOME_ZOOM
+var _pads := [] # per slot (base_layout.gd): {"root", "pos", "key", "model", "label", "ring", "plus", "light"}
+var _wall: Node3D # the base wall and its turrets, rebuilt when the Command Centre's level changes
+var _wall_level := 0
+var _berths: Node3D # the Star Port's berths along the front, lit as its level opens them
+var _berths_open := -1
 var _drag_from := Vector2.ZERO
 var _drag_total := 0.0
 var _dragging := false
@@ -231,97 +240,69 @@ func _build_world() -> void:
 	_place_camera()
 
 	# Ground: the planet's icy terrain, generated for each base (see _refresh_terrain), with the
-	# base plate and paths on top.
+	# base's paved square, streets and node plates on top.
 	_terrain = Terrain.new()
 	world.add_child(_terrain)
-	var plate := MeshInstance3D.new()
-	var plate_mesh := CylinderMesh.new()
-	plate_mesh.top_radius = PAD_RING + 16.0
-	plate_mesh.bottom_radius = PAD_RING + 17.5
-	plate_mesh.height = 0.4
-	plate_mesh.radial_segments = 6
-	plate.mesh = plate_mesh
-	plate.position.y = 0.2
-	plate.rotation_degrees.y = 30
-	plate.material_override = _flat(Color(0.2, 0.25, 0.35))
 	_home = Node3D.new()
 	world.add_child(_home)
-	_home.add_child(plate)
-
-	var hq := BaseModels.command_center()
-	hq.rotation_degrees.y = 45
-	_home.add_child(hq)
-
-	var slots := 6
-	for i in slots:
-		var ang := deg_to_rad(-90.0 + 360.0 * i / slots)
-		var pos := Vector3(cos(ang), 0, sin(ang)) * PAD_RING
-		var path := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(3.0, 0.2, PAD_RING - 16.0)
-		path.mesh = box
-		path.material_override = _flat(Color(0.15, 0.19, 0.28))
-		_home.add_child(path)
-		path.position = pos * 0.5 + Vector3(0, 0.45, 0)
-		path.look_at(Vector3(0, 0.45, 0), Vector3.UP)
-		_pads.append(_make_pad(_home, pos))
+	_home.add_child(Layout.ground(_flat))
+	for slot in Layout.CELLS.size():
+		_pads.append(_make_pad(_home, Layout.slot_pos(slot), Layout.plate_size(slot)))
 
 	_site = SiteView.new()
 	_site.position.y = SiteView.DECK_TOP # the site's deck stands clear of the ground, so the two never flicker
 	_site.visible = false
 	world.add_child(_site)
 
-	# Beacons at the edge of the base plate. (Boulders and ice out on the terrain come with it.)
-	for a in 4:
-		var beacon := BaseModels.Models.nav_beacon()
-		var ang := deg_to_rad(a * 90.0)
-		beacon.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RING + 18.0)
-		beacon.scale = Vector3.ONE * 0.7
-		_home.add_child(beacon)
 
-
-func _make_pad(world: Node3D, pos: Vector3) -> Dictionary:
+## A node: its selection frame, the "+" over an empty one, its name tag and its raid light.
+func _make_pad(world: Node3D, pos: Vector3, size: float) -> Dictionary:
 	var root := Node3D.new()
 	root.position = pos
 	world.add_child(root)
-	root.add_child(BaseModels.pad())
 
-	# Selection / placement ring, shown when needed.
-	var ring := MeshInstance3D.new()
-	var torus := TorusMesh.new()
-	torus.inner_radius = PAD_RADIUS + 0.2
-	torus.outer_radius = PAD_RADIUS + 1.2
-	torus.rings = 32
-	ring.mesh = torus
-	ring.position.y = 1.0
-	ring.material_override = _glow(C_AMBER)
+	# Selection frame, shown when needed: a glowing square just outside the plate.
+	var ring := Node3D.new()
+	ring.position.y = 1.2
 	ring.visible = false
+	var glow := _glow(C_AMBER)
+	for i in 4:
+		var bar := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(size + 4.0, 0.6, 1.6)
+		bar.mesh = box
+		bar.material_override = glow
+		bar.rotation.y = i * PI / 2.0
+		bar.position = Vector3(sin(i * PI / 2.0), 0, cos(i * PI / 2.0)) * (size * 0.5 + 1.2)
+		ring.add_child(bar)
+	ring.set_meta("material", glow)
 	root.add_child(ring)
 
 	var plus := Label3D.new()
 	plus.text = "+"
 	plus.font_size = 96
-	plus.pixel_size = 0.06
+	plus.pixel_size = 0.16
 	plus.outline_size = 12
 	plus.modulate = Color(0.6, 1.0, 1.0, 0.75)
 	plus.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	plus.position.y = 4.0
+	plus.position.y = 10.0
 	root.add_child(plus)
 
 	var label := Label3D.new()
 	label.font_size = 40
-	label.pixel_size = 0.07
+	label.pixel_size = 0.0011 # the same size on screen however far the camera is
+	label.fixed_size = true
 	label.outline_size = 10
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
-	label.position.y = 16.0
+	label.position.y = 52.0
 	label.visible = false
 	root.add_child(label)
 
 	var light := OmniLight3D.new()
 	light.light_color = C_RED
-	light.omni_range = 18.0
-	light.position.y = 10.0
+	light.omni_range = 60.0
+	light.position.y = 30.0
 	light.visible = false
 	root.add_child(light)
 	return {"root": root, "pos": pos, "key": "", "model": null, "label": label, "ring": ring, "plus": plus, "light": light}
@@ -372,7 +353,8 @@ func _pan(from: Vector2, to: Vector2) -> void:
 
 
 func _zoom_by(factor: float) -> void:
-	_zoom = clampf(_zoom * factor, ZOOM_MIN, ZOOM_MAX)
+	var limits := ZOOM if _view == "" else SITE_ZOOM
+	_zoom = clampf(_zoom * factor, limits.x, limits.y)
 	_place_camera()
 
 
@@ -436,16 +418,7 @@ func _tap(screen: Vector2) -> void:
 	if _view != "":
 		_tap_site(hit)
 		return
-	var pad := -1
-	if hit != null:
-		for i in _pads.size():
-			if Vector2(hit.x - _pads[i].pos.x, hit.z - _pads[i].pos.z).length() < PAD_RADIUS + 3.0:
-				pad = i
-	if _placing != "":
-		if pad >= 0 and _building_at(pad).is_empty():
-			_build(pad, _placing)
-			_set_placing("")
-		return
+	var pad: int = Layout.slot_at(hit) if hit != null else -1
 	select_pad(pad if pad != _selected else -1)
 
 
@@ -480,11 +453,12 @@ func show_view(id: String) -> void:
 	_placing = ""
 	_place_bar.visible = false
 	_shop.visible = false
-	_focus = Vector3(0, 0, 4) if id == "" else Vector3.ZERO
-	_zoom = 120.0 if id == "" else 95.0
+	_focus = Vector3(0, 0, 10) if id == "" else Vector3.ZERO
+	_zoom = HOME_ZOOM if id == "" else 95.0
 	_place_camera()
 	_home_btn.visible = id != ""
-	_jobs_btn.visible = id == "" # jobs are posted from the home Spaceport
+	_jobs_btn.visible = id == "" # jobs are posted from the home Star Port
+	_build_btn.text = "Outposts" if id == "" else "Build"
 	if _page == "info":
 		_show_page("")
 	if not Net.state.is_empty():
@@ -500,7 +474,7 @@ func _process(delta: float) -> void:
 		if p.ring.visible:
 			p.ring.scale = Vector3.ONE * (1.0 + 0.03 * pulse)
 		if p.plus.visible:
-			p.plus.position.y = 4.0 + 0.6 * sin(_clock * 2.0 + p.pos.x)
+			p.plus.position.y = 10.0 + 1.5 * sin(_clock * 2.0 + p.pos.x)
 	_fit_bottom(_select_box)
 	_fit_bottom(_place_bar)
 
@@ -661,7 +635,7 @@ func _build_hud() -> void:
 
 	# Bottom right: the shop.
 	var build := Button.new()
-	build.text = "Build"
+	build.text = "Outposts" # on an outpost's site: "Build", for its defences (show_view)
 	build.icon = load(ICONS + "launch.png")
 	build.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 	build.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1263,7 +1237,7 @@ func _set_placing(type: String) -> void:
 	_place_bar.visible = type != ""
 	if type != "":
 		if _view == "":
-			_place_label.text = "Tap a free pad to place the %s" % BUILDING_INFO[type].name
+			_place_label.text = "Tap a free node to place the %s" % BUILDING_INFO[type].name
 		else:
 			_place_label.text = "Tap the grid to place a %s. Tap Done when finished." % Net.catalog.sites.pieces[type].name
 		_selected = -1
@@ -1306,10 +1280,7 @@ func _shop_pick(type: String) -> void:
 		_founding = type # pick a sector for it next
 		_show_page("found")
 		return
-	if _selected >= 0 and _building_at(_selected).is_empty():
-		_build(_selected, type)
-	else:
-		_set_placing(type)
+	_set_placing(type)
 
 
 # --- State -------------------------------------------------------------------------------
@@ -1353,6 +1324,64 @@ func _building_at(slot: int) -> Dictionary:
 	return {}
 
 
+## The building a home node is for (base_layout.gd: slot 8 is the Command Centre).
+func _node_type(slot: int) -> String:
+	return "command" if slot == Layout.COMMAND_SLOT else Layout.NODES[slot]
+
+
+## The home planet's Command Centre level.
+func _command_level() -> int:
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "command":
+			return maxi(1, int(b.get("level", 1)))
+	return 1
+
+
+## The Command Centre level that opens a node's building.
+func _opens_at(type: String) -> int:
+	var levels: Array = Net.catalog.get("commandLevels", [])
+	for i in levels.size():
+		if levels[i] != null and type in levels[i].nodes:
+			return i
+	return 1
+
+
+## Why the building for a home node can't be built now, or "".
+func _node_blocked(type: String) -> String:
+	if _opens_at(type) > _command_level():
+		return "Command Centre level %d" % _opens_at(type)
+	var info: Dictionary = BUILDING_INFO[type]
+	if info.get("needs_ice", false) and type not in _econ().unlocked:
+		return "Needs ice in stock"
+	if info.has("needs") and not Net.has_building(info.needs, _pid()):
+		return "Needs a %s" % BUILDING_INFO[info.needs].name
+	return ""
+
+
+## How many of the Star Port's berths are open: more with each level, none without a Star Port.
+func _berths_open_now() -> int:
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "spaceport" and int(b.get("level", 1)) >= 1:
+			return mini(Layout.BERTHS_MAX, int(b.get("level", 1)) * int(Net.catalog.get("berthsPerLevel", 2)))
+	return 0
+
+
+## How many outposts the Command Centre allows.
+func _outposts_allowed() -> int:
+	var levels: Array = Net.catalog.get("commandLevels", [])
+	return int(levels[_command_level()].outposts) if _command_level() < levels.size() else 5
+
+
+## How much metal and ice the base's own buildings fill up to (the Warehouse).
+func _storage_cap() -> int:
+	var level := 0
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "warehouse":
+			level = maxi(level, int(b.get("level", 1)))
+	var st: Dictionary = Net.catalog.get("storage", {"base": 500, "perLevel": 750})
+	return int(st.base) + int(st.perLevel) * level
+
+
 func _is_facility(type: String) -> bool:
 	return Net.catalog.get("facilities", {}).has(type)
 
@@ -1360,7 +1389,7 @@ func _is_facility(type: String) -> bool:
 func _pad_name(slot: int) -> String:
 	var b := _building_at(slot)
 	if b.is_empty():
-		return "Empty pad %d" % (slot + 1)
+		return "%s node" % BUILDING_INFO[_node_type(slot)].name if _view == "" else "Empty pad %d" % (slot + 1)
 	var n: String = BUILDING_INFO.get(b.type, {"name": b.type}).name
 	return "%s  (Tier %d)" % [n, int(b.security)] if _is_facility(b.type) else n
 
@@ -1431,8 +1460,9 @@ func _refresh(state: Dictionary) -> void:
 	_title.text = state.system.name
 	_subtitle.text = "Planet %s" % _planet().get("name", "")
 	_stock.credits.text = str(int(e.credits))
-	_stock.metal.text = str(int(stock.metal))
-	_stock.ice.text = str(int(stock.get("ice", 0)))
+	var cap := _storage_cap()
+	_stock.metal.text = "%d/%d" % [int(stock.metal), cap]
+	_stock.ice.text = "%d/%d" % [int(stock.get("ice", 0)), cap]
 	_stock.population.text = str(int(e.population))
 	_stock.navy.text = str(_fleet_size(state))
 	var goods := []
@@ -1481,15 +1511,29 @@ func _refresh(state: Dictionary) -> void:
 
 
 func _refresh_pads(state: Dictionary) -> void:
-	var tiers: Dictionary = Net.catalog.get("security", {})
+	var command := _command_level()
+	if command != _wall_level:
+		if _wall:
+			_wall.queue_free()
+		_wall = Layout.wall(command)
+		_home.add_child(_wall)
+		_wall_level = command
+	var open := _berths_open_now()
+	if open != _berths_open:
+		if _berths:
+			_berths.queue_free()
+		_berths = Layout.berths(open)
+		_home.add_child(_berths)
+		_berths_open = open
 	for i in _pads.size():
 		var p: Dictionary = _pads[i]
 		var b := _building_at(i)
-		var raid := Net.raid_on(_pid(), i) if not b.is_empty() else {}
 		var key := ""
 		var constructing := not b.is_empty() and int(b.get("level", 1)) == 0 and _work_left(b) > 0
 		if not b.is_empty():
-			key = "%s:%d:%s" % [b.type, int(b.get("security", 0)), constructing]
+			key = "%s:%s" % [b.type, constructing]
+			if b.type == "command":
+				key += ":%d" % command
 			if b.type == "foundry":
 				key += ":%d" % mini(_fleet_size(state), 3)
 		if key != p.key:
@@ -1499,17 +1543,10 @@ func _refresh_pads(state: Dictionary) -> void:
 			if not b.is_empty():
 				p.model = Node3D.new()
 				p.model.position.y = 1.0
-				p.model.rotation_degrees.y = 45.0 + 60.0 * i
+				p.model.rotation.y = Layout.slot_yaw(i)
 				p.root.add_child(p.model)
-				p.model.add_child(BaseModels.construction(14.0) if constructing else BaseModels.building(b.type))
-				# Security turrets around a facility, one per turret its tier adds.
-				var turrets := int(tiers.get(str(int(b.get("security", 0))), {}).get("turrets", 0))
-				for t in turrets:
-					var tur := BaseModels.turret()
-					var ang := TAU * (t + 0.5) / maxf(turrets, 1) + 0.6
-					tur.position = Vector3(cos(ang), 0, sin(ang)) * (PAD_RADIUS - 1.2)
-					tur.rotation.y = -ang - PI / 2
-					p.model.add_child(tur)
+				var m := Layout.building(b.type, 0 if constructing else maxi(1, int(b.get("level", 1))))
+				p.model.add_child(m)
 				# Up to three finished warships parked beside the Foundry.
 				if b.type == "foundry":
 					for s in mini(_fleet_size(state), 3):
@@ -1517,27 +1554,22 @@ func _refresh_pads(state: Dictionary) -> void:
 						ship.scale = Vector3.ONE * 0.38
 						ship.position = Vector3(-6.0 + s * 3.2, 1.2, 5.6)
 						ship.rotation_degrees.y = 180.0
-						p.model.add_child(ship)
+						m.add_child(ship)
 			p.key = key
-		p.plus.visible = b.is_empty()
-		p.plus.modulate = Color(0.5, 1.0, 0.6, 0.95) if _placing != "" else Color(0.6, 1.0, 1.0, 0.6)
-		p.label.visible = not b.is_empty()
-		if not b.is_empty():
-			var n := _building_label(b)
-			if _is_facility(b.type):
-				n += "  T%d" % int(b.security)
-			p.label.text = ("RAID!  " + n) if not raid.is_empty() else n
-			p.label.modulate = Color(1, 0.55, 0.45) if not raid.is_empty() else Color(1, 1, 1, 0.9)
-		p.light.visible = not raid.is_empty()
-		var placing_here := _placing != "" and b.is_empty()
-		p.ring.visible = placing_here or _selected == i or not raid.is_empty()
-		var ring_color := C_AMBER
-		if placing_here:
-			ring_color = Color(0.4, 1.0, 0.5)
-		elif not raid.is_empty() and _selected != i:
-			ring_color = C_RED
-		(p.ring.material_override as StandardMaterial3D).albedo_color = ring_color
-		(p.ring.material_override as StandardMaterial3D).emission = ring_color
+		var blocked := _node_blocked(_node_type(i)) if b.is_empty() else ""
+		p.plus.visible = b.is_empty() and blocked == ""
+		p.label.visible = true
+		if b.is_empty():
+			p.label.text = "%s\n%s" % [BUILDING_INFO[_node_type(i)].name, blocked if blocked != "" else "Tap to build"]
+			p.label.modulate = Color(0.75, 0.85, 0.95, 0.55) if blocked != "" else Color(0.6, 1.0, 1.0, 0.9)
+		else:
+			p.label.text = _building_label(b)
+			p.label.modulate = Color(1, 1, 1, 0.9)
+		p.light.visible = false
+		p.ring.visible = _selected == i
+		var mat: StandardMaterial3D = p.ring.get_meta("material")
+		mat.albedo_color = C_AMBER
+		mat.emission = C_AMBER
 
 
 ## Name and action buttons for the selected pad.
@@ -1568,7 +1600,14 @@ func _refresh_selection(state: Dictionary) -> void:
 	_select_name.text = _pad_name(_selected)
 	var b := _building_at(_selected)
 	var acts := []
-	if b.is_empty():
+	if b.is_empty() and _view == "":
+		var type := _node_type(_selected)
+		var blocked := _node_blocked(type)
+		var cost: Dictionary = BUILDING_INFO[type].cost
+		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
+		acts.append({"id": "build", "icon": "launch", "disabled": blocked != "" or not _can_afford(cost),
+			"text": blocked if blocked != "" else "Build\n%s" % _cost_text(cost)})
+	elif b.is_empty():
 		acts.append({"id": "build", "text": "Build here", "icon": "launch"})
 	else:
 		acts.append({"id": "info", "text": "Info", "icon": "notifications"})
@@ -1585,8 +1624,10 @@ func _refresh_selection(state: Dictionary) -> void:
 			return
 		if level < int(Net.catalog.get("maxLevel", 5)):
 			var cost := _level_cost(b.type, level)
-			acts.append({"id": "level", "icon": "rank", "disabled": dormant or not _can_afford(cost),
-				"text": "Level %d\n%s" % [level + 1, _cost_text(cost)]})
+			# Home nodes can't level past the Command Centre.
+			var capped: bool = _view == "" and b.type != "command" and level >= _command_level()
+			acts.append({"id": "level", "icon": "rank", "disabled": dormant or capped or not _can_afford(cost),
+				"text": ("Needs Command\nCentre L%d" % (level + 1)) if capped else "Level %d\n%s" % [level + 1, _cost_text(cost)]})
 		if b.type == "spaceport":
 			acts.append({"id": "job", "text": "Post job", "icon": "send",
 				"disabled": not Net.open_job(_pid()).is_empty()})
@@ -1644,7 +1685,10 @@ func _set_actions(acts: Array) -> void:
 func _on_action(id: String) -> void:
 	match id:
 		"build":
-			open_shop()
+			if _view == "":
+				_build(_selected, _node_type(_selected))
+			else:
+				open_shop()
 		"info":
 			_toggle_page("info")
 		"job":
@@ -1675,14 +1719,16 @@ func _refresh_shop(state: Dictionary) -> void:
 	if _view != "":
 		_refresh_defence_shop()
 		return
-	var target := _selected >= 0 and _building_at(_selected).is_empty()
-	_shop_hint.text = "  Building on pad %d" % (_selected + 1) if target else "  Pick a building, then tap a free pad. Outposts stand on a sector your faction holds."
-	var sites_full := _my_sites().size() >= int(Net.catalog.get("sites", {}).get("max", 5))
+	var allowed := _outposts_allowed()
+	_shop_hint.text = "  Outposts stand on a sector your faction holds. Your Command Centre allows %d." % allowed if allowed > 0 else "  Upgrade your Command Centre to level 2 to found outposts."
+	var sites_full := _my_sites().size() >= allowed
 	var faction = _econ().get("faction")
 	var held := _held_planets()
 	for type in BUILDING_INFO:
 		var info: Dictionary = BUILDING_INFO[type]
 		var outpost := _is_facility(type)
+		if not outpost:
+			continue # the base's own buildings go on their nodes
 		var card := Button.new()
 		card.custom_minimum_size = Vector2(150, 166)
 		var icon: String = CARD_ICON.get(type, type)
@@ -1698,13 +1744,13 @@ func _refresh_shop(state: Dictionary) -> void:
 		var why := "Locked: needs ice in stock" if locked else ""
 		if not locked and info.has("needs") and not Net.has_building(info.needs, _pid()):
 			why = "Needs a %s" % BUILDING_INFO[info.needs].name
-		if not locked and info.has("limit") and _count(type) >= int(info.limit):
-			why = "Already built"
 		if not locked and outpost:
 			if faction == null:
 				why = "Choose a faction first"
+			elif allowed == 0:
+				why = "Command Centre level 2"
 			elif sites_full:
-				why = "All %d outposts used" % int(Net.catalog.get("sites", {}).get("max", 5))
+				why = "All %d outposts used" % allowed
 			elif held.is_empty():
 				why = "Your faction holds no planet in %s" % state.system.name
 		locked = locked or why != ""
@@ -1792,7 +1838,7 @@ func _refresh_terrain() -> void:
 	if _view != "":
 		_terrain.generate(_view, 44.0)
 	elif Net.home != "":
-		_terrain.generate(Net.home, PAD_RING + 22.0)
+		_terrain.generate(Net.home, Layout.FLAT)
 
 
 ## Opens a site the Builder has just founded.
@@ -1853,6 +1899,13 @@ func _refresh_info(state: Dictionary) -> void:
 		return
 	_drawer_title.text = _pad_name(_selected)
 	var b := _building_at(_selected)
+	if b.is_empty() and _view == "":
+		var type := _node_type(_selected)
+		var blocked := _node_blocked(type)
+		_info.text = "\n\n".join([BUILDING_INFO[type].about,
+			"Costs %s and takes %s to build." % [_cost_text(BUILDING_INFO[type].cost), _clock_text(_level_secs(type, 0))],
+			("Not yet: %s." % blocked) if blocked != "" else "Tap Build to start."])
+		return
 	if b.is_empty():
 		_info.text = "An empty pad. Tap Build to put something here."
 		return
@@ -1875,6 +1928,10 @@ func _refresh_info(state: Dictionary) -> void:
 		lines.append("Level %d of %d. %s" % [level, max_level, LEVEL_EFFECT.get(b.type, OUTPOST_LEVEL if _is_facility(b.type) else "")])
 		if level < max_level:
 			lines.append("Level %d costs %s and takes %s" % [level + 1, _cost_text(_level_cost(b.type, level)), _clock_text(_level_secs(b.type, level))])
+			if _view == "" and b.type != "command" and level >= _command_level():
+				lines.append("Upgrade the Command Centre to level %d first." % (level + 1))
+	if b.type == "command":
+		lines.append(_command_ladder())
 	if _is_facility(b.type):
 		var now := Net.now_ms()
 		var vault := []
@@ -1904,28 +1961,38 @@ func _refresh_info(state: Dictionary) -> void:
 	_info.text = "\n\n".join(lines)
 
 
+## Every Command Centre level and what it opens, the ones still to come marked as such.
+func _command_ladder() -> String:
+	var levels: Array = Net.catalog.get("commandLevels", [])
+	var out := []
+	for i in range(1, levels.size()):
+		var mark := "Done" if i <= _command_level() else "Next" if i == _command_level() + 1 else "Later"
+		out.append("Level %d (%s): %s" % [i, mark, "; ".join(levels[i].about)])
+	return "\n".join(out)
+
+
 ## What the home planet's buildings earn a minute, e.g. "+12 metal  +2 ice  +12 credits a minute".
 func _income_text() -> String:
 	var per_tick := {}
 	var produces: Dictionary = Net.catalog.get("produces", {})
+	var power := 0
+	for b in Net.my_planet().get("buildings", []):
+		if b.type == "power" and _work_left(b) <= 0:
+			power = maxi(power, int(b.get("level", 1)))
+	var boost := 1.0 + float(Net.catalog.get("powerBoost", 0.1)) * power
+	var cap := _storage_cap()
 	for b in Net.my_planet().get("buildings", []):
 		if _work_left(b) > 0:
 			continue # idle while it's built or upgraded
 		for res in produces.get(b.type, {}):
-			per_tick[res] = per_tick.get(res, 0.0) + float(produces[b.type][res]) * int(b.get("level", 1))
+			if res != "credits" and float(_econ().stock.get(res, 0)) >= cap:
+				continue # the Warehouse is full
+			per_tick[res] = per_tick.get(res, 0.0) + float(produces[b.type][res]) * int(b.get("level", 1)) * boost
 	var parts := []
 	for res in ["metal", "ice", "credits"]:
 		if per_tick.has(res):
 			parts.append("+%s %s" % [str(snappedf(per_tick[res] * 12.0, 0.1)).trim_suffix(".0"), res])
 	return ("  ".join(parts) + " a minute") if parts else ""
-
-
-func _count(type: String) -> int:
-	var n := 0
-	for b in _planet().get("buildings", []):
-		if b.type == type:
-			n += 1
-	return n
 
 
 func _fleet_size(state: Dictionary) -> int:
@@ -2003,7 +2070,7 @@ func _refresh_jobs(state: Dictionary) -> void:
 	var lines := []
 	for job in state.jobs.filter(func(j): return j.get("planet", "aster") == _pid()):
 		lines.append("#%d  %s %d/%d  (%d cr)  %s" % [job.id, job.resource, job.delivered, job.amount, job.reward, job.status])
-	_jobs.text = "\n".join(lines) if lines else "No jobs yet. Build a Spaceport, then post one."
+	_jobs.text = "\n".join(lines) if lines else "No jobs yet. Build a Star Port, then post one."
 	_refresh_contracts(state)
 
 
@@ -2150,8 +2217,8 @@ func _refresh_found(state: Dictionary) -> void:
 	var info: Dictionary = BUILDING_INFO[_founding]
 	var afford := _can_afford(info.cost)
 	var mine := _my_sites().size()
-	var most := int(Net.catalog.get("outposts", {}).get("max", 5))
-	var key := JSON.stringify([_founding, faction, planets.map(func(p): return [p.owner, p.sectors.map(func(x): return x.owner)]), counts, afford, mine])
+	var most := _outposts_allowed()
+	var key := JSON.stringify([_founding, faction, planets.map(func(p): return [p.owner, p.sectors.map(func(x): return x.owner)]), counts, afford, mine, most])
 	if key == _found_key:
 		return
 	_found_key = key

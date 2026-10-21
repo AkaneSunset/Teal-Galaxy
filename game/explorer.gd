@@ -2,7 +2,7 @@ extends Node3D
 ## Explorer mode (PC): fly from the pilot's seat around Teal Prime, mine ice, deliver jobs,
 ## and raid Builders' facilities on foot (raid.gd).
 ## Every Builder planet has a High Port in orbit. Docking there opens the transit menu, which
-## shuttles the pilot down to the planet's Spaceport (jobs and the Fence) or into one of its
+## shuttles the pilot down to the planet's Star Port (jobs and the Fence) or into one of its
 ## facilities to raid it.
 ## The faction war: a pilot picks a side once (faction_picker.gd). The contested worlds (Cinder,
 ## Vesper, Halcyon, Morrow) have orbital stations instead, over the Builders' outposts in their
@@ -1434,7 +1434,7 @@ func _close_standing_menu() -> void:
 		_station.set_menu_open(false)
 
 
-## Your ship flies down to the planet's surface and lands at its Builder's base, beside the Spaceport.
+## Your ship flies down to the planet's surface and lands at its Builder's base, beside the Star Port.
 func _fly_to_base() -> void:
 	var p := Net.planet(_docked)
 	_land_in(Surface.new(_docked), true)
@@ -1497,7 +1497,7 @@ func _refresh_dock() -> void:
 		var job := Net.open_job(_docked)
 		var stash: Array = _me().get("stash", [])
 		if job.is_empty():
-			_dock_note("No open jobs at this Spaceport.")
+			_dock_note("No open jobs at this Star Port.")
 		elif _cargo(job.resource) <= 0:
 			_dock_note("Job #%d wants %d %s (%d delivered). Go mine some." % [job.id, job.amount, job.resource, job.delivered])
 		else:
@@ -1527,9 +1527,9 @@ func _refresh_dock() -> void:
 			where = wp.get("name", _docked)
 			_dock_note(_front_note(wp), WarInfo.faction_color(wp.get("owner")).lightened(0.2))
 		elif Net.has_building("spaceport", _docked):
-			_dock_button(("Take a lander down to %s's base, to the Spaceport" if _carrier else "Fly down to %s's base and land at the Spaceport") % owner, _fly_to_base)
+			_dock_button(("Take a lander down to %s's base, to the Star Port" if _carrier else "Fly down to %s's base and land at the Star Port") % owner, _fly_to_base)
 		else:
-			_dock_note("%s has no Spaceport yet." % where)
+			_dock_note("%s has no Star Port yet." % where)
 		var facs := facilities_on(_docked)
 		if facs.is_empty():
 			_dock_note("No outposts to raid on %s." % where)
@@ -1892,7 +1892,7 @@ func _update_hud(delta: float) -> void:
 		_cargo("ice"),
 		int(me.get("credits", 0)),
 		int(me.get("reputation", 0)),
-		("Job #%d: deliver %s %d/%d to %s's Spaceport" % [job.id, job.resource, job.delivered, job.amount, Net.planet(job.get("planet", "aster")).get("name", "Aster")]) if not job.is_empty() else "No open jobs",
+		("Job #%d: deliver %s %d/%d to %s's Star Port" % [job.id, job.resource, job.delivered, job.amount, Net.planet(job.get("planet", "aster")).get("name", "Aster")]) if not job.is_empty() else "No open jobs",
 		("\nRaided loot: %d items, about %d credits at the Fence" % [stash.size(), _stash_value() / 2]) if not stash.is_empty() else "",
 		("\nWar goods hold: %s" % WarInfo.goods_list(hold)) if WarInfo.goods_list(hold, "") != "" else "",
 	]

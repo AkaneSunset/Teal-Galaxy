@@ -392,7 +392,7 @@ func _build_hall() -> void:
 		var war: bool = deg == 160.0 or deg == 340.0
 		if travel:
 			_console(self, _polar(deg, 11.0, 0.0), _inward(deg), "SURFACE TRANSIT",
-				("Shuttles to every\noutpost on %s.\nPress F." % _planet_name()) if not _war.is_empty() else "Shuttles to the Spaceport\nand every facility.\nPress F.", 1.8)
+				("Shuttles to every\noutpost on %s.\nPress F." % _planet_name()) if not _war.is_empty() else "Shuttles to the Star Port\nand every facility.\nPress F.", 1.8)
 			_use(self, _polar(deg, 10.3, 1.0), func(): return "Press %s to plan a trip to the surface" % _key(), func(): wants_menu.emit())
 		elif war:
 			_console(self, _polar(deg, 11.0, 0.0), _inward(deg), "WAR TERMINAL", "The front, sector\nby sector.\nPress F.", 1.8)
