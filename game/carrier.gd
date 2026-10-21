@@ -684,6 +684,7 @@ func _open_battles() -> void:
 		return
 	_battle_menu = load(BATTLE_MENU).open(self, over)
 	if _battle_menu == null:
+		_say("Sector Battles couldn't open. Re-import the project (see the README) and try again.")
 		return
 	set_menu_open(true)
 	if _battle_menu.has_signal("closed"):

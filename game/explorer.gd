@@ -1781,9 +1781,17 @@ func _open_battles(planet_id: String) -> void:
 	var path := "res://battle/battle_menu.gd"
 	if not ResourceLoader.exists(path):
 		return
+	var menu: Control = load(path).open(self, planet_id)
+	if menu == null:
+		# The screen failed to load (a project that hasn't been imported since the battle code
+		# arrived: run godot --headless --path game --import). Keep the War terminal and the controls.
+		var why := "Sector Battles couldn't open. Re-import the project (see the README) and try again."
+		_say(why)
+		if _station:
+			_station._say(why)
+		return
 	_hide_panels()
 	_dock_panel.visible = false
-	var menu: Control = load(path).open(self, planet_id)
 	if _station:
 		_station.set_menu_open(true)
 	controls.enabled = false
