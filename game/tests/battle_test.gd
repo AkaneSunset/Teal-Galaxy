@@ -344,7 +344,8 @@ func _fight() -> void:
 		return
 	_drop_at = _clock
 	var engineers := _mine("engineer").filter(func(u): return not u.dropping())
-	if not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5 and _extractors <= _generators:
+	# Every extractor needs five generators' worth of energy, and units need energy too: the generators go first.
+	if not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5 and _generators >= 5 * _extractors + 2:
 		var e: Units.Unit = engineers[0]
 		var best = null
 		for p in _view.mass_points:
@@ -353,11 +354,13 @@ func _fight() -> void:
 		if best and Vector2(best.x, best.z).distance_to(e.to) < 700.0:
 			_view.order_units([e.id], "build", Vector2(best.x, best.z), false, -1, "extractor")
 			_extractors += 1
-	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _generators < 8:
+	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _generators < 5 * 5 + 10:
 		# A row of generators behind the landing zone, on the side away from the enemy.
 		var lz: Dictionary = _view.info.get("lz", {"x": 800, "z": 170})
 		var back := -1.0 if float(lz.z) < 800.0 else 1.0
-		var spot := Vector2(float(lz.x) - 105.0 + 30.0 * _generators, float(lz.z) + back * 150.0)
+		# In rows either side of the landing zone (behind it can be the edge of the map).
+		var side := 1.0 if _generators % 2 == 0 else -1.0
+		var spot := Vector2(float(lz.x) + side * (150.0 + 28.0 * ((_generators / 2) % 6)), float(lz.z) - back * 28.0 * (_generators / 12))
 		if _view._site("generator", spot) != null:
 			_view.order_units([engineers[0].id], "build", spot, false, -1, "generator")
 		_generators += 1
@@ -374,7 +377,7 @@ func _fight() -> void:
 	var army := 0.0
 	var idle := []
 	for u: Units.Unit in _view.units.values():
-		if u.mine and u.kind != "structure" and u.type != "engineer" and not u.dropping():
+		if u.mine and u.kind != "structure" and u.type != "engineer" and u.type != "acu" and not u.dropping(): # the ACU stays home: losing it loses the battle
 			army += float(_view.catalog[u.type].cost)
 			if u.state == "idle":
 				idle.append(u.id)

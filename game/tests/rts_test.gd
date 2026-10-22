@@ -366,11 +366,16 @@ func _fight() -> void:
 	if _clock - _drop_at < 0.5:
 		return
 	_drop_at = _clock
-	var engineers := _mine("engineer").filter(func(u): return not u.dropping())
-	_factory_steps(engineers)
+	var all_engineers := _mine("engineer").filter(func(u): return not u.dropping())
+	_factory_steps(all_engineers)
+	# Three engineers, as a player would: every extractor needs five generators built first.
+	if _mine("engineer").size() < 3 and _view.mass >= 50.0 and _view.energy >= 125.0:
+		_view.call_in("engineer", 1)
+	# Each pass gives one idle engineer a job (the list holds just that one).
+	var engineers := all_engineers.filter(func(u): return u.orders.is_empty())
 	var lz: Dictionary = _view.info.get("lz", {"x": 800, "z": 170})
 	var back := -1.0 if float(lz.z) < 800.0 else 1.0
-	if not engineers.is_empty() and engineers[0].orders.is_empty() and _factory_stage == 0 and _extractors >= 2:
+	if not engineers.is_empty() and engineers[0].orders.is_empty() and _factory_stage == 0 and _extractors >= 5:
 		# A factory beside the landing zone: built on the planet, its units cost half.
 		for dx in [70.0, -70.0, 110.0, -110.0]:
 			var spot := Vector2(float(lz.x) + dx, float(lz.z) + back * 60.0)
@@ -378,9 +383,11 @@ func _fight() -> void:
 				_view.order_units([engineers[0].id], "build", spot, false, -1, "factory")
 				_factory_stage = 1
 				break
-	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors >= 5 and _generators < 6:
-		# Then Power Generators in a row behind the landing zone: units cost energy too.
-		var spot := Vector2(float(lz.x) - 105.0 + 30.0 * _generators, float(lz.z) + back * 150.0)
+	elif not engineers.is_empty() and engineers[0].orders.is_empty() and (_generators < 5 * _extractors + 3 or (_extractors >= 5 and _factory_stage > 0)) and _generators < 35:
+		# Every extractor needs five generators' worth of energy, and units need energy too: rows of
+		# Power Generators either side of the landing zone (behind it can be the edge of the map).
+		var side := 1.0 if _generators % 2 == 0 else -1.0
+		var spot := Vector2(float(lz.x) + side * (150.0 + 28.0 * ((_generators / 2) % 6)), float(lz.z) - back * 28.0 * (_generators / 12))
 		if _view._site("generator", spot) != null:
 			_view.order_units([engineers[0].id], "build", spot, false, -1, "generator")
 		_generators += 1
@@ -410,7 +417,7 @@ func _fight() -> void:
 	var idle := []
 	var guns := []
 	for u: Units.Unit in _view.units.values():
-		if u.mine and u.kind != "structure" and u.type != "engineer" and not u.dropping():
+		if u.mine and u.kind != "structure" and u.type != "engineer" and u.type != "acu" and not u.dropping(): # the ACU stays home: losing it loses the battle
 			army += float(_view.catalog[u.type].cost)
 			if u.state == "idle":
 				(guns if u.type == "artillery" else idle).append(u.id)
@@ -423,7 +430,7 @@ func _fight() -> void:
 	if _attacking and idle.size() + guns.size() >= 4:
 		_view.order_units(idle + guns, "amove", node.to)
 	if int(_step_clock * 2.0) % 30 == 0:
-		print("t %.0f: mass %d, %d of mine (worth %d), node hp %d, %d snapshots, slowest frame %.0f ms" % [_step_clock, int(_view.mass), _view.my_unit_count(), int(army), int(node.hp), _states, _slowest * 1000.0])
+		print("t %.0f: mass %d, energy %d (%+d/s), %d of mine (worth %d), node hp %d, %d snapshots, slowest frame %.0f ms" % [_step_clock, int(_view.mass), int(_view.energy), int(_view.energy_income), _view.my_unit_count(), int(army), int(node.hp), _states, _slowest * 1000.0])
 	if _attacking and not _looked and DisplayServer.get_name() != "headless":
 		_looked = true
 		_view._dist_to = 300.0

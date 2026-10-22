@@ -56,6 +56,9 @@ func _draw_all() -> void:
 		elif sel or u.hp < u.max_hp - 0.5:
 			if not u.dropping():
 				_bar(t + Vector2(0, -6), w, u.hp / u.max_hp, _hp_colour(u.hp / u.max_hp))
+		if u.vet > 0 and not u.dropping(): # veterancy: a gold pip per star over the health bar
+			for i in u.vet:
+				draw_circle(t + Vector2(-w / 2.0 + 3.0 + i * 6.0, -13), 2.2, Color(1.0, 0.82, 0.25))
 		if u.name != "" and dist < 900.0:
 			var label := u.name
 			var size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
@@ -131,6 +134,9 @@ func _icon(u: Units.Unit, s: Vector2, sel: bool) -> void:
 	draw_rect(box, fill, true)
 	draw_rect(box, line, false, 1.5 if not sel else 2.5)
 	match u.type:
+		"acu":
+			draw_rect(Rect2(s - Vector2(5, 5), Vector2(10, 10)), mark, false, 2.0)
+			draw_circle(s, 2.5, mark)
 		"engineer":
 			draw_line(s + Vector2(-4, 0), s + Vector2(4, 0), mark, 2.0)
 			draw_line(s + Vector2(0, -4), s + Vector2(0, 4), mark, 2.0)

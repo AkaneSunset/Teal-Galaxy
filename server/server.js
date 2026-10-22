@@ -59,7 +59,7 @@ const PILOT_ONLY = {
   sell_to_builder: 'only pilots sell at a Star Port', buy_from_builder: 'only pilots buy at a Star Port',
   enter_space: 'only pilots walk around', leave_space: 'only pilots walk around', walk: 'only pilots walk around', ship_open: 'only pilots have carriers',
   battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
-  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles',
+  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles', battle_resign: 'only pilots fight sector battles',
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
   campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches',
   defense_move: 'only pilots fight', defense_fire: 'only pilots fight', defense_leave: 'only pilots fight',
@@ -673,6 +673,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'battle_order':
       case 'battle_produce':
       case 'battle_upgrade':
+      case 'battle_resign':
       case 'battle_possess':
       case 'battle_drive':
       case 'battle_release':

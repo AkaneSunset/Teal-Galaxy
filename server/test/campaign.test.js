@@ -126,7 +126,7 @@ test('a campaign match scores for its winner instead of taking a sector; the min
   assert.strictEqual(h.g.war.campaigns.cinder.points.ashen, 5, 'a win against AI scores half of 10');
   assert.deepStrictEqual(W.planet(h.g, 'cinder').sectors.map((s) => s.owner), sectors, 'no sector changed hands');
   const end = h.sent.find(([n, m]) => n === 'Ash' && m.type === 'battle_end');
-  assert.match(end[1].text, /Ashen Collective won the match: \+5 campaign points on Cinder/);
+  assert.match(end[1].text, /Ashen Collective won the match \(every Command Node fell\): \+5 campaign points on Cinder/);
   // On a mining world the holder's commanders start with 15% more mass.
   const mining = h.g.war.planets.find((wp) => !wp.capital && wp.owner && h.g.war.campaigns[wp.id].bonus === 'mining');
   assert.ok(mining, 'some planet is a mining world');

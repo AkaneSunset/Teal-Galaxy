@@ -580,24 +580,44 @@ by an AI (plus any of its pilots who join), or a militia if nobody holds it. You
 time: starting another gives up the last one unless other pilots are still fighting it.
 
 The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
-4000 energy; your carrier gives 2 mass and 10 energy a second, each Mass Extractor 3 mass more and each
-**Power Generator** (45 mass) 20 energy more. Call units in by drop pod from the panel on the right; they
-land in your landing zone 6 seconds later. The carrier drops **tier 1 units only, at full price**.
-Engineers build extractors on mass points, generators, turrets and land factories.
+4000 energy; your carrier gives 2 mass and 10 energy a second. Call units in by drop pod from the panel
+on the right (the ▾ button folds it away); they land in your landing zone 6 seconds later. The carrier
+drops **tier 1 units only, at full price**.
 
-**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever).
-Select one and its panel shows what its tier makes and its upgrade: tier 2 (400 mass, 2500 energy) and
-tier 3 (900 mass, 6000 energy), paid as it works, making nothing meanwhile. Each tier makes the Mk II or
-Mk III Striker, Tank, Artillery and AA: bigger, faster, tougher and harder hitting than the tier below
-(per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter bigger) and dearer.
-The defender's AI pays mass only.
-The defender's AI keeps a guard round its base and, after giving you five minutes to dig in, sends
-waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction fields
-more than a militia. **Destroy the Command Node** to take the sector (*Sector taken*); the defenders win if they
-hold for 30 minutes, if the attackers have nothing on the field for a minute, or if none of the
-attackers' pilots has been in the battle for five minutes. An attack is called off if the planet locks
-meanwhile (another sector's battle took it). Either way a banner says so and you're back at the holo
-table.
+**Your ACU.** Every attacking commander lands an **Armoured Command Unit**: a walker tougher than a handful
+of tier 1 units that fights and builds everything an engineer's tier 1 list has. You never get another:
+when it falls it goes up in a blast that wrecks most things within 45 metres (yours too) and **you're out**
+(you can watch, but not give orders or call anything in).
+
+**Economy.** Engineers (and the ACU) build **Mass Extractors** on mass points (3 mass a second), **Power
+Generators** (20 mass, 20 energy a second) and storage that raises your caps (Mass Storage +1500, Energy
+Storage +8000). Every extractor **uses as much energy as five generators of its tier make**, and when your
+energy runs out (*STALLED*) your extractors stop until you build more power. Select an extractor or
+generator to upgrade it: extractors make 3, 7 and 16 mass a second at tiers 1 to 3 (and use 100, 300 and
+800 energy), generators 20, 60 and 160 energy. Energy prices are half what they were before extractors used
+energy.
+
+**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever): the
+**Land Factory** (Strikers, Tanks, Artillery, AA, engineers, scouts) and the **Air Factory** (Fighters
+against air, Bombers against the ground, Gunships). Select one and its panel shows what its tier makes and
+its upgrade: tier 2 (400 mass, 2500 energy) and tier 3 (900 mass, 6000 energy), paid as it works, making
+nothing meanwhile. Each tier makes the Mk II or Mk III units: bigger, faster, tougher and harder hitting
+than the tier below (per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter
+bigger) and dearer. Defences: Turrets, **AA Turrets** and the **Shield Generator** (engineers only), whose
+dome soaks the damage done to everything under it while it has charge (it uses 50 energy a second).
+
+**Veterancy.** Units earn up to five stars (gold pips over the health bar) from kills; each star restores
+a quarter of their health, adds a tenth to it and mends them faster.
+
+**Winning.** The defender gets a **Command Node** (and a drop zone by it) for every attacking commander; a
+defending pilot who joins takes command of one nobody commands. The attackers win when **every Command
+Node** is destroyed; the defenders win when **every attacking ACU** is destroyed or the 30 minutes run out.
+A side **resigns** when 66% of its commanders still in the fight vote to (*Resign*, top bar). The
+defender's AI pays mass only; it keeps a guard round its base and, after giving you five minutes to dig in,
+sends waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction
+fields more than a militia. An attack is called off if the planet locks meanwhile, and the attackers lose
+if none of their pilots has been in the battle for five minutes. Either way a banner says so and you're
+back at the holo table.
 
 | Command | Keys and mouse |
 | --- | --- |

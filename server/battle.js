@@ -38,7 +38,7 @@ const MASS_CAP = 5000;
 const ENERGY_START = 4000;
 const ENERGY_CAP = 25000;
 const CARRIER_ENERGY = 10; // energy a second from each pilot's carrier...
-const GENERATOR_POWER = 20; // ...and from each Power Generator they own
+const GENERATOR_POWER = 20; // ...and from each tier 1 Power Generator they own
 // Units a factory makes on the planet cost this much of their price; drop pods from the carrier
 // cost it all, and bring tier 1 units only.
 const FACTORY_DISCOUNT = 0.5;
@@ -46,7 +46,21 @@ const FACTORY_DISCOUNT = 0.5;
 // makes the higher-tier units: bigger, faster and stronger, and dearer.
 const FACTORY_TIERS = 3;
 const FACTORY_UPGRADE = { 2: { cost: 400, energy: 2500 }, 3: { cost: 900, energy: 6000 } };
-const TIERED = ['striker', 'tank', 'artillery', 'aa'];
+// The economy's tiers: Mass Extractors and Power Generators upgrade like factories. An extractor
+// uses as much energy as EXTRACTOR_DRAIN Power Generators of its tier make, and stops while its
+// owner has no energy left.
+const EXTRACTOR_MASS = [0, 3, 7, 16]; // mass a second by tier
+const GENERATOR_POWER_T = [0, 20, 60, 160]; // energy a second by tier
+const EXTRACTOR_DRAIN = 5;
+const EXTRACTOR_UPGRADE = { 2: { cost: 300, energy: 1500 }, 3: { cost: 900, energy: 6000 } };
+const GENERATOR_UPGRADE = { 2: { cost: 200, energy: 0 }, 3: { cost: 600, energy: 0 } };
+const STORAGE = { massstorage: { mass: 1500 }, energystorage: { energy: 8000 } };
+// Veterancy: a unit earns a star at each of these kill scores (a kill scores the victim's tier;
+// an ACU 10, a Command Node 5, any other structure 1). Each star restores a quarter of its health
+// and adds a tenth to it, and it mends VET_REGEN hit points a second per star.
+const VET_STARS = [3, 8, 15, 25, 40];
+const VET_REGEN = 1.5;
+const TIERED = ['striker', 'tank', 'artillery', 'aa', 'fighter', 'bomber', 'gunship'];
 const TIER_SCALE = { hp: 1.8, damage: 1.6, speed: 1.15, range: 1.1, radius: 1.25, cost: 2.2, energy: 2.5 }; // per tier above 1
 const CARRIER_INCOME = 2; // mass a second from each pilot's carrier...
 const EXTRACTOR_INCOME = 3; // ...and from each extractor they own
@@ -81,6 +95,14 @@ const AI_HOME = 400; // a wave with nothing left to fight further than this from
 const AI_MIX = ['striker', 'tank', 'striker', 'aa', 'tank', 'artillery', 'striker', 'tank'];
 const MILITIA_K = 0.6; // an unclaimed sector's militia earns this much of a faction's AI
 const CELL = 40; // metres per cell of the grid used to find what's near
+// Command: every attacking commander lands an Armoured Command Unit (ACU) and is out of the battle
+// when it falls; the defender gets a Command Node (and a drop zone by it) for every attacking
+// commander, and a defending pilot who joins commands one of them. The attackers win when every
+// Node is down, the defenders when every ACU is (or the clock runs out). A side resigns when
+// RESIGN_SHARE of its commanders still in the fight vote to.
+const RESIGN_SHARE = 0.66;
+const NODE_GAP = 300; // metres between the defender's Command Nodes, across their end of the map
+const OUT = "your ACU was destroyed: you're out of this battle";
 const CAMPAIGN_SIDE = 8; // commanders a side in a campaign match
 const CAMPAIGN_BONUS = { mining: { mass: 1.15 } }; // planet bonuses that touch sector battles (campaign.js BONUSES)
 
@@ -88,17 +110,27 @@ const CAMPAIGN_BONUS = { mining: { mass: 1.15 } }; // planet bonuses that touch 
 // roster; it goes to the clients in battle_joined.
 const LAND = ['land', 'structure'];
 const CATALOG = {
-  engineer: { name: 'Engineer', kind: 'land', hp: 150, speed: 9, damage: 0, reload: 0, range: 12, cost: 50, energy: 250, radius: 3, vision: 80, hits: [], builds: ['extractor', 'generator', 'turret', 'factory'] },
+  engineer: { name: 'Engineer', kind: 'land', hp: 150, speed: 9, damage: 0, reload: 0, range: 12, cost: 50, energy: 250, radius: 3, vision: 80, hits: [], builds: ['extractor', 'generator', 'turret', 'aaturret', 'factory', 'airfactory', 'shield', 'massstorage', 'energystorage'] },
+  // One per attacking commander, landed when they join, never built: tougher than a handful of tier
+  // 1 units, builds what an engineer does, and goes up in a blast that wrecks what's round it.
+  acu: { name: 'Armoured Command Unit', kind: 'land', hp: 4000, speed: 7, damage: 60, reload: 1, range: 45, cost: 0, energy: 0, radius: 5, vision: 140, hits: ['land', 'structure', 'air'], builds: ['extractor', 'generator', 'turret', 'aaturret', 'factory', 'airfactory', 'massstorage', 'energystorage'], acu: true, blast: { radius: 45, damage: 3000 } },
   scout: { name: 'Scout', kind: 'land', hp: 90, speed: 22, damage: 5, reload: 1, range: 30, cost: 25, energy: 100, radius: 3, vision: 160, hits: LAND },
   striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, energy: 275, radius: 3, vision: 80, hits: LAND },
   tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, energy: 650, radius: 4, vision: 80, hits: LAND },
   artillery: { name: 'Artillery', kind: 'land', hp: 220, speed: 7, damage: 120, reload: 4, range: 160, cost: 170, energy: 850, radius: 3, vision: 80, hits: LAND, minRange: 30, splash: 14, shell: 160 },
   aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, energy: 450, radius: 3, vision: 100, hits: ['air'] },
+  fighter: { name: 'Fighter', kind: 'air', hp: 260, speed: 30, damage: 22, reload: 0.6, range: 40, cost: 70, energy: 500, radius: 3, vision: 120, hits: ['air'] },
+  bomber: { name: 'Bomber', kind: 'air', hp: 520, speed: 18, damage: 260, reload: 5, range: 14, cost: 160, energy: 1100, radius: 3.5, vision: 100, hits: ['land', 'structure'], splash: 12, shell: 60 },
   gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, energy: 1400, radius: 3, vision: 100, hits: ['land', 'structure', 'air'] },
-  extractor: { name: 'Mass Extractor', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 200, radius: 8, hits: [], income: EXTRACTOR_INCOME },
-  generator: { name: 'Power Generator', kind: 'structure', hp: 500, damage: 0, cost: 45, energy: 0, radius: 7, hits: [], power: GENERATOR_POWER },
+  extractor: { name: 'Mass Extractor', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 200, radius: 8, hits: [], income: EXTRACTOR_INCOME, tiers: 3, upgrade: EXTRACTOR_UPGRADE, mass: EXTRACTOR_MASS, drain: GENERATOR_POWER_T.map((p) => p * EXTRACTOR_DRAIN) },
+  generator: { name: 'Power Generator', kind: 'structure', hp: 500, damage: 0, cost: 20, energy: 0, radius: 7, hits: [], power: GENERATOR_POWER, tiers: 3, upgrade: GENERATOR_UPGRADE, powers: GENERATOR_POWER_T },
+  aaturret: { name: 'AA Turret', kind: 'structure', hp: 900, damage: 26, reload: 0.5, range: 90, cost: 110, energy: 500, radius: 6, hits: ['air'] },
+  shield: { name: 'Shield Generator', kind: 'structure', hp: 800, damage: 0, cost: 180, energy: 1200, radius: 6, hits: [], shield: { radius: 32, hp: 4000, regen: 40, drain: 50 } },
+  massstorage: { name: 'Mass Storage', kind: 'structure', hp: 600, damage: 0, cost: 80, energy: 200, radius: 6, hits: [], storage: STORAGE.massstorage },
+  energystorage: { name: 'Energy Storage', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 0, radius: 6, hits: [], storage: STORAGE.energystorage },
   turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'] },
   factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
+  airfactory: { name: 'Air Factory', kind: 'structure', hp: 2200, damage: 0, cost: 280, energy: 1500, radius: 12, hits: [], produces: ['fighter', 'bomber', 'gunship'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, energy: 0, radius: 12, hits: [] },
   node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'] },
 };
@@ -121,10 +153,17 @@ for (const base of TIERED)
       cost: Math.round(c.cost * k('cost')),
       energy: Math.round(c.energy * k('energy')),
     };
-    CATALOG.factory.produces.push(`${base}_t${t}`);
+    CATALOG[c.kind === 'air' ? 'airfactory' : 'factory'].produces.push(`${base}_t${t}`);
   }
 const tierOf = (type) => CATALOG[type]?.tier || 1;
-const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure' && tierOf(id) === 1);
+// Energy prices are halved from what they were before extractors used energy: with every extractor
+// needing five generators' worth to run, units at the old prices starved the economy.
+const ENERGY_PRICE = 0.5;
+for (const c of Object.values(CATALOG)) if (c.energy) c.energy = Math.round(c.energy * ENERGY_PRICE);
+const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure' && tierOf(id) === 1 && !CATALOG[id].acu);
+const builds = (u) => !!CATALOG[u.type].builds; // engineers and ACUs
+const makes = (u) => !!CATALOG[u.type].produces; // land and air factories
+const upgradable = (u) => !!CATALOG[u.type].upgrade; // factories, extractors, generators
 const BUILDABLE = CATALOG.engineer.builds;
 const RADIUS_MAX = Math.max(...Object.values(CATALOG).map((c) => c.radius));
 
@@ -236,7 +275,7 @@ function newBattle({ id = 'b1', wp, sector, attacker, defender = null, outposts 
   for (const s of map.base) {
     const st = spawn(b, s.type, 'd', '', s.x, s.z);
     if (s.name) st.name = s.name;
-    if (s.type === 'node') b.nodeId = st.id;
+    if (s.type === 'node') [b.nodeId, b.nodes] = [st.id, [st.id]];
   }
   const near = map.massPoints.slice().sort((p, q) => Math.hypot(p.x - map.node.x, p.z - map.node.z) - Math.hypot(q.x - map.node.x, q.z - map.node.z));
   for (const p of near.slice(0, 3)) spawn(b, 'extractor', 'd', '', p.x, p.z).point = p.id;
@@ -245,6 +284,38 @@ function newBattle({ id = 'b1', wp, sector, attacker, defender = null, outposts 
 
 // The defender AI's income factor: 1 for a faction, the Coma director's intensity against the
 // attacker (doubled, at least 0.5) for Coma, MILITIA_K for an unclaimed sector.
+// --- The defender's Command Nodes -------------------------------------------------------------
+
+// Where the defender's `i`th Command Node stands: the first is the map's, the rest spread either
+// side of it across the defender's end.
+function nodeSpot(b, i) {
+  if (i === 0) return { x: b.node.x, z: b.node.z };
+  const side = i % 2 ? 1 : -1;
+  let x = b.node.x + side * Math.ceil(i / 2) * NODE_GAP;
+  if (x < 120 || x > SIZE - 120) x = b.node.x - side * (Math.ceil(i / 2) + 1) * NODE_GAP; // off the map: the other side
+  return { x: clamp(x, 120, SIZE - 120), z: b.node.z - (i % 2) * 60 };
+}
+
+// Another Command Node for the defender, with two turrets by it (one for each attacking commander).
+function addNode(b) {
+  const at = nodeSpot(b, b.nodes.length);
+  const n = spawn(b, 'node', 'd', '', at.x, at.z);
+  spawn(b, 'turret', 'd', '', at.x - 45, at.z - 42);
+  spawn(b, 'turret', 'd', '', at.x + 45, at.z - 42);
+  b.nodes.push(n.id);
+  b.feed.push('The defenders raised another Command Node');
+  return n;
+}
+
+function aliveNodes(b) {
+  return b.nodes.map((id) => b.units.get(id)).filter((n) => n && n.hp > 0);
+}
+
+// The Node the defender AI plans round: its first one still standing.
+function aiNode(b) {
+  return aliveNodes(b).find((n) => !n.commander) || aliveNodes(b)[0] || b.node;
+}
+
 function aiRate(g, attacker, defender) {
   if (!defender) return MILITIA_K;
   if (defender === 'coma') return Math.max(0.5, D.intensityFor(g, attacker) * 2);
@@ -260,7 +331,14 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
     u.progress = built ? 1 : 0;
     u.paid = built ? c.cost : 0;
     if (!built) u.hp = c.hp * 0.1;
-    if (type === 'factory') [u.queue, u.tier] = [[], 1];
+    if (c.produces) u.queue = [];
+    if (c.upgrade) u.tier = 1;
+    if (c.shield) u.shieldHp = 0;
+  }
+  u.maxHp = c.hp;
+  if (!isStructure(u)) {
+    u.vet = 0;
+    u.kills = 0;
   }
   if (dropAt) u.state = 'drop';
   b.units.set(u.id, u);
@@ -269,12 +347,48 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
 
 // --- Pilots and their mass ------------------------------------------------------------------
 
+// A new attacking commander lands their ACU (and the defender gets another Command Node once there
+// are more commanders than Nodes); a new defending one takes command of a Node nobody commands.
 function addPilot(b, name, side, faction) {
   let p = b.pilots.get(name);
-  if (!p) b.pilots.set(name, (p = { name, side, faction, mass: MASS_START, energy: ENERGY_START, drive: null }));
+  const fresh = !p;
+  if (!p) b.pilots.set(name, (p = { name, side, faction, mass: MASS_START, energy: ENERGY_START, drive: null, out: false, resign: false }));
   p.side = side;
   p.present = true;
+  if (fresh && side === 'a') {
+    const commanders = [...b.pilots.values()].filter((q) => q.side === 'a').length;
+    while (b.nodes.length < commanders) addNode(b);
+    p.acu = dropUnits(b, 'a', name, 'acu', 1)[0].id;
+  }
+  if (fresh && side === 'd') {
+    const free = aliveNodes(b).find((n) => !n.commander);
+    if (free) [free.commander, p.node] = [name, free.id];
+  }
   return p;
+}
+
+// A pilot who may give orders: in the battle, and (attacking) with their ACU still standing.
+function commander(b, name) {
+  const p = b.pilots.get(name);
+  if (!p?.present) return fail('not in that battle');
+  if (p.out) return fail(OUT);
+  return p;
+}
+
+// battle_resign: a commander votes to resign (or takes the vote back). When RESIGN_SHARE of their
+// side's commanders still in the fight have voted, the side gives up the battle.
+function resign(b, name, yes = true) {
+  const p = commander(b, name);
+  if (p.ok === false) return p;
+  p.resign = !!yes;
+  const voters = present(b, p.side).filter((q) => !q.out);
+  const votes = voters.filter((q) => q.resign).length;
+  b.feed.push(`${name} ${yes ? 'votes to resign' : 'takes back their resign vote'} (${votes} of ${voters.length})`);
+  if (!b.result && votes >= RESIGN_SHARE * voters.length - 1e-9) {
+    [b.result, b.how] = [p.side === 'a' ? 'd' : 'a', 'resign'];
+    b.feed.push(`${p.side === 'a' ? 'The attackers' : 'The defenders'} resigned`);
+  }
+  return { ok: true, votes, voters: voters.length };
 }
 
 // A pilot leaves: whatever they drive goes back to them, and their units stand where they are.
@@ -306,20 +420,46 @@ function extractorCounts(b) {
   return out;
 }
 
-// Mass a second for a pilot (or the AI, '').
-function income(b, owner) {
-  if (!owner) return AI_INCOME * b.ai.k + EXTRACTOR_INCOME * extractors(b, '', 'd');
-  const p = b.pilots.get(owner);
-  return p ? CARRIER_INCOME + EXTRACTOR_INCOME * extractors(b, owner, p.side) : 0;
+// Everyone's economy at once: 'side|name' -> { mass, power, drain, massCap, energyCap } a second
+// from their finished extractors, generators, shields and storage (the carrier's share not in it).
+function economies(b) {
+  const out = new Map();
+  for (const u of b.units.values()) {
+    if (!isStructure(u) || !u.built) continue;
+    const c = CATALOG[u.type];
+    if (u.type !== 'extractor' && u.type !== 'generator' && !c.shield && !c.storage) continue;
+    const k = `${u.side}|${u.owner}`;
+    if (!out.has(k)) out.set(k, { mass: 0, power: 0, drain: 0, massCap: 0, energyCap: 0 });
+    const e = out.get(k);
+    const t = u.tier || 1;
+    if (u.type === 'extractor') [e.mass, e.drain] = [e.mass + c.mass[t], e.drain + c.drain[t]];
+    if (u.type === 'generator') e.power += c.powers[t];
+    if (c.shield) e.drain += c.shield.drain;
+    if (c.storage) [e.massCap, e.energyCap] = [e.massCap + (c.storage.mass || 0), e.energyCap + (c.storage.energy || 0)];
+  }
+  return out;
 }
 
-// Energy a second for a pilot (the AI has none: it pays mass only).
+const NO_ECONOMY = { mass: 0, power: 0, drain: 0, massCap: 0, energyCap: 0 };
+
+// Mass a second for a pilot (or the AI, ''): the carrier's, and their extractors' unless they've
+// run out of energy (the AI's extractors need none).
+function income(b, owner) {
+  if (!owner) return AI_INCOME * b.ai.k + [...b.units.values()].filter((u) => u.type === 'extractor' && u.built && u.side === 'd' && !u.owner).reduce((a, u) => a + EXTRACTOR_MASS[u.tier || 1], 0);
+  const p = b.pilots.get(owner);
+  if (!p) return 0;
+  const e = economies(b).get(`${p.side}|${owner}`) || NO_ECONOMY;
+  return CARRIER_INCOME + (p.stalled ? 0 : e.mass);
+}
+
+// Energy a second for a pilot, net: the carrier's and their generators', less what their
+// extractors and shields use (the AI has none: it pays mass only). Below zero with none stored,
+// their extractors stop (`stalled`).
 function energyIncome(b, owner) {
   const p = owner && b.pilots.get(owner);
   if (!p) return 0;
-  let gens = 0;
-  for (const u of b.units.values()) if (u.type === 'generator' && u.built && u.owner === owner && u.side === p.side) gens++;
-  return CARRIER_ENERGY + GENERATOR_POWER * gens;
+  const e = economies(b).get(`${p.side}|${owner}`) || NO_ECONOMY;
+  return CARRIER_ENERGY + e.power - e.drain;
 }
 
 // How much of something costing `mass` and `energy` a purse can pay for now, as a share of it
@@ -341,30 +481,38 @@ const priceText = (mass, energy) => `${Math.round(mass)} mass${energy ? ` and ${
 // A pilot's units in the field or on the way down (structures don't count).
 function unitCount(b, owner, side) {
   let n = 0;
-  for (const u of b.units.values()) if (u.owner === owner && u.side === side && mobile(u)) n++;
+  for (const u of b.units.values()) if (u.owner === owner && u.side === side && mobile(u) && !CATALOG[u.type].acu) n++;
   return n;
 }
 
 // Every unit a side has in the field or on the way down, whoever owns it.
 function sideCount(b, side) {
   let n = 0;
-  for (const u of b.units.values()) if (u.side === side && mobile(u)) n++;
+  for (const u of b.units.values()) if (u.side === side && mobile(u) && !CATALOG[u.type].acu) n++;
   return n;
 }
 
 // --- Buying units ---------------------------------------------------------------------------
 
 // Where a side's drop pods come down: the landing zone, or by the Command Node.
-function dropSpot(b, side) {
+// Where a side's drop pods come down: the attackers' landing zone; by a defending commander's own
+// Command Node; the AI's in turn by each of the Nodes nobody commands.
+function dropSpot(b, side, owner = '') {
   if (side === 'a') return b.lz;
-  const node = b.units.get(b.nodeId) || b.node;
+  const mine = owner && b.pilots.get(owner)?.node;
+  let node = mine && b.units.get(mine);
+  if (!node || node.hp <= 0) {
+    const ai = aliveNodes(b).filter((n) => !n.commander);
+    const all = ai.length ? ai : aliveNodes(b);
+    node = all.length ? all[b.dropCount.d % all.length] : b.node;
+  }
   return { x: node.x, z: node.z - 60 };
 }
 
 // `count` units of `type` for `owner` (a pilot, or '' for the AI), landing DROP_S from now in a
 // small ring round the side's drop spot.
 function dropUnits(b, side, owner, type, count) {
-  const at = dropSpot(b, side);
+  const at = dropSpot(b, side, owner);
   const out = [];
   for (let i = 0; i < count; i++) {
     const n = b.dropCount[side]++ % 40;
@@ -377,8 +525,8 @@ function dropUnits(b, side, owner, type, count) {
 
 // battle_drop: a pilot buys units, paid for now, landing by drop pod.
 function drop(b, name, type, count) {
-  const p = b.pilots.get(name);
-  if (!p?.present) return fail('not in that battle');
+  const p = commander(b, name);
+  if (p.ok === false) return p;
   if (CATALOG[type] && CATALOG[type].kind !== 'structure' && tierOf(type) > 1) return fail('your carrier drops tier 1 units only: build a factory and upgrade it for higher tiers');
   if (!DROPPABLE.includes(type)) return fail('no such unit');
   const n = Math.floor(Number(count));
@@ -394,12 +542,12 @@ function drop(b, name, type, count) {
 
 // battle_produce: a pilot's finished factory makes land units, paying as it goes.
 function produce(b, name, factoryId, type, count) {
-  const p = b.pilots.get(name);
-  if (!p?.present) return fail('not in that battle');
+  const p = commander(b, name);
+  if (p.ok === false) return p;
   const f = b.units.get(Number(factoryId));
-  if (!f || f.type !== 'factory' || f.owner !== name) return { ok: true, quiet: true };
+  if (!f || !makes(f) || f.owner !== name) return { ok: true, quiet: true };
   if (!f.built) return fail('that factory is still being built');
-  if (!CATALOG.factory.produces.includes(type)) return fail('a factory makes land units only');
+  if (!CATALOG[f.type].produces.includes(type)) return fail(f.type === 'factory' ? 'a factory makes land units only' : 'an air factory makes air units only');
   if (tierOf(type) > (f.tier || 1)) return fail(`a tier ${f.tier || 1} factory can't make the ${CATALOG[type].name}: upgrade it to tier ${tierOf(type)}`);
   const n = Math.floor(Number(count));
   if (!(n >= 1 && n <= COUNT_MAX)) return fail(`make 1 to ${COUNT_MAX} at a time`);
@@ -411,13 +559,14 @@ function produce(b, name, factoryId, type, count) {
 // battle_upgrade: a pilot's finished factory upgrades to its next tier, paid as it goes (it makes
 // nothing meanwhile, and picks its queue up again after).
 function upgradeFactory(b, name, factoryId) {
-  const p = b.pilots.get(name);
-  if (!p?.present) return fail('not in that battle');
+  const p = commander(b, name);
+  if (p.ok === false) return p;
   const f = b.units.get(Number(factoryId));
-  if (!f || f.type !== 'factory' || f.owner !== name) return { ok: true, quiet: true };
-  if (!f.built) return fail('that factory is still being built');
-  if (f.upgrade) return fail('that factory is already upgrading');
-  if ((f.tier || 1) >= FACTORY_TIERS) return fail(`that factory is at tier ${FACTORY_TIERS}, the top`);
+  if (!f || !upgradable(f) || f.owner !== name) return { ok: true, quiet: true };
+  const what = f.type === 'factory' ? 'factory' : CATALOG[f.type].name;
+  if (!f.built) return fail(`that ${what} is still being built`);
+  if (f.upgrade) return fail(`that ${what} is already upgrading`);
+  if ((f.tier || 1) >= CATALOG[f.type].tiers) return fail(`that ${what} is at tier ${CATALOG[f.type].tiers}, the top`);
   f.upgrade = { to: (f.tier || 1) + 1, done: 0 };
   return { ok: true };
 }
@@ -457,6 +606,7 @@ function formation(units, x, z) {
 // that aren't theirs, and unknown ids, are left out without a word.
 function order(b, name, msg) {
   if (name && !b.pilots.get(name)?.present) return fail('not in that battle');
+  if (name && b.pilots.get(name).out) return fail(OUT);
   const ids = Array.isArray(msg.units) ? msg.units.slice(0, 400) : [];
   const units = [...new Set(ids.map(Number))].map((id) => b.units.get(id)).filter((u) => u && u.owner === name && (name || u.side === 'd') && mobile(u) && !u.driven);
   if (!units.length) return { ok: true, quiet: true };
@@ -485,9 +635,9 @@ function order(b, name, msg) {
       return { ok: true };
     }
     case 'build': {
-      const engineers = units.filter((u) => u.type === 'engineer');
+      const engineers = units.filter(builds); // engineers and ACUs
       if (!engineers.length) return { ok: true, quiet: true };
-      if (!BUILDABLE.includes(msg.structure)) return fail('engineers build extractors, generators, turrets and factories');
+      if (!engineers.some((u) => CATALOG[u.type].builds.includes(msg.structure))) return fail('engineers build extractors, generators, turrets and factories');
       if (!num(msg.x) || !num(msg.z)) return { ok: true, quiet: true };
       const r = CATALOG[msg.structure].radius;
       let [x, z] = [clamp(msg.x, r, SIZE - r), clamp(msg.z, r, SIZE - r)];
@@ -512,8 +662,8 @@ function order(b, name, msg) {
 
 // battle_possess: the pilot takes direct control of one of their own landed units (one at a time).
 function possess(b, name, unitId) {
-  const p = b.pilots.get(name);
-  if (!p?.present) return fail('not in that battle');
+  const p = commander(b, name);
+  if (p.ok === false) return p;
   const u = b.units.get(Number(unitId));
   if (!u || u.owner !== name) return { ok: true, quiet: true };
   if (!mobile(u)) return fail('you can only drive land and air units');
@@ -617,7 +767,16 @@ function acquire(b, u, extra = 0) {
 // hit it, as units do.
 function hurt(b, t, damage, from = null) {
   if (t.hp <= 0) return;
+  const dome = CATALOG[t.type].shield ? null : shieldOver(b, t);
+  if (dome) {
+    // The dome takes it first; what's left gets through.
+    const soak = Math.min(dome.shieldHp, damage);
+    dome.shieldHp -= soak;
+    damage -= soak;
+    if (damage <= 0) return;
+  }
   t.hp -= damage;
+  if (from) t.lastHit = from;
   const by = from && b.units.get(from);
   if (by && mobile(t) && !t.orders.length && !t.driven && CATALOG[t.type].damage && canHit(t, by)) t.orders = [{ order: 'attack', target: by.id }];
 }
@@ -703,32 +862,56 @@ function build(b, u, o, dt) {
 function repair(b, u, dt) {
   let best = null;
   near(b, u.x, u.z, CATALOG.engineer.range + RADIUS_MAX, (t) => {
-    if (t === u || t.side !== u.side || t.hp >= CATALOG[t.type].hp || (isStructure(t) && !t.built)) return;
+    if (t === u || t.side !== u.side || t.hp >= (t.maxHp || CATALOG[t.type].hp) || (isStructure(t) && !t.built)) return;
     if (reach(u, t) <= CATALOG.engineer.range && (!best || t.id < best.id)) best = t;
   });
   if (!best) return;
-  best.hp = Math.min(CATALOG[best.type].hp, best.hp + REPAIR_RATE * dt);
+  best.hp = Math.min(best.maxHp || CATALOG[best.type].hp, best.hp + REPAIR_RATE * dt);
   u.state = 'build';
 }
 
 // A factory puts mass into the first thing in its queue and rolls it out when paid for.
+// A structure's upgrade to its next tier, paid in full at FACTORY_RATE; true once it's done or
+// while there's none (an extractor or generator works on at its old tier meanwhile).
+function upgradeStep(b, f, dt) {
+  const pay = purse(b, f.owner);
+  if (!f.upgrade || !pay) return !f.upgrade;
+  const up = CATALOG[f.type].upgrade[f.upgrade.to];
+  const share = Math.max(0, Math.min((FACTORY_RATE * dt) / up.cost, 1 - f.upgrade.done, affordable(pay, up.cost, up.energy)));
+  charge(pay, share * up.cost, share * up.energy);
+  f.upgrade.done += share;
+  if (f.upgrade.done >= 1 - 1e-6) {
+    f.tier = f.upgrade.to;
+    delete f.upgrade;
+    b.feed.push(`${f.owner || 'The defenders'}'s ${CATALOG[f.type].name} reached tier ${f.tier}`);
+  }
+  return false;
+}
+
+// A shield dome charges up while its owner has energy, and soaks the damage done to what's under it.
+function shieldStep(b, u, dt) {
+  const sh = CATALOG[u.type].shield;
+  const p = u.owner && b.pilots.get(u.owner);
+  if (p && p.energy <= 0) return;
+  u.shieldHp = Math.min(sh.hp, (u.shieldHp || 0) + sh.regen * dt);
+}
+
+// The friendly shield dome up over `t`, if any.
+function shieldOver(b, t) {
+  for (const s of b.units.values()) {
+    const sh = CATALOG[s.type].shield;
+    if (!sh || !s.built || s.side !== t.side || s.shieldHp <= 0 || s.hp <= 0) continue;
+    if (Math.hypot(s.x - t.x, s.z - t.z) <= sh.radius) return s;
+  }
+  return null;
+}
+
 // It works at FACTORY_RATE of the full price (so the discount saves mass and energy, not time),
 // paying FACTORY_DISCOUNT of it. An upgrade comes first, paid in full.
 function factoryStep(b, f, dt) {
   const pay = purse(b, f.owner);
   if (!pay) return;
-  if (f.upgrade) {
-    const up = FACTORY_UPGRADE[f.upgrade.to];
-    const share = Math.max(0, Math.min((FACTORY_RATE * dt) / up.cost, 1 - f.upgrade.done, affordable(pay, up.cost, up.energy)));
-    charge(pay, share * up.cost, share * up.energy);
-    f.upgrade.done += share;
-    if (f.upgrade.done >= 1 - 1e-6) {
-      f.tier = f.upgrade.to;
-      delete f.upgrade;
-      b.feed.push(`${f.owner || 'The defenders'}'s factory reached tier ${f.tier}`);
-    }
-    return;
-  }
+  if (f.upgrade) return upgradeStep(b, f, dt);
   const job = f.queue[0];
   if (!job) return;
   const c = CATALOG[job.unit];
@@ -856,15 +1039,60 @@ function separate(b) {
 }
 
 // Removes the dead (reported once, in the next snapshot); the Command Node's fall decides the battle.
+// Removes the dead (reported once, in the next snapshot). An ACU goes up in a blast that can kill
+// more (buried in the same pass), and puts its commander out. The last Command Node's fall wins the
+// battle for the attackers; the last ACU's, for the defenders.
 function bury(b) {
-  for (const u of [...b.units.values()]) {
-    if (u.hp > 0) continue;
-    b.units.delete(u.id);
-    b.dead.push(u.id);
-    for (const p of b.pilots.values()) if (p.drive === u.id) p.drive = null;
-    if (isStructure(u)) b.feed.push(`${u.name || CATALOG[u.type].name}${u.owner ? ` (${u.owner})` : ''} was destroyed`);
-    if (u.id === b.nodeId && !b.result) [b.result, b.how] = ['a', 'node'];
+  for (let again = true; again; ) {
+    again = false;
+    for (const u of [...b.units.values()]) {
+      if (u.hp > 0) continue;
+      b.units.delete(u.id);
+      b.dead.push(u.id);
+      for (const p of b.pilots.values()) if (p.drive === u.id) p.drive = null;
+      if (isStructure(u)) b.feed.push(`${u.name || CATALOG[u.type].name}${u.owner ? ` (${u.owner})` : u.commander ? ` (${u.commander})` : ''} was destroyed`);
+      const killer = u.lastHit && b.units.get(u.lastHit);
+      if (killer && killer.hp > 0 && killer.vet !== undefined) veteran(b, killer, u);
+      if (CATALOG[u.type].acu) {
+        again = true;
+        acuDown(b, u);
+      }
+    }
   }
+  if (b.result) return;
+  if (b.nodes && !aliveNodes(b).length) [b.result, b.how] = ['a', 'node'];
+  const attackers = [...b.pilots.values()].filter((p) => p.side === 'a');
+  if (!b.result && attackers.length && attackers.every((p) => p.out)) [b.result, b.how] = ['d', 'acus'];
+}
+
+// A kill scores the victim's worth toward the killer's next veterancy star.
+function veteran(b, k, victim) {
+  const c = CATALOG[victim.type];
+  k.kills += c.acu ? 10 : victim.type === 'node' ? 5 : isStructure(victim) ? 1 : tierOf(victim.type);
+  while (k.vet < VET_STARS.length && k.kills >= VET_STARS[k.vet]) {
+    k.vet += 1;
+    k.maxHp *= 1.1;
+    k.hp = Math.min(k.maxHp, k.hp + k.maxHp * 0.25);
+  }
+}
+
+// An ACU falls: its blast hurts everything near (friend and foe, less further out) and its
+// commander is out of the battle; their units stand where they are.
+function acuDown(b, u) {
+  const blast = CATALOG[u.type].blast;
+  b.shots.push([u.id, r1(u.x), r1(u.z), r1(u.x), r1(u.z), 'blast']);
+  near(b, u.x, u.z, blast.radius + RADIUS_MAX, (t) => {
+    const d = Math.max(0, Math.hypot(t.x - u.x, t.z - u.z) - CATALOG[t.type].radius);
+    if (t !== u && t.hp > 0 && d <= blast.radius) t.hp -= blast.damage * (1 - (0.75 * d) / blast.radius);
+  });
+  const p = u.owner && b.pilots.get(u.owner);
+  if (p) {
+    p.out = true;
+    p.resign = false;
+    release(b, p.name);
+    for (const v of b.units.values()) if (v.owner === p.name && mobile(v)) [v.orders, v.target] = [[], null];
+  }
+  b.feed.push(`${u.owner || 'An'}${u.owner ? "'s" : ''} ACU was destroyed${p ? `: ${p.name} is out` : ''}`);
 }
 
 // Advances the battle by `dt` simulated seconds (STEP_S or less at a time).
@@ -875,10 +1103,19 @@ function step(b, dt) {
 
 function tick(b, dt) {
   b.t += dt;
-  const owned = extractorCounts(b);
-  for (const p of b.pilots.values()) p.mass = Math.min(MASS_CAP, p.mass + (CARRIER_INCOME + EXTRACTOR_INCOME * (owned.get(`${p.side}|${p.name}`) || 0)) * dt);
-  for (const p of b.pilots.values()) p.energy = Math.min(ENERGY_CAP, (p.energy ?? ENERGY_START) + energyIncome(b, p.name) * dt);
-  b.ai.mass = Math.min(AI_CAP, b.ai.mass + (AI_INCOME * b.ai.k + EXTRACTOR_INCOME * (owned.get('d|') || 0)) * dt);
+  // Pilots' economies: energy first (an extractor with no energy to run on stops: `stalled`), then mass.
+  const eco = economies(b);
+  for (const p of b.pilots.values()) {
+    const e = eco.get(`${p.side}|${p.name}`) || NO_ECONOMY;
+    const energyCap = ENERGY_CAP + e.energyCap;
+    const net = CARRIER_ENERGY + e.power - e.drain;
+    p.energy = (p.energy ?? ENERGY_START) + net * dt;
+    p.stalled = p.energy <= 0 && net < 0;
+    if (p.stalled) p.energy = 0;
+    p.energy = Math.min(energyCap, p.energy);
+    p.mass = Math.min(MASS_CAP + e.massCap, p.mass + (CARRIER_INCOME + (p.stalled ? 0 : e.mass)) * dt);
+  }
+  b.ai.mass = Math.min(AI_CAP, b.ai.mass + income(b, '') * dt);
   for (const u of b.units.values()) if (u.dropAt && b.t >= u.dropAt) [u.dropAt, u.state] = [0, 'idle'];
   if (b.t >= b.aiAt) {
     b.aiAt += AI_S;
@@ -891,13 +1128,18 @@ function tick(b, dt) {
     if (isStructure(u)) {
       u.state = u.built ? 'idle' : 'build';
       if (!u.built) continue;
-      if (u.type === 'factory') factoryStep(b, u, dt);
+      if (u.upgrade && !makes(u)) upgradeStep(b, u, dt);
+      if (makes(u)) factoryStep(b, u, dt);
+      else if (CATALOG[u.type].shield) shieldStep(b, u, dt);
       else if (CATALOG[u.type].damage) {
         const t = acquire(b, u);
         if (t) fire(b, u, t.x, t.z, t);
       }
-    } else if (u.driven) driveStep(b, u, dt);
-    else unitStep(b, u, dt);
+    } else {
+      if (u.vet) u.hp = Math.min(u.maxHp, u.hp + VET_REGEN * u.vet * dt);
+      if (u.driven) driveStep(b, u, dt);
+      else unitStep(b, u, dt);
+    }
   }
   buildGrid(b);
   for (const s of b.shells.filter((s) => b.t >= s.at)) land(b, s);
@@ -934,7 +1176,7 @@ function think(b) {
   const mine = [...b.units.values()].filter((u) => u.side === 'd' && u.owner === '' && mobile(u));
   const engineers = mine.filter((u) => u.type === 'engineer');
   const army = mine.filter((u) => u.type !== 'engineer');
-  const node = b.units.get(b.nodeId) || b.node;
+  const node = aiNode(b);
 
   // Engineers: one more if there's room, and idle ones off to the nearest free mass point.
   if (engineers.length < AI_ENGINEERS && ai.mass >= CATALOG.engineer.cost && mine.length < AI_UNITS) {
@@ -1032,7 +1274,7 @@ function frame(b) {
   const units = [];
   const build = [];
   for (const u of b.units.values()) {
-    units.push([u.id, u.type, u.side, u.owner, r1(u.x), r1(u.z), r1(Math.max(0, u.hp)), r1(u.heading), u.state]);
+    units.push([u.id, u.type, u.side, u.owner, r1(u.x), r1(u.z), r1(Math.max(0, u.hp)), r1(u.heading), u.state, u.vet || 0, u.shieldHp !== undefined ? Math.round(u.shieldHp) : null, u.tier || 1]);
     if (isStructure(u) && !u.built) build.push([u.id, Math.round(u.progress * 100) / 100]);
   }
   const out = {
@@ -1042,7 +1284,7 @@ function frame(b) {
     dead: b.dead,
     shots: b.shots,
     build,
-    pilots: present(b).map((p) => ({ name: p.name, side: p.side })),
+    pilots: present(b).map((p) => ({ name: p.name, side: p.side, out: !!p.out, resign: !!p.resign })),
     endsAt: b.endsAt,
     feed: b.feed,
   };
@@ -1057,8 +1299,9 @@ function stateFor(b, f, name) {
   const p = b.pilots.get(name);
   const factories = [];
   for (const u of b.units.values())
-    if (u.type === 'factory' && u.owner === name && u.built) factories.push([u.id, u.tier || 1, u.upgrade ? [u.upgrade.to, Math.round(u.upgrade.done * 100) / 100] : null, u.queue.reduce((a, j) => a + j.left, 0)]);
-  return { type: 'battle_state', ...f, mass: r1(p?.mass ?? 0), income: r1(income(b, name)), energy: r1(p?.energy ?? 0), energyIncome: r1(energyIncome(b, name)), factories };
+    if (upgradable(u) && u.owner === name && u.built) factories.push([u.id, u.tier || 1, u.upgrade ? [u.upgrade.to, Math.round(u.upgrade.done * 100) / 100] : null, (u.queue || []).reduce((a, j) => a + j.left, 0)]);
+  const e = (p && economies(b).get(`${p.side}|${name}`)) || NO_ECONOMY;
+  return { type: 'battle_state', ...f, mass: r1(p?.mass ?? 0), income: r1(income(b, name)), energy: r1(p?.energy ?? 0), energyIncome: r1(energyIncome(b, name)), massCap: MASS_CAP + e.massCap, energyCap: ENERGY_CAP + e.energyCap, stalled: !!p?.stalled, factories };
 }
 
 // battle_joined, for a pilot on `side`.
@@ -1091,6 +1334,9 @@ function joined(b, name) {
 }
 
 // --- The server's battles -------------------------------------------------------------------
+
+// How a battle was decided, for the end banner.
+const HOW = { acus: 'every attacking ACU was destroyed', resign: 'a side resigned', abandoned: 'the attackers abandoned it', time: 'the clock ran out', node: 'every Command Node fell' };
 
 function sideName(f) {
   return f ? F.the(f) : 'the militia';
@@ -1211,6 +1457,8 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
         return produce(b, me.name, msg.factory, msg.unit, msg.count ?? 1);
       case 'battle_upgrade':
         return upgradeFactory(b, me.name, msg.factory);
+      case 'battle_resign':
+        return resign(b, me.name, msg.yes !== false);
       case 'battle_possess':
         return possess(b, me.name, msg.unit);
       case 'battle_release':
@@ -1231,7 +1479,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
       const vsAi = ![...b.pilots.values()].some((p) => p.side === loser);
       const pts = winner && onCampaignEnd ? onCampaignEnd(b, winner, vsAi) : 0;
       text = winner
-        ? `${F.FACTIONS[winner].name} won the match${b.how === 'abandoned' ? ' (the attackers abandoned it)' : ''}: +${pts} campaign points on ${b.planetName}`
+        ? `${F.FACTIONS[winner].name} won the match${HOW[b.how] ? ` (${HOW[b.how]})` : ''}: +${pts} campaign points on ${b.planetName}`
         : `The militia held: no campaign points`;
       W.warLog(g, `${winner ? F.FACTIONS[winner].name : 'The militia'} won a Sector Battle on ${b.planetName}${pts ? ` (+${pts})` : ''}`, now());
     } else if (b.result === 'a') {
@@ -1244,7 +1492,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
       text =
         b.how === 'abandoned'
           ? `Attack failed: the attackers abandoned ${b.sectorName}`
-          : `Attack failed: ${sideName(b.defender)} held ${b.sectorName}`;
+          : `Attack failed: ${sideName(b.defender)} held ${b.sectorName}${HOW[b.how] ? ` (${HOW[b.how]})` : ''}`;
       W.warLog(g, `${F.FACTIONS[b.attacker].name}'s attack on ${b.sectorName} failed`, now());
     }
     const winner = b.result === 'a' ? b.attacker : b.defender;
@@ -1365,6 +1613,10 @@ module.exports = {
   GENERATOR_POWER,
   FACTORY_DISCOUNT,
   FACTORY_UPGRADE,
+  EXTRACTOR_MASS,
+  GENERATOR_POWER_T,
+  EXTRACTOR_DRAIN,
+  VET_STARS,
   DROPPABLE,
   UNIT_CAP,
   BUILD_RATE,
@@ -1383,6 +1635,10 @@ module.exports = {
   removePilot,
   income,
   energyIncome,
+  resign,
+  aliveNodes,
+  dropUnits,
+  RESIGN_SHARE,
   drop,
   produce,
   upgradeFactory,
