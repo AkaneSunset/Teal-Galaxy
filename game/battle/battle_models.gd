@@ -71,10 +71,18 @@ static func material() -> ShaderMaterial:
 	return _material
 
 
+## How much bigger a unit of a higher tier is drawn: "tank_t3" is a Tank Mk III.
+static func tier_scale(type: String) -> float:
+	return pow(1.25, int(type.get_slice("_t", 1)) - 1) if type.contains("_t") else 1.0
+
+
 ## {"body": Mesh, "top": Mesh or null, "top_at": Vector3, "muzzle": metres from the top's pivot}
 ## for a unit type (or "pod", a drop pod).
 static func model(type: String) -> Dictionary:
 	if _cache.has(type):
+		return _cache[type]
+	if type.contains("_t"): # a higher tier ("tank_t2") looks like its base, drawn bigger (tier_scale)
+		_cache[type] = model(type.get_slice("_t", 0))
 		return _cache[type]
 	var body := SurfaceTool.new()
 	body.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -180,6 +188,15 @@ static func model(type: String) -> Dictionary:
 			_cyl(body, 1.6, 1.4, Vector3(0, 8.3, 0), MASS, GLOW, 8)
 			_cyl(body, 2.4, 0.5, Vector3(0, 9.2, 0), DARK, PLAIN, 8)
 			_cyl(body, 3.0, 0.15, Vector3(0, 1.65, 0), MASS, GLOW, 16)
+		"generator":
+			_cyl(body, 5.6, 1.0, Vector3(0, 0.5, 0), DARK, PLAIN, 8)
+			_cone(body, 4.2, 3.0, 5.5, Vector3(0, 3.7, 0), GREY, PAINT, 12)
+			_cyl(body, 3.1, 0.5, Vector3(0, 6.7, 0), DARK, PLAIN, 12)
+			_cyl(body, 2.2, 1.6, Vector3(0, 7.5, 0), AMBER, GLOW, 12)
+			for k in 3:
+				var a := k * TAU / 3.0
+				_box(body, Vector3(1.2, 2.4, 1.2), Vector3(cos(a) * 4.6, 1.6, sin(a) * 4.6), LIGHT, PAINT, Vector3(0, -a, 0))
+			_cyl(body, 4.5, 0.2, Vector3(0, 2.2, 0), AMBER, GLOW, 16)
 		"turret":
 			_cyl(body, 5.0, 2.6, Vector3(0, 1.3, 0), DARK, PLAIN, 8)
 			_cyl(body, 4.4, 0.6, Vector3(0, 2.8, 0), GREY, PAINT, 8)

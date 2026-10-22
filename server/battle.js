@@ -1,6 +1,6 @@
 // Sector battles: real-time battles over one sector of a contested planet, in the spirit of
 // Supreme Commander. Pilots command units from their carrier in orbit (or drive one themselves),
-// with mass as the one resource; the defending side is played by an AI (plus any of the
+// with mass and energy as resources; the defending side is played by an AI (plus any of the
 // defender's pilots who join). Simulated here on the server in 2D: x and z on the ground in
 // metres, over a square map SIZE across with (0, 0) at a corner. Clients draw the terrain from
 // `seed`; the server ignores height.
@@ -33,6 +33,21 @@ const DROP_S = 6; // drop pods land this long after they're bought
 const LZ_R = 120; // landing zones' radius
 const MASS_START = 400;
 const MASS_CAP = 5000;
+// Energy: everything costs mass and energy. A pilot's carrier gives a little, Power Generators the
+// rest. The defender AI's economy stays mass only.
+const ENERGY_START = 4000;
+const ENERGY_CAP = 25000;
+const CARRIER_ENERGY = 10; // energy a second from each pilot's carrier...
+const GENERATOR_POWER = 20; // ...and from each Power Generator they own
+// Units a factory makes on the planet cost this much of their price; drop pods from the carrier
+// cost it all, and bring tier 1 units only.
+const FACTORY_DISCOUNT = 0.5;
+// Factories upgrade to tier 2 and 3 (paid like production, the factory idle meanwhile); each tier
+// makes the higher-tier units: bigger, faster and stronger, and dearer.
+const FACTORY_TIERS = 3;
+const FACTORY_UPGRADE = { 2: { cost: 400, energy: 2500 }, 3: { cost: 900, energy: 6000 } };
+const TIERED = ['striker', 'tank', 'artillery', 'aa'];
+const TIER_SCALE = { hp: 1.8, damage: 1.6, speed: 1.15, range: 1.1, radius: 1.25, cost: 2.2, energy: 2.5 }; // per tier above 1
 const CARRIER_INCOME = 2; // mass a second from each pilot's carrier...
 const EXTRACTOR_INCOME = 3; // ...and from each extractor they own
 const BUILD_RATE = 15; // mass a second an engineer puts into what it builds
@@ -66,25 +81,50 @@ const AI_HOME = 400; // a wave with nothing left to fight further than this from
 const AI_MIX = ['striker', 'tank', 'striker', 'aa', 'tank', 'artillery', 'striker', 'tank'];
 const MILITIA_K = 0.6; // an unclaimed sector's militia earns this much of a faction's AI
 const CELL = 40; // metres per cell of the grid used to find what's near
+const CAMPAIGN_SIDE = 8; // commanders a side in a campaign match
+const CAMPAIGN_BONUS = { mining: { mass: 1.15 } }; // planet bonuses that touch sector battles (campaign.js BONUSES)
 
 // Every unit and structure. `hits`: what it can shoot (land, air, structure). Both sides use one
 // roster; it goes to the clients in battle_joined.
 const LAND = ['land', 'structure'];
 const CATALOG = {
-  engineer: { name: 'Engineer', kind: 'land', hp: 150, speed: 9, damage: 0, reload: 0, range: 12, cost: 50, radius: 3, vision: 80, hits: [], builds: ['extractor', 'turret', 'factory'] },
-  scout: { name: 'Scout', kind: 'land', hp: 90, speed: 22, damage: 5, reload: 1, range: 30, cost: 25, radius: 3, vision: 160, hits: LAND },
-  striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, radius: 3, vision: 80, hits: LAND },
-  tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, radius: 4, vision: 80, hits: LAND },
-  artillery: { name: 'Artillery', kind: 'land', hp: 220, speed: 7, damage: 120, reload: 4, range: 160, cost: 170, radius: 3, vision: 80, hits: LAND, minRange: 30, splash: 14, shell: 160 },
-  aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, radius: 3, vision: 100, hits: ['air'] },
-  gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, radius: 3, vision: 100, hits: ['land', 'structure', 'air'] },
-  extractor: { name: 'Mass Extractor', kind: 'structure', hp: 600, damage: 0, cost: 60, radius: 8, hits: [], income: EXTRACTOR_INCOME },
-  turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, radius: 8, hits: ['land', 'air'] },
-  factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa'] },
-  outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, radius: 12, hits: [] },
-  node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, radius: 14, hits: ['land', 'air'] },
+  engineer: { name: 'Engineer', kind: 'land', hp: 150, speed: 9, damage: 0, reload: 0, range: 12, cost: 50, energy: 250, radius: 3, vision: 80, hits: [], builds: ['extractor', 'generator', 'turret', 'factory'] },
+  scout: { name: 'Scout', kind: 'land', hp: 90, speed: 22, damage: 5, reload: 1, range: 30, cost: 25, energy: 100, radius: 3, vision: 160, hits: LAND },
+  striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, energy: 275, radius: 3, vision: 80, hits: LAND },
+  tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, energy: 650, radius: 4, vision: 80, hits: LAND },
+  artillery: { name: 'Artillery', kind: 'land', hp: 220, speed: 7, damage: 120, reload: 4, range: 160, cost: 170, energy: 850, radius: 3, vision: 80, hits: LAND, minRange: 30, splash: 14, shell: 160 },
+  aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, energy: 450, radius: 3, vision: 100, hits: ['air'] },
+  gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, energy: 1400, radius: 3, vision: 100, hits: ['land', 'structure', 'air'] },
+  extractor: { name: 'Mass Extractor', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 200, radius: 8, hits: [], income: EXTRACTOR_INCOME },
+  generator: { name: 'Power Generator', kind: 'structure', hp: 500, damage: 0, cost: 45, energy: 0, radius: 7, hits: [], power: GENERATOR_POWER },
+  turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'] },
+  factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
+  outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, energy: 0, radius: 12, hits: [] },
+  node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'] },
 };
-const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure');
+// The higher tiers of the combat units ("tank_t2" is a Tank Mk II), made by upgraded factories.
+for (const base of TIERED)
+  for (let t = 2; t <= FACTORY_TIERS; t++) {
+    const c = CATALOG[base];
+    const k = (f) => TIER_SCALE[f] ** (t - 1);
+    CATALOG[`${base}_t${t}`] = {
+      ...c,
+      name: `${c.name} Mk ${'I'.repeat(t)}`,
+      base,
+      tier: t,
+      hp: Math.round(c.hp * k('hp')),
+      damage: Math.round(c.damage * k('damage')),
+      speed: Math.round(c.speed * k('speed') * 10) / 10,
+      range: Math.round(c.range * k('range')),
+      radius: Math.round(c.radius * k('radius') * 10) / 10,
+      vision: Math.round(c.vision * k('range')),
+      cost: Math.round(c.cost * k('cost')),
+      energy: Math.round(c.energy * k('energy')),
+    };
+    CATALOG.factory.produces.push(`${base}_t${t}`);
+  }
+const tierOf = (type) => CATALOG[type]?.tier || 1;
+const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure' && tierOf(id) === 1);
 const BUILDABLE = CATALOG.engineer.builds;
 const RADIUS_MAX = Math.max(...Object.values(CATALOG).map((c) => c.radius));
 
@@ -220,7 +260,7 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
     u.progress = built ? 1 : 0;
     u.paid = built ? c.cost : 0;
     if (!built) u.hp = c.hp * 0.1;
-    if (type === 'factory') u.queue = [];
+    if (type === 'factory') [u.queue, u.tier] = [[], 1];
   }
   if (dropAt) u.state = 'drop';
   b.units.set(u.id, u);
@@ -231,7 +271,7 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
 
 function addPilot(b, name, side, faction) {
   let p = b.pilots.get(name);
-  if (!p) b.pilots.set(name, (p = { name, side, faction, mass: MASS_START, drive: null }));
+  if (!p) b.pilots.set(name, (p = { name, side, faction, mass: MASS_START, energy: ENERGY_START, drive: null }));
   p.side = side;
   p.present = true;
   return p;
@@ -272,6 +312,31 @@ function income(b, owner) {
   const p = b.pilots.get(owner);
   return p ? CARRIER_INCOME + EXTRACTOR_INCOME * extractors(b, owner, p.side) : 0;
 }
+
+// Energy a second for a pilot (the AI has none: it pays mass only).
+function energyIncome(b, owner) {
+  const p = owner && b.pilots.get(owner);
+  if (!p) return 0;
+  let gens = 0;
+  for (const u of b.units.values()) if (u.type === 'generator' && u.built && u.owner === owner && u.side === p.side) gens++;
+  return CARRIER_ENERGY + GENERATOR_POWER * gens;
+}
+
+// How much of something costing `mass` and `energy` a purse can pay for now, as a share of it
+// (the AI's purse has no energy: it never runs short of it).
+function affordable(pay, mass, energy) {
+  if (!pay) return 0;
+  let share = mass > 0 ? pay.mass / mass : Infinity;
+  if (energy > 0 && pay.energy !== undefined) share = Math.min(share, pay.energy / energy);
+  return Math.max(0, share);
+}
+
+function charge(pay, mass, energy) {
+  pay.mass -= mass;
+  if (pay.energy !== undefined) pay.energy -= energy;
+}
+
+const priceText = (mass, energy) => `${Math.round(mass)} mass${energy ? ` and ${Math.round(energy)} energy` : ''}`;
 
 // A pilot's units in the field or on the way down (structures don't count).
 function unitCount(b, owner, side) {
@@ -314,14 +379,16 @@ function dropUnits(b, side, owner, type, count) {
 function drop(b, name, type, count) {
   const p = b.pilots.get(name);
   if (!p?.present) return fail('not in that battle');
+  if (CATALOG[type] && CATALOG[type].kind !== 'structure' && tierOf(type) > 1) return fail('your carrier drops tier 1 units only: build a factory and upgrade it for higher tiers');
   if (!DROPPABLE.includes(type)) return fail('no such unit');
   const n = Math.floor(Number(count));
   if (!(n >= 1 && n <= COUNT_MAX)) return fail(`drop 1 to ${COUNT_MAX} at a time`);
   const cost = CATALOG[type].cost * n;
-  if (p.mass + 1e-9 < cost) return fail(`not enough mass: ${n} ${CATALOG[type].name}${n === 1 ? '' : 's'} cost ${cost}`);
+  const energy = CATALOG[type].energy * n;
+  if (p.mass + 1e-9 < cost || p.energy + 1e-9 < energy) return fail(`not enough ${p.mass + 1e-9 < cost ? 'mass' : 'energy'}: ${n} ${CATALOG[type].name}${n === 1 ? '' : 's'} cost ${priceText(cost, energy)}`);
   if (unitCount(b, name, p.side) + n > UNIT_CAP) return fail(`you can field ${UNIT_CAP} units`);
   if (sideCount(b, p.side) + n > SIDE_CAP) return fail(`your side has ${SIDE_CAP} units in the field`);
-  p.mass -= cost;
+  charge(p, cost, energy);
   return { ok: true, units: dropUnits(b, p.side, name, type, n).map((u) => u.id) };
 }
 
@@ -333,10 +400,25 @@ function produce(b, name, factoryId, type, count) {
   if (!f || f.type !== 'factory' || f.owner !== name) return { ok: true, quiet: true };
   if (!f.built) return fail('that factory is still being built');
   if (!CATALOG.factory.produces.includes(type)) return fail('a factory makes land units only');
+  if (tierOf(type) > (f.tier || 1)) return fail(`a tier ${f.tier || 1} factory can't make the ${CATALOG[type].name}: upgrade it to tier ${tierOf(type)}`);
   const n = Math.floor(Number(count));
   if (!(n >= 1 && n <= COUNT_MAX)) return fail(`make 1 to ${COUNT_MAX} at a time`);
   if (f.queue.length >= JOBS_MAX) return fail(`a factory queues ${JOBS_MAX} orders`);
-  f.queue.push({ unit: type, left: n, paid: 0 });
+  f.queue.push({ unit: type, left: n, done: 0 });
+  return { ok: true };
+}
+
+// battle_upgrade: a pilot's finished factory upgrades to its next tier, paid as it goes (it makes
+// nothing meanwhile, and picks its queue up again after).
+function upgradeFactory(b, name, factoryId) {
+  const p = b.pilots.get(name);
+  if (!p?.present) return fail('not in that battle');
+  const f = b.units.get(Number(factoryId));
+  if (!f || f.type !== 'factory' || f.owner !== name) return { ok: true, quiet: true };
+  if (!f.built) return fail('that factory is still being built');
+  if (f.upgrade) return fail('that factory is already upgrading');
+  if ((f.tier || 1) >= FACTORY_TIERS) return fail(`that factory is at tier ${FACTORY_TIERS}, the top`);
+  f.upgrade = { to: (f.tier || 1) + 1, done: 0 };
   return { ok: true };
 }
 
@@ -405,7 +487,7 @@ function order(b, name, msg) {
     case 'build': {
       const engineers = units.filter((u) => u.type === 'engineer');
       if (!engineers.length) return { ok: true, quiet: true };
-      if (!BUILDABLE.includes(msg.structure)) return fail('engineers build extractors, turrets and factories');
+      if (!BUILDABLE.includes(msg.structure)) return fail('engineers build extractors, generators, turrets and factories');
       if (!num(msg.x) || !num(msg.z)) return { ok: true, quiet: true };
       const r = CATALOG[msg.structure].radius;
       let [x, z] = [clamp(msg.x, r, SIZE - r), clamp(msg.z, r, SIZE - r)];
@@ -602,8 +684,8 @@ function build(b, u, o, dt) {
   u.heading = Math.atan2(site.x - u.x, site.z - u.z);
   u.state = 'build';
   const pay = purse(b, site.owner) || purse(b, u.owner);
-  const amount = Math.max(0, Math.min(BUILD_RATE * dt, c.cost - site.paid, pay?.mass ?? 0));
-  if (pay) pay.mass -= amount;
+  const amount = Math.max(0, Math.min(BUILD_RATE * dt, c.cost - site.paid, affordable(pay, 1, c.energy / c.cost)));
+  if (pay) charge(pay, amount, (amount * c.energy) / c.cost);
   site.paid += amount;
   site.hp = Math.min(c.hp, site.hp + (c.hp * 0.9 * amount) / c.cost);
   site.progress = Math.min(1, site.paid / c.cost);
@@ -630,22 +712,37 @@ function repair(b, u, dt) {
 }
 
 // A factory puts mass into the first thing in its queue and rolls it out when paid for.
+// It works at FACTORY_RATE of the full price (so the discount saves mass and energy, not time),
+// paying FACTORY_DISCOUNT of it. An upgrade comes first, paid in full.
 function factoryStep(b, f, dt) {
+  const pay = purse(b, f.owner);
+  if (!pay) return;
+  if (f.upgrade) {
+    const up = FACTORY_UPGRADE[f.upgrade.to];
+    const share = Math.max(0, Math.min((FACTORY_RATE * dt) / up.cost, 1 - f.upgrade.done, affordable(pay, up.cost, up.energy)));
+    charge(pay, share * up.cost, share * up.energy);
+    f.upgrade.done += share;
+    if (f.upgrade.done >= 1 - 1e-6) {
+      f.tier = f.upgrade.to;
+      delete f.upgrade;
+      b.feed.push(`${f.owner || 'The defenders'}'s factory reached tier ${f.tier}`);
+    }
+    return;
+  }
   const job = f.queue[0];
   if (!job) return;
   const c = CATALOG[job.unit];
-  const pay = purse(b, f.owner);
-  if (!pay) return;
-  if (job.paid < c.cost) {
-    const amount = Math.max(0, Math.min(FACTORY_RATE * dt, c.cost - job.paid, pay.mass));
-    pay.mass -= amount;
-    job.paid += amount;
+  const [mass, energy] = [c.cost * FACTORY_DISCOUNT, c.energy * FACTORY_DISCOUNT];
+  if (job.done < 1) {
+    const share = Math.max(0, Math.min((FACTORY_RATE * dt) / c.cost, 1 - job.done, affordable(pay, mass, energy)));
+    charge(pay, share * mass, share * energy);
+    job.done += share;
   }
-  if (job.paid < c.cost - 1e-6 || (f.owner && unitCount(b, f.owner, f.side) >= UNIT_CAP) || sideCount(b, f.side) >= SIDE_CAP) return;
+  if (job.done < 1 - 1e-6 || (f.owner && unitCount(b, f.owner, f.side) >= UNIT_CAP) || sideCount(b, f.side) >= SIDE_CAP) return;
   const out = f.side === 'a' ? 1 : -1;
   const n = b.dropCount[f.side]++ % 8;
   spawn(b, job.unit, f.side, f.owner, f.x + (n - 3.5) * 5, f.z + out * (CATALOG.factory.radius + 6));
-  job.paid = 0;
+  job.done = 0;
   if (--job.left <= 0) f.queue.shift();
 }
 
@@ -780,6 +877,7 @@ function tick(b, dt) {
   b.t += dt;
   const owned = extractorCounts(b);
   for (const p of b.pilots.values()) p.mass = Math.min(MASS_CAP, p.mass + (CARRIER_INCOME + EXTRACTOR_INCOME * (owned.get(`${p.side}|${p.name}`) || 0)) * dt);
+  for (const p of b.pilots.values()) p.energy = Math.min(ENERGY_CAP, (p.energy ?? ENERGY_START) + energyIncome(b, p.name) * dt);
   b.ai.mass = Math.min(AI_CAP, b.ai.mass + (AI_INCOME * b.ai.k + EXTRACTOR_INCOME * (owned.get('d|') || 0)) * dt);
   for (const u of b.units.values()) if (u.dropAt && b.t >= u.dropAt) [u.dropAt, u.state] = [0, 'idle'];
   if (b.t >= b.aiAt) {
@@ -957,7 +1055,10 @@ function frame(b) {
 // One pilot's battle_state from a frame: theirs is the mass (and income).
 function stateFor(b, f, name) {
   const p = b.pilots.get(name);
-  return { type: 'battle_state', ...f, mass: r1(p?.mass ?? 0), income: r1(income(b, name)) };
+  const factories = [];
+  for (const u of b.units.values())
+    if (u.type === 'factory' && u.owner === name && u.built) factories.push([u.id, u.tier || 1, u.upgrade ? [u.upgrade.to, Math.round(u.upgrade.done * 100) / 100] : null, u.queue.reduce((a, j) => a + j.left, 0)]);
+  return { type: 'battle_state', ...f, mass: r1(p?.mass ?? 0), income: r1(income(b, name)), energy: r1(p?.energy ?? 0), energyIncome: r1(energyIncome(b, name)), factories };
 }
 
 // battle_joined, for a pilot on `side`.
@@ -981,8 +1082,10 @@ function joined(b, name) {
     enemyLz: p.side === 'a' ? b.enemyLz : b.lz,
     massPoints: b.massPoints,
     units: CATALOG,
+    economy: { energyCap: ENERGY_CAP, massCap: MASS_CAP, factoryDiscount: FACTORY_DISCOUNT, droppable: DROPPABLE },
     endsAt: b.endsAt,
     mass: r1(p.mass),
+    energy: r1(p.energy ?? 0),
     names,
   };
 }
@@ -996,7 +1099,10 @@ function sideName(f) {
 // The battles a server runs. `galaxy()` is its galaxy; `send(me, msg)` sends one connection a
 // message; `changed()` is called when the galaxy changed (a sector taken, the war log, who
 // fights where); `speed` is BATTLE_SPEED. A pilot's connection record (`me`) notes their battle.
-function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
+// Campaign matches (`b.campaign`, started by matchmaking in campaign.js) are fought on a notional
+// sector: the winner scores campaign points through `onCampaignEnd(b, winner, vsAi)` instead of
+// taking the sector, and the war rules (locks, shares) don't call them off.
+function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCampaignEnd = null }) {
   const battles = new Map(); // id -> battle
   const conns = new Map(); // battle id -> Map(name -> connection)
   let nextId = 1;
@@ -1046,7 +1152,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     if (!b || b.result) return fail('no such battle');
     const side = faction && faction === b.attacker ? 'a' : faction && faction === b.defender ? 'd' : null;
     if (!side) return fail(`a battle between ${sideName(b.attacker)} and ${sideName(b.defender)} is already on there`);
-    if (side === 'a') {
+    if (side === 'a' && !b.campaign) {
       const can = W.canAttack(galaxy(), faction, b.planet, now());
       if (!can.ok) return can;
     }
@@ -1103,6 +1209,8 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
         return drop(b, me.name, msg.unit, msg.count ?? 1);
       case 'battle_produce':
         return produce(b, me.name, msg.factory, msg.unit, msg.count ?? 1);
+      case 'battle_upgrade':
+        return upgradeFactory(b, me.name, msg.factory);
       case 'battle_possess':
         return possess(b, me.name, msg.unit);
       case 'battle_release':
@@ -1112,12 +1220,21 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     }
   }
 
-  // The battle is decided: the sector changes hands if the attackers won, everyone hears, and the
-  // battle is forgotten END_KEEP_MS later.
+  // The battle is decided: the sector changes hands if the attackers won (a campaign match scores
+  // for its winner instead), everyone hears, and the battle is forgotten END_KEEP_MS later.
   function finish(b) {
     const g = galaxy();
     let text;
-    if (b.result === 'a') {
+    if (b.campaign) {
+      const winner = b.result === 'a' ? b.attacker : b.defender;
+      const loser = b.result === 'a' ? 'd' : 'a';
+      const vsAi = ![...b.pilots.values()].some((p) => p.side === loser);
+      const pts = winner && onCampaignEnd ? onCampaignEnd(b, winner, vsAi) : 0;
+      text = winner
+        ? `${F.FACTIONS[winner].name} won the match${b.how === 'abandoned' ? ' (the attackers abandoned it)' : ''}: +${pts} campaign points on ${b.planetName}`
+        : `The militia held: no campaign points`;
+      W.warLog(g, `${winner ? F.FACTIONS[winner].name : 'The militia'} won a Sector Battle on ${b.planetName}${pts ? ` (+${pts})` : ''}`, now());
+    } else if (b.result === 'a') {
       const r = W.capture(g, b.planet, b.sector, b.attacker, now());
       text = r.ok ? `Sector taken: ${b.sectorName} falls to ${F.the(b.attacker)}` : `The Command Node fell, but ${b.sectorName} can't be taken: ${r.reason}`;
     } else if (b.how === 'void') {
@@ -1162,7 +1279,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
       if (b.result) continue;
       // The planet locked (another sector's battle took it) or the attackers lost their share:
       // this attack can't take anything any more.
-      const can = recheck ? W.canAttack(galaxy(), b.attacker, b.planet, now()) : { ok: true };
+      const can = recheck && !b.campaign ? W.canAttack(galaxy(), b.attacker, b.planet, now()) : { ok: true };
       if (!can.ok) {
         end(b, 'void', can.reason);
         continue;
@@ -1183,7 +1300,42 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
   function list() {
     return [...battles.values()]
       .filter((b) => !b.result)
-      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt }));
+      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt, campaign: b.campaign || undefined }));
+  }
+
+  // --- Campaign matches (campaign.js) ---
+
+  // A new match on planet `wp` between `attacker` and `defender` (null: the militia), on one of its
+  // sectors' maps in turn. Matchmaking puts the pilots in.
+  function startCampaign(wp, attacker, defender) {
+    const n = nextId++;
+    const sector = wp.sectors[n % wp.sectors.length];
+    const b = newBattle({ id: `b${n}`, wp, sector, attacker, defender, k: aiRate(galaxy(), attacker, defender), now: now(), speed });
+    b.campaign = true;
+    b.sectorName = `${wp.name} match ${n}`;
+    battles.set(b.id, b);
+    conns.set(b.id, new Map());
+    return b;
+  }
+
+  // A pilot into a campaign match on `side`. The planet's holder starts with the planet's bonus
+  // (a mining world's extra mass).
+  function enlistCampaign(me, b, side, faction) {
+    const first = !b.pilots.has(me.name);
+    const r = enlist(me, b, side, faction);
+    const c = galaxy().war.campaigns?.[b.planet];
+    const bonus = c && CAMPAIGN_BONUS[c.bonus];
+    if (first && bonus?.mass && faction === W.planet(galaxy(), b.planet)?.owner) b.pilots.get(me.name).mass *= bonus.mass;
+    return r;
+  }
+
+  function campaignMatches(planetId) {
+    return [...battles.values()].filter((b) => b.campaign && !b.result && b.planet === planetId);
+  }
+
+  // Whether a side of a match has room for another commander.
+  function room(b, side) {
+    return present(b, side).length < CAMPAIGN_SIDE && present(b).length < PILOTS_MAX;
   }
 
   function close() {
@@ -1191,7 +1343,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed }) {
     for (const t of timers) clearTimeout(t);
   }
 
-  return { battles, start, join, leave, handle, list, tick: tickAll, close };
+  return { battles, start, join, leave, handle, list, tick: tickAll, close, startCampaign, enlistCampaign, campaignMatches, room };
 }
 
 module.exports = {
@@ -1207,6 +1359,13 @@ module.exports = {
   LZ_R,
   MASS_START,
   MASS_CAP,
+  ENERGY_START,
+  ENERGY_CAP,
+  CARRIER_ENERGY,
+  GENERATOR_POWER,
+  FACTORY_DISCOUNT,
+  FACTORY_UPGRADE,
+  DROPPABLE,
   UNIT_CAP,
   BUILD_RATE,
   FACTORY_RATE,
@@ -1223,8 +1382,10 @@ module.exports = {
   addPilot,
   removePilot,
   income,
+  energyIncome,
   drop,
   produce,
+  upgradeFactory,
   order,
   possess,
   drive,

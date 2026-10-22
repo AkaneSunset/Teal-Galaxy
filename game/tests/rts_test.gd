@@ -7,8 +7,9 @@ extends Node
 ## the Sector Battles screen for Scar and attacks a sector. In the RTS view it calls in tanks by
 ## drop pod, attack-moves them at the Command Node, takes control of one and drives it, checks the
 ## snapshots move the units, leaves the battle and joins it again from the Sector Battles screen
-## (its units and mass still there), and keeps calling in units (an engineer takes mass points)
-## until the Command Node falls: the battle ends with the sector taken and the war map shows it
+## (its units and mass still there), and keeps calling in units (an engineer takes mass points,
+## builds a factory, then Power Generators) until the Command Node falls. Meanwhile, through the HUD,
+## it upgrades the factory to tier 2 and has it make a Tank Mk II: the battle ends with the sector taken and the war map shows it
 ## the Compact's. Then the view closes by itself.
 ## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way, and
 ## `-- --server=ws://127.0.0.1:9000` for a server on another port. Prints PASS or FAIL and quits.
@@ -35,6 +36,9 @@ var _moved_from := {} # id -> where it was when the attack-move went out
 var _end: Dictionary = {}
 var _drop_at := 0.0
 var _extractors := 0
+var _generators := 0 # Power Generators the engineer was told to build
+var _factory_stage := 0 # 0 none yet, 1 being built, 2 upgrading to tier 2, 3 making a Tank Mk II, 4 done
+var _factory := -1
 var _bought := 0
 var _attacking := false
 var _looked := false
@@ -363,7 +367,24 @@ func _fight() -> void:
 		return
 	_drop_at = _clock
 	var engineers := _mine("engineer").filter(func(u): return not u.dropping())
-	if not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5:
+	_factory_steps(engineers)
+	var lz: Dictionary = _view.info.get("lz", {"x": 800, "z": 170})
+	var back := -1.0 if float(lz.z) < 800.0 else 1.0
+	if not engineers.is_empty() and engineers[0].orders.is_empty() and _factory_stage == 0 and _extractors >= 2:
+		# A factory beside the landing zone: built on the planet, its units cost half.
+		for dx in [70.0, -70.0, 110.0, -110.0]:
+			var spot := Vector2(float(lz.x) + dx, float(lz.z) + back * 60.0)
+			if _view._site("factory", spot) != null:
+				_view.order_units([engineers[0].id], "build", spot, false, -1, "factory")
+				_factory_stage = 1
+				break
+	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors >= 5 and _generators < 6:
+		# Then Power Generators in a row behind the landing zone: units cost energy too.
+		var spot := Vector2(float(lz.x) - 105.0 + 30.0 * _generators, float(lz.z) + back * 150.0)
+		if _view._site("generator", spot) != null:
+			_view.order_units([engineers[0].id], "build", spot, false, -1, "generator")
+		_generators += 1
+	elif not engineers.is_empty() and engineers[0].orders.is_empty() and _extractors < 5:
 		var e: Units.Unit = engineers[0]
 		var best = null
 		for p in _view.mass_points:
@@ -380,8 +401,9 @@ func _fight() -> void:
 	if _view.my_unit_count() < 110:
 		var kind := "artillery" if _bought % 2 == 1 else "tank"
 		var cost := float(_view.catalog[kind].cost)
-		if _view.mass >= cost:
-			var n := clampi(int(_view.mass / cost), 1, 10)
+		var energy := float(_view.catalog[kind].energy)
+		if _view.mass >= cost and _view.energy >= energy:
+			var n := clampi(mini(int(_view.mass / cost), int(_view.energy / energy)), 1, 10)
 			_view.call_in(kind, n)
 			_bought += 1
 	var army := 0.0
@@ -408,6 +430,41 @@ func _fight() -> void:
 		_view.look_at_ground(node.to - Vector2(0, 200) * (1.0 if _view.my_side == "a" else -1.0))
 
 
+## The factory, through the HUD as a player would: select it when it's built, press its upgrade
+## button, and once it's tier 2 its Tank Mk II button; done when the Mk II rolls out.
+func _factory_steps(_engineers: Array) -> void:
+	var hud: Control = _view._hud
+	match _factory_stage:
+		1:
+			var built := _mine("factory").filter(func(u): return u.progress >= 1.0)
+			if built.is_empty():
+				return
+			_factory = built[0].id
+			_view.select([_factory])
+			var up := _buttons(hud, "Upgrade to tier 2")
+			if up.is_empty():
+				return # the panel is drawn on the HUD's next frame
+			if _buttons(hud, "Tank Mk II").size() > 0 or _buttons(hud, "Tank ").is_empty():
+				_finish(false, "a tier 1 factory should offer tier 1 units only, at half price")
+				return
+			up[0].pressed.emit()
+			_factory_stage = 2
+		2:
+			if int(_view.factories.get(_factory, {}).get("tier", 1)) < 2:
+				return
+			_view.select([_factory])
+			var mk2 := _buttons(hud, "Tank Mk II")
+			if mk2.is_empty():
+				return
+			_shot("rts-04b-tier-2-factory")
+			mk2[0].pressed.emit()
+			_factory_stage = 3
+		3:
+			if not _mine("tank_t2").is_empty():
+				_factory_stage = 4
+				print("the tier 2 factory made a Tank Mk II")
+
+
 func _check_end() -> void:
 	if OS.get_environment("RTS_DEBUG") != "":
 		print("check_end %.1f valid=%s active=%s" % [_step_clock, is_instance_valid(_view), BattleView.active])
@@ -428,7 +485,10 @@ func _check_end() -> void:
 	if BattleView.active or is_instance_valid(_view):
 		_finish(false, "the battle view should close by itself after the banner")
 		return
-	_finish(true, "%d units drawn in budget; attacked %s from the carrier, dropped units, attack-moved, drove a tank, left and rejoined, took the sector (%s); %d snapshots, slowest frame %.0f ms" % [PERF_UNITS, _sector, _end.get("text", ""), _states, _slowest * 1000.0])
+	if _factory_stage != 4:
+		_finish(false, "the factory should have been built, upgraded to tier 2 and made a Tank Mk II (got to stage %d)" % _factory_stage)
+		return
+	_finish(true, "%d units drawn in budget; attacked %s from the carrier, dropped units, attack-moved, drove a tank, left and rejoined, built a factory, upgraded it to tier 2 and made a Tank Mk II, took the sector (%s); %d snapshots, slowest frame %.0f ms" % [PERF_UNITS, _sector, _end.get("text", ""), _states, _slowest * 1000.0])
 
 
 func is_instance_valid_unit(u: Units.Unit) -> bool:
@@ -469,3 +529,8 @@ func _finish(ok: bool, what: String) -> void:
 	_done = true
 	print(("PASS " if ok else "FAIL ") + "rts: " + what)
 	get_tree().quit(0 if ok else 1)
+
+
+## Visible buttons under `root` whose text contains `text`.
+func _buttons(root: Node, text: String) -> Array:
+	return root.find_children("*", "Button", true, false).filter(func(b): return b.is_visible_in_tree() and b.text.contains(text))

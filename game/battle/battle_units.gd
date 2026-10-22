@@ -175,9 +175,9 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 			basis = u.tilt * basis
 		elif u.kind == "air":
 			basis = basis * Basis(Vector3.RIGHT, 0.08 if u.state == "move" else 0.0)
-		var scale := 1.0
+		var scale := Models.tier_scale(u.type)
 		if u.landed_at > 0.0 and now - u.landed_at < 0.35: # out of the pod with a little bounce
-			scale = 0.85 + 0.15 * (now - u.landed_at) / 0.35
+			scale *= 0.85 + 0.15 * (now - u.landed_at) / 0.35
 		var y_scale := 1.0
 		if u.kind == "structure" and u.progress < 1.0:
 			y_scale = 0.12 + 0.88 * u.progress
@@ -242,6 +242,7 @@ func add_wreck(u: Unit) -> void:
 	else:
 		basis = basis.scaled(Vector3(1, 0.45, 1)) # a broken stump of a building
 	var m: Dictionary = Models.model(u.type)
+	basis = basis.scaled(Vector3.ONE * Models.tier_scale(u.type))
 	var xf := Transform3D(basis, at)
 	var top := Transform3D()
 	if m.top:

@@ -239,6 +239,53 @@ system counts as wholly its faction's). Once it holds a sector of a planet, the 
 one it holds. Capital worlds can't be attacked at all. Builders with outposts on a planet get an alert
 when one of their faction's sectors there falls.
 
+### Planet campaigns
+
+Every contested planet (not the capital worlds) is also fought over in **week-long campaigns**, in the
+spirit of Helldivers 2. A campaign runs from Monday 12:00 US Eastern time to the next (the demo war runs
+one every 30 minutes); its last day (the demo's last 5 minutes) is the **final push**, when wins count
+double. The planet's holder and every faction with 25% of its system's orbit when the campaign starts are
+in it. Pilots of those factions queue for a game mode from the **Sector Battles** screen (the carrier's
+holo table, or the War terminal), aboard a carrier over the planet. Every match their faction wins scores
+**campaign points** by how long the mode takes (Sector Battles 10; a win against AI only scores half), and
+when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
+points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
+commanders start Sector Battles with 15% more mass (shipyard and fortress worlds' bonuses come with Space
+Battles and Sector Defense).
+
+Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
+matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
+in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
+whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
+match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
+RTS view opens by itself when a match starts, wherever you are. Supremacy, Space Battles and Facility
+Battles show on the screen as coming.
+
+### Sector Defense
+
+The second campaign mode, in the spirit of Halo's Firefight: a squad of 1 to 4 pilots of one faction
+holds a walled position on the planet against waves of AI troops (`server/defense.js`, the view in
+`game/defense/`). Queue for it like Sector Battles; four queued go in at once, fewer after the wait (a
+queued pilot also joins a squad of their faction on the planet with room, between waves). The enemy is
+the holder's troops, or, for the holder's own squads, another faction's in the campaign.
+
+- **3 sets of 5 waves**, each harder than the last (troopers, drones, elites, brutes), a **Warlord** boss
+  ending each set. Waves come in through the gaps in the wall; a break of 10 seconds between waves, 20
+  between sets.
+- **Shared lives**: the squad starts with 7 and gets 3 more after each set. A fallen pilot comes back 5
+  seconds later for a life; with none left they stay down, and when everyone is down the match is lost.
+- **Modifiers** switch on as the sets go on: from set 2 *Tough* (enemies have 50% more health), from set 3
+  *Fury* (they hit 40% harder) and *Famine* (fewer supply drops).
+- **Supply drops** land between waves: ammo, med packs, shield cells, and rocket launchers (4 rockets;
+  always at the end of a set). Walk over one to take it.
+- Shields (60) soak damage first and recharge 4 seconds after the last hit; health (100) doesn't.
+- W A S D walk, Shift run, Space jump, mouse look, left mouse fire, R reload, 1 rifle, 2 rocket launcher,
+  Esc pause (*Leave match*).
+
+Holding all 15 waves wins the match for the squad's faction (6 points, halved to 3: it's always against
+AI); a squad that falls scores for the enemy's. The enemies, the waves and every hit are decided on the
+server: each screen reports where its pilot stands and every shot it fires.
+
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
 *Take sector (demo)*, and every rule above applies.
@@ -532,9 +579,18 @@ defenders' pilots can also join from the planet's station). The defender is the 
 by an AI (plus any of its pilots who join), or a militia if nobody holds it. You lead one attack at a
 time: starting another gives up the last one unless other pilots are still fighting it.
 
-The RTS view takes over the screen. You start with 400 mass and earn 2 a second from your carrier plus
-3 per Mass Extractor. Call units in by drop pod from the panel on the right; they land in your landing
-zone 6 seconds later. Engineers build extractors on mass points, turrets and land factories.
+The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
+4000 energy; your carrier gives 2 mass and 10 energy a second, each Mass Extractor 3 mass more and each
+**Power Generator** (45 mass) 20 energy more. Call units in by drop pod from the panel on the right; they
+land in your landing zone 6 seconds later. The carrier drops **tier 1 units only, at full price**.
+Engineers build extractors on mass points, generators, turrets and land factories.
+
+**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever).
+Select one and its panel shows what its tier makes and its upgrade: tier 2 (400 mass, 2500 energy) and
+tier 3 (900 mass, 6000 energy), paid as it works, making nothing meanwhile. Each tier makes the Mk II or
+Mk III Striker, Tank, Artillery and AA: bigger, faster, tougher and harder hitting than the tier below
+(per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter bigger) and dearer.
+The defender's AI pays mass only.
 The defender's AI keeps a guard round its base and, after giving you five minutes to dig in, sends
 waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction fields
 more than a militia. **Destroy the Command Node** to take the sector (*Sector taken*); the defenders win if they

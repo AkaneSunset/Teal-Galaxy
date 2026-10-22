@@ -8,6 +8,7 @@
 //                              war: every faction holds 25% of every system, so anyone may attack
 //                              anywhere, captures lock for 5 minutes, and every pilot flies a carrier)
 //   BATTLE_SPEED=10 node server.js   (sector battles run 10x faster, for the game tests)
+//   QUEUE_WAIT=3 node server.js   (a lone faction waits 3 s in a campaign queue before fighting AI)
 //   BUILD_SPEED=0 node server.js   (buildings finish instantly, for the game smoke tests)
 //   ADMIN_KEY=<secret> node server.js   (apps that say hello with this admin_key are admins: they can
 //                                        play the Coma Conglomerate and steer its AI director)
@@ -18,6 +19,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const B = require('./battle');
+const C = require('./campaign');
+const DF = require('./defense');
 const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
@@ -56,8 +59,10 @@ const PILOT_ONLY = {
   sell_to_builder: 'only pilots sell at a Star Port', buy_from_builder: 'only pilots buy at a Star Port',
   enter_space: 'only pilots walk around', leave_space: 'only pilots walk around', walk: 'only pilots walk around', ship_open: 'only pilots have carriers',
   battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
-  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles',
+  battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles',
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
+  campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches',
+  defense_move: 'only pilots fight', defense_fire: 'only pilots fight', defense_leave: 'only pilots fight',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
 const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
@@ -76,7 +81,7 @@ function adminCheck(secret) {
 
 // `demoWar` turns the demo war (war.js setDemo) on or off for the whole process; left out, it stays
 // as it is. `battleSpeed` is BATTLE_SPEED.
-function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, demoWar, buildSpeed = null, adminKey = null, battleSpeed = 1 } = {}) {
+function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, demoWar, buildSpeed = null, adminKey = null, battleSpeed = 1, queueWait = null } = {}) {
   if (demoWar !== undefined) W.setDemo(demoWar);
   let galaxy = G.newGalaxy();
   if (saveFile && fs.existsSync(saveFile)) {
@@ -125,11 +130,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   function playerView() {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), berths: spaces.allBerths() };
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list(), berths: spaces.allBerths() };
+    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -173,7 +178,21 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     send: (c, msg) => send(c.ws, msg),
   });
 
-  const battles = B.createBattles({ galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed });
+  const battles = B.createBattles({
+    galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    onCampaignEnd: (b, winner, vsAi) => C.score(galaxy, b.planet, 'sector', winner, vsAi, now()),
+  });
+  // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
+  const defenses = DF.createDefenses({
+    now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now()),
+  });
+  // Planet campaigns: the week's matches, and the queues for them.
+  C.tick(galaxy, now());
+  const matchmaking = C.createMatchmaking({
+    galaxy: () => galaxy, now, battles, defenses, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
+    send: (c, msg) => send(c.ws, msg), changed, wait: queueWait,
+  });
 
   // Where a pilot is, for the battle rules: the planet the carrier they're aboard is over (its
   // owner flying in that orbit, or docked at that planet's station), and the station they're at.
@@ -439,6 +458,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         meritValue: G.MERIT_VALUE,
         demo,
         carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
+        campaign: { modes: C.MODES, bonuses: C.BONUSES, aiShare: C.AI_SHARE },
         director: { ms: D.DIRECTOR_MS, scaleMax: D.SCALE_MAX, patrolPower: D.PATROL_POWER, armadaCap: D.ARMADA_CAP, activeMs: D.ACTIVE_MS },
       };
       // A Builder gets their own home planet the first time they connect.
@@ -634,10 +654,25 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = msg.type === 'battle_start' ? battles.start(me, pilotFaction(me), msg.planet, msg.sector, where(me)) : battles.join(me, pilotFaction(me), msg.battle, where(me));
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
+      case 'campaign_queue':
+        if (tooFast(me, 'battle', BATTLE_JOINS_PER_S)) return;
+        result = matchmaking.join(me, msg.planet, msg.mode);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
+      case 'campaign_unqueue':
+        matchmaking.leave(me);
+        return;
+      case 'defense_move':
+      case 'defense_fire':
+      case 'defense_leave':
+        result = defenses.handle(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
       case 'battle_leave':
       case 'battle_drop':
       case 'battle_order':
       case 'battle_produce':
+      case 'battle_upgrade':
       case 'battle_possess':
       case 'battle_drive':
       case 'battle_release':
@@ -682,6 +717,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     ws.on('close', () => {
       const berthed = Boolean(me.berth);
       spaces.drop(me);
+      matchmaking.leave(me, true);
+      defenses.leave(me);
       battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
@@ -692,6 +729,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   const ticker = setInterval(() => {
     try {
       if (G.tick(galaxy, now())) changed();
+      if (C.tick(galaxy, now())) changed();
     } catch (err) {
       console.error('error in the galaxy tick:', err);
     }
@@ -706,10 +744,14 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     runs,
     spaces,
     battles,
+    defenses,
+    matchmaking,
     close() {
       clearInterval(ticker);
       clearInterval(raidTicker);
       battles.close();
+      defenses.close();
+      matchmaking.close();
       clearTimeout(saveTimer);
       for (const ws of clients.keys()) ws.terminate();
       return new Promise((resolve) => wss.close(resolve));
@@ -728,7 +770,9 @@ if (require.main === module) {
   const adminKey = process.env.ADMIN_KEY || null;
   // BATTLE_SPEED: sector battles run this many times faster (default 1).
   const battleSpeed = Number(process.env.BATTLE_SPEED) > 0 ? Number(process.env.BATTLE_SPEED) : 1;
-  const { wss } = startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed });
+  // QUEUE_WAIT: seconds a lone faction waits in a matchmaking queue before fighting AI (for tests).
+  const queueWait = Number(process.env.QUEUE_WAIT) > 0 ? Number(process.env.QUEUE_WAIT) * 1000 : null;
+  const { wss } = startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed, queueWait });
   wss.on('listening', () => {
     console.log(
       `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
