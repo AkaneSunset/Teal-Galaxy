@@ -530,7 +530,7 @@ func walker_pose() -> Dictionary:
 ## True while a sector battle's RTS view is up (game/battle/battle_view.gd sets BattleView.active).
 ## The view may not be built yet, so it's looked up rather than named.
 static func battle_active() -> bool:
-	for path in [BATTLE_VIEW, DEFENSE_VIEW, FACILITY_VIEW]: # a sector battle's RTS view, or an FPS match
+	for path in [BATTLE_VIEW, DEFENSE_VIEW, FACILITY_VIEW]: # a sector battle's RTS view, or an FPS match (Supremacy's view is a Facility one)
 		if ResourceLoader.exists(path):
 			var view = load(path)
 			if view != null and view.get("active") == true:

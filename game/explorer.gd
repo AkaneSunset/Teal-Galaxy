@@ -2377,6 +2377,15 @@ func _on_net_message(msg: Dictionary) -> void:
 			var fv = load(path) if ResourceLoader.exists(path) else null
 			if fv and fv.can_instantiate() and not fv.active:
 				fv.open(self, msg)
+		"supremacy_joined":
+			# Matchmaking put us in a Supremacy battle: its first-person view takes over.
+			var menu = _battle_script("battle_menu")
+			if menu:
+				menu.queued = {}
+			var path := "res://supremacy/supremacy_view.gd"
+			var sv = load(path) if ResourceLoader.exists(path) else null
+			if sv and sv.can_instantiate() and not sv.active:
+				sv.open(self, msg)
 		"dock_granted":
 			var st := str(msg.get("station", ""))
 			if not _stations.has(st):

@@ -316,12 +316,36 @@ function segBox(a, b, box) {
 }
 
 // What stops shots and bodies: the walls and the closed doors (3 m tall).
+// What stops shots and bodies: the walls, the closed doors (3 m tall), and whatever breakables
+// (blast doors, a reactor: { box, hp, side }) still stand.
 function blockers(f) {
   const out = f.map.walls.slice();
   f.map.doors.forEach(([x, z, w, d], i) => {
     if (!f.doors[i]) out.push([x, z, w, d, 3]);
   });
+  for (const br of f.breakables || []) if (br.hp > 0) out.push(br.box);
   return out;
+}
+
+// A breakable the shot from `o` to `end` stops on at `wall` metres (of `range`), if it's the other side's.
+function breakableAt(f, b, o, end, range, wall) {
+  for (const br of f.breakables || []) {
+    if (br.hp <= 0 || br.side === b.side) continue;
+    const t = segBox(o, end, br.box);
+    if (t !== null && Math.abs(t * range - wall) < 1e-6) return br;
+  }
+  return null;
+}
+
+// Damage to a breakable; destroyed, it stops blocking (and f.onBreak hears of it).
+function hurtBreakable(f, br, damage, by) {
+  if (br.hp <= 0 || f.result) return;
+  br.hp = Math.max(0, br.hp - damage);
+  if (br.hp > 0) return;
+  f.blockers = blockers(f);
+  f.nav = navGrid(f);
+  f.flows.clear();
+  f.onBreak?.(f, br, by);
 }
 
 function blocked(f, a, b) {
@@ -363,7 +387,7 @@ function pushOut(f, x, z, r = RADIUS) {
     x += out[0];
     z += out[1];
   }
-  return [clamp(x, 0.5, SIZE - 0.5), clamp(z, 0.5, SIZE - 0.5)];
+  return [clamp(x, 0.5, f.w - 0.5), clamp(z, 0.5, f.d - 0.5)];
 }
 
 // Where the ray (o, dir) passes a body (a standing capsule): the distance along it and the height
@@ -386,27 +410,30 @@ function rayBody(o, dir, b, range) {
 // 1 m cells; a cell is open if a body can stand at its centre. Doors that aren't locked shut count
 // as open (they open for whoever comes near).
 function navGrid(f) {
-  const open = new Uint8Array(SIZE * SIZE);
-  const boxes = f.map.walls.concat(f.map.doors.filter((d, i) => d[4] && !f.doors[i]).map(([x, z, w, d]) => [x, z, w, d, 3]));
-  for (let j = 0; j < SIZE; j++) {
-    for (let i = 0; i < SIZE; i++) {
+  const open = new Uint8Array(f.w * f.d);
+  const boxes = f.map.walls.concat(f.map.doors.filter((d, i) => d[4] && !f.doors[i]).map(([x, z, w, d]) => [x, z, w, d, 3]), (f.breakables || []).filter((br) => br.hp > 0).map((br) => br.box));
+  for (let j = 0; j < f.d; j++) {
+    for (let i = 0; i < f.w; i++) {
       const x = i + 0.5;
       const z = j + 0.5;
-      open[j * SIZE + i] = boxes.every((b) => boxNear(b, x, z).r >= RADIUS + 0.05) ? 1 : 0;
+      open[j * f.w + i] = boxes.every((b) => boxNear(b, x, z).r >= RADIUS + 0.05) ? 1 : 0;
     }
   }
   return open;
 }
 
-const cellOf = (x, z) => clamp(Math.floor(z), 0, SIZE - 1) * SIZE + clamp(Math.floor(x), 0, SIZE - 1);
+// The grid cell at (x, z) on a map `w` wide and `d` deep.
+const cellOf = (x, z, w = SIZE, d = SIZE) => clamp(Math.floor(z), 0, d - 1) * w + clamp(Math.floor(x), 0, w - 1);
 
 // Steps from every cell to the goal cell (8 neighbours, no corner cutting); -1 where it can't reach.
 function flowTo(f, goal) {
+  const GW = f.w;
+  const GD = f.d;
   const key = goal;
   const hit = f.flows.get(key);
   if (hit) return hit;
-  const dist = new Int32Array(SIZE * SIZE).fill(-1);
-  const q = new Int32Array(SIZE * SIZE);
+  const dist = new Int32Array(GW * GD).fill(-1);
+  const q = new Int32Array(GW * GD);
   let head = 0;
   let tail = 0;
   // From the nearest open cell to the goal.
@@ -414,14 +441,14 @@ function flowTo(f, goal) {
   if (!f.nav[g]) {
     let best = -1;
     let bd = Infinity;
-    const gx = g % SIZE;
-    const gz = Math.floor(g / SIZE);
+    const gx = g % GW;
+    const gz = Math.floor(g / GW);
     for (let dz = -3; dz <= 3; dz++)
       for (let dx = -3; dx <= 3; dx++) {
         const x = gx + dx;
         const z = gz + dz;
-        if (x < 0 || z < 0 || x >= SIZE || z >= SIZE || !f.nav[z * SIZE + x]) continue;
-        if (dx * dx + dz * dz < bd) [best, bd] = [z * SIZE + x, dx * dx + dz * dz];
+        if (x < 0 || z < 0 || x >= GW || z >= GD || !f.nav[z * GW + x]) continue;
+        if (dx * dx + dz * dz < bd) [best, bd] = [z * GW + x, dx * dx + dz * dz];
       }
     if (best < 0) return dist;
     g = best;
@@ -430,17 +457,17 @@ function flowTo(f, goal) {
   q[tail++] = g;
   while (head < tail) {
     const c = q[head++];
-    const cx = c % SIZE;
-    const cz = Math.floor(c / SIZE);
+    const cx = c % GW;
+    const cz = Math.floor(c / GW);
     for (let dz = -1; dz <= 1; dz++)
       for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dz) continue;
         const x = cx + dx;
         const z = cz + dz;
-        if (x < 0 || z < 0 || x >= SIZE || z >= SIZE) continue;
-        const n = z * SIZE + x;
+        if (x < 0 || z < 0 || x >= GW || z >= GD) continue;
+        const n = z * GW + x;
         if (!f.nav[n] || dist[n] >= 0) continue;
-        if (dx && dz && (!f.nav[cz * SIZE + x] || !f.nav[z * SIZE + cx])) continue;
+        if (dx && dz && (!f.nav[cz * GW + x] || !f.nav[z * GW + cx])) continue;
         dist[n] = dist[c] + 1;
         q[tail++] = n;
       }
@@ -469,6 +496,8 @@ function newFacility({ id = 'f1', planet, planetName = '', attacker, defender = 
     speed,
     rule: r,
     map: m,
+    w: SIZE,
+    d: SIZE,
     startedAt: now,
     t: 0,
     nextId: 1,
@@ -529,8 +558,8 @@ function equip(b, cls) {
   b.speed = (has('lightweight') ? 1.12 : 1) * (WEAPONS[b.guns.primary?.weapon]?.speed || 1);
 }
 
-function newBody(f, { id, name, side, ai = false, cls = 'assault', loadouts = [] }) {
-  const b = { id, name, side, ai, present: true, x: 0, z: 0, yaw: 0, hp: HP, shield: SHIELD, hitAt: -100, alive: false, respawnAt: 0, kills: 0, deaths: 0, caps: 0, streak: 0, earned: [], moveT: 0, lastShot: -100, reloadUntil: 0, want: cls, loadouts, cd: 0, path: null };
+function newBody(f, { id, name, side, ai = false, cls = 'assault', loadouts = [], fodder = false }) {
+  const b = { id, name, side, ai, fodder, present: true, x: 0, z: 0, yaw: 0, hp: HP, shield: SHIELD, hitAt: -100, alive: false, respawnAt: 0, kills: 0, deaths: 0, caps: 0, streak: 0, earned: [], moveT: 0, lastShot: -100, reloadUntil: 0, want: cls, loadouts, cd: 0, path: null };
   equip(b, classOf(cls, loadouts));
   f.bodies.set(id, b);
   spawn(f, b);
@@ -538,17 +567,20 @@ function newBody(f, { id, name, side, ai = false, cls = 'assault', loadouts = []
 }
 
 // Back in at one of the side's spawns (the one furthest from the enemy), with the class it chose.
+// A mode can choose the spawns (f.spawnSpots) and change the body as it comes in (f.onSpawn: an
+// elite trooper, a fodder bot).
 function spawn(f, b) {
   const enemies = [...f.bodies.values()].filter((o) => o.alive && o.side !== b.side);
   let best = null;
   let bd = -1;
-  for (const [x, z] of f.map.spawns[b.side]) {
+  for (const [x, z] of f.spawnSpots ? f.spawnSpots(f, b) : f.map.spawns[b.side]) {
     const near = enemies.reduce((m, o) => Math.min(m, Math.hypot(o.x - x, o.z - z)), 999) + random(f.rng) * 4;
     if (near > bd) [best, bd] = [[x, z], near];
   }
   equip(b, classOf(b.want, b.loadouts));
-  Object.assign(b, { alive: true, x: best[0], z: best[1], hp: HP, shield: b.shieldMax, hitAt: -100, streak: 0, reloadUntil: 0, moveT: f.t, path: null, power: null });
+  Object.assign(b, { alive: true, x: best[0], z: best[1], hp: HP, hpMax: HP, shield: b.shieldMax, hitAt: -100, streak: 0, reloadUntil: 0, moveT: f.t, path: null, power: null, damageMul: 1, elite: false });
   b.yaw = b.side === 'd' ? 0 : Math.PI; // facing the other side's end
+  f.onSpawn?.(f, b);
 }
 
 // A pilot joins `side`; an AI trooper of that side makes room if the side is full.
@@ -574,7 +606,7 @@ function removePilot(f, name) {
   balance(f);
 }
 
-const team = (f, side) => [...f.bodies.values()].filter((b) => b.present && b.side === side);
+const team = (f, side) => [...f.bodies.values()].filter((b) => b.present && b.side === side && !b.fodder);
 const humans = (f, side) => team(f, side).filter((b) => !b.ai);
 
 // Both sides at the same size: the bigger human side's, between TEAM_MIN and TEAM_MAX, AI troopers
@@ -769,8 +801,10 @@ function shoot(f, b, o, dir) {
         const { best } = firstHit(f, b, o, d, g.range, wall, skip);
         if (!best) break;
         skip.add(best.body || best.turret);
-        hits += hurtTarget(f, best, def.damage, b, g.weapon);
+        hits += hurtTarget(f, best, def.damage * b.damageMul, b, g.weapon);
       }
+      const br = breakableAt(f, b, o, end, g.range, wall);
+      if (br) hurtBreakable(f, br, def.damage * b.damageMul, b);
       f.shots.push([b.id, r1(o.x), r1(o.z), r1(o.x + d.x * wall), r1(o.z + d.z * wall), g.weapon]);
       continue;
     }
@@ -780,9 +814,13 @@ function shoot(f, b, o, dir) {
     if (k === 0) f.shots.push([b.id, r1(o.x), r1(o.z), r1(hx), r1(hz), g.weapon]);
     if (def.splash) {
       const back = Math.max(0, at - 0.3);
-      blast(f, { x: o.x + d.x * back, y: o.y + d.y * back, z: o.z + d.z * back }, def.splash, def.damage, b, g.weapon, false);
+      blast(f, { x: o.x + d.x * back, y: o.y + d.y * back, z: o.z + d.z * back }, def.splash, def.damage * b.damageMul, b, g.weapon, false);
       hits += best ? 1 : 0;
-    } else if (best) hits += hurtTarget(f, best, def.damage * (best.y > HEAD_Y ? HEADSHOT : 1), b, g.weapon);
+    } else if (best) hits += hurtTarget(f, best, def.damage * b.damageMul * (best.y > HEAD_Y ? HEADSHOT : 1), b, g.weapon);
+    else if (at < g.range) {
+      const br = breakableAt(f, b, o, end, g.range, at);
+      if (br) hurtBreakable(f, br, def.damage * b.damageMul, b);
+    }
   }
   return { ok: true, hits };
 }
@@ -807,6 +845,8 @@ function blast(f, at, r, damage, by, weapon, fromAbove) {
     hurt(f, t, damage * (d < 1 ? 1 : Math.max(0.2, 1 - (0.8 * d) / r)), by, weapon);
   }
   if (by.side === 'a') for (const tu of f.turrets) if (tu.hp > 0 && Math.hypot(tu.x - at.x, tu.z - at.z) <= r + 0.6) hurtTurret(f, tu, damage * 0.6, by);
+  // Explosives are what breaks blast doors best: double damage to them.
+  for (const br of f.breakables || []) if (br.hp > 0 && br.side !== by.side && boxNear(br.box, at.x, at.z).r <= r) hurtBreakable(f, br, damage * 2, by);
 }
 
 function hurtTurret(f, tu, damage, by) {
@@ -832,9 +872,9 @@ function kill(f, t, by, weapon) {
   t.streak = 0;
   t.reloading = null;
   dropFlag(f, t);
-  if (f.reinforcements[t.side] > 0) {
-    f.reinforcements[t.side] -= 1;
-    t.respawnAt = f.t + RESPAWN_S;
+  if (f.unlimited || f.reinforcements[t.side] > 0) {
+    if (!f.unlimited) f.reinforcements[t.side] -= 1;
+    t.respawnAt = f.t + (f.respawnS ?? RESPAWN_S);
   } else t.respawnAt = Infinity;
   if (by && by.side !== t.side) {
     by.kills += 1;
@@ -843,14 +883,17 @@ function kill(f, t, by, weapon) {
     if (by.alive) {
       by.streak += 1;
       const less = by.items.includes('hardline') ? 1 : 0;
-      for (const s of STREAK_IDS) if (by.streak === STREAKS[s].kills - less) {
+      // A mode may give streaks to only some (f.streaksFor) or only some streaks (f.streakIds).
+      const ids = !f.streaksFor || f.streaksFor(f, by) ? f.streakIds || STREAK_IDS : [];
+      for (const s of ids) if (by.streak === STREAKS[s].kills - less) {
         by.earned.push(s);
         f.feed.push({ name: by.name, earned: s, text: `${by.name} earned a ${STREAKS[s].name}` });
       }
       if (by.items.includes('scavenger')) for (const g of Object.values(by.guns)) g.reserve = WEAPONS[g.weapon].reserve;
     }
   }
-  f.feed.push({ kill: [by ? by.name : null, t.name, weapon], text: by ? `${by.name} killed ${t.name}` : `${t.name} died` });
+  f.onKill?.(f, t, by);
+  if (!t.fodder) f.feed.push({ kill: [by ? by.name : null, t.name, weapon], text: by ? `${by.name} killed ${t.name}` : `${t.name} died` });
 }
 
 // Shows `b` on the other side's map for `s` seconds (Ghost hides it from calls, not from firing).
@@ -877,7 +920,7 @@ function stim(f, name) {
   if (!b?.alive) return { ok: true, quiet: true };
   if (b.stims <= 0) return fail('no stims left');
   b.stims -= 1;
-  b.hp = Math.min(HP, b.hp + 60);
+  b.hp = Math.min(b.hpMax || HP, b.hp + 60);
   return { ok: true };
 }
 
@@ -935,8 +978,8 @@ function useStreak(f, name, msg) {
   const def = STREAKS[s];
   if (def.mark && !(num(msg.x) && num(msg.z))) return fail('mark a spot for it');
   b.earned.splice(i, 1);
-  const x = clamp(num(msg.x) ? msg.x : b.x, 1, SIZE - 1);
-  const z = clamp(num(msg.z) ? msg.z : b.z, 1, SIZE - 1);
+  const x = clamp(num(msg.x) ? msg.x : b.x, 1, f.w - 1);
+  const z = clamp(num(msg.z) ? msg.z : b.z, 1, f.d - 1);
   const side = b.side;
   if (s === 'emp') {
     f.active = f.active.filter((a) => a.side === side || a.kind === 'nuke' || a.kind === 'drop' || a.kind === 'barrage');
@@ -973,7 +1016,7 @@ function streaksStep(f) {
       if (targets.length) {
         const t = targets[Math.floor(random(f.rng) * targets.length) % targets.length];
         const hit = random(f.rng) < 0.5;
-        f.shots.push(['gunship', r1(SIZE / 2), r1(SIZE / 2), r1(t.x), r1(t.z), hit ? 'hit' : 'miss']);
+        f.shots.push(['gunship', r1(f.w / 2), r1(f.d / 2), r1(t.x), r1(t.z), hit ? 'hit' : 'miss']);
         if (hit) hurt(f, t, def.damage, by, 'gunship');
       }
     }
@@ -1014,6 +1057,7 @@ function grenadesStep(f, dt) {
 // --- The AI troopers ---------------------------------------------------------------------------------
 
 const AI = { damage: 14, reload: 0.35, range: 45, speed: 4.2 };
+const FODDER_DAMAGE = 5;
 
 // A body's yaw (as the game's cameras turn: 0 looks down -z) facing along (dx, dz).
 const yawTo = (dx, dz) => Math.atan2(-dx, -dz);
@@ -1066,47 +1110,52 @@ function aiStep(f, b, dt) {
     if (!clear(f, eye, { x: t.x, y: 1.2, z: t.z }) && !clear(f, eye, { x: t.x, y: EYE, z: t.z })) continue;
     [target, td] = [t, d];
   }
+  // A mode can have troopers go for breakables first (boarders and a reactor in sight).
+  const broke = f.breakFirst?.(f, b) && b.cd <= 0 && !b.fodder && shootBreakable(f, b, eye);
   if (target) {
     if (!target.items.includes('ghost')) spot(f, target, CALL_S);
-    b.yaw = yawTo(target.x - b.x, target.z - b.z);
+    if (!broke) b.yaw = yawTo(target.x - b.x, target.z - b.z);
     if (b.cd <= 0) {
       b.cd = AI.reload;
-      const hit = random(f.rng) < 0.45 - (0.25 * td) / AI.range;
+      // Fodder bots are poor shots and hit softly.
+      const hit = random(f.rng) < (0.45 - (0.25 * td) / AI.range) * (b.fodder ? 0.5 : 1);
       f.shots.push([b.id, r1(b.x), r1(b.z), r1(target.x), r1(target.z), hit ? 'hit' : 'miss']);
       spot(f, b, SPOT_S);
-      if (hit) hurt(f, target, AI.damage, b, 'rifle');
+      if (hit) hurt(f, target, (b.fodder ? FODDER_DAMAGE : AI.damage) * b.damageMul, b, 'rifle');
     }
   }
-  // Attackers' troopers shoot turrets that are in their way.
-  if (!target && b.side === 'a' && b.cd <= 0) {
-    const tu = f.turrets.find((x) => x.hp > 0 && Math.hypot(x.x - b.x, x.z - b.z) < 30 && clear(f, eye, { x: x.x, y: 1.0, z: x.z }));
+  // Attackers' troopers shoot turrets that are in their way, and anyone's shoot the other side's
+  // blast doors and reactor when they can see them.
+  if (!target && b.cd <= 0 && !b.fodder) {
+    const tu = b.side === 'a' && f.turrets.find((x) => x.hp > 0 && Math.hypot(x.x - b.x, x.z - b.z) < 30 && clear(f, eye, { x: x.x, y: 1.0, z: x.z }));
     if (tu) {
       b.cd = AI.reload;
       f.shots.push([b.id, r1(b.x), r1(b.z), r1(tu.x), r1(tu.z), 'hit']);
       hurtTurret(f, tu, AI.damage, b);
     }
+    if (!tu) shootBreakable(f, b, eye);
   }
   // Defenders' troopers repair turrets on their way; attackers' hack the plant when they're at it.
   useBy(f, b, dt);
   // Move: along the flow field to the goal (holding still in a fight close to it).
-  const goal = aiGoal(f, b);
+  const goal = f.aiGoal ? f.aiGoal(f, b) : aiGoal(f, b);
   if (!goal) return;
   const gd = Math.hypot(goal[0] - b.x, goal[1] - b.z);
-  const holding = b.side === 'd' && gd < 3;
+  const holding = gd < 3 && (f.holding ? f.holding(f, b) : b.side === 'd');
   if (target && (td < 15 || holding)) return;
   if (gd < 1.2) return;
-  const flow = flowTo(f, cellOf(goal[0], goal[1]));
-  const c = cellOf(b.x, b.z);
+  const flow = flowTo(f, cellOf(goal[0], goal[1], f.w, f.d));
+  const c = cellOf(b.x, b.z, f.w, f.d);
   let next = null;
   let nd = flow[c] >= 0 ? flow[c] : Infinity;
-  const cx = c % SIZE;
-  const cz = Math.floor(c / SIZE);
+  const cx = c % f.w;
+  const cz = Math.floor(c / f.w);
   for (let dz = -1; dz <= 1; dz++)
     for (let dx = -1; dx <= 1; dx++) {
       const x = cx + dx;
       const z = cz + dz;
-      if (x < 0 || z < 0 || x >= SIZE || z >= SIZE) continue;
-      const v = flow[z * SIZE + x];
+      if (x < 0 || z < 0 || x >= f.w || z >= f.d) continue;
+      const v = flow[z * f.w + x];
       if (v >= 0 && v < nd) [next, nd] = [[x + 0.5, z + 0.5], v];
     }
   const to = next || goal;
@@ -1115,6 +1164,25 @@ function aiStep(f, b, dt) {
   [b.x, b.z] = pushOut(f, b.x + Math.sin(h) * step, b.z + Math.cos(h) * step);
   if (!target) b.yaw = yawTo(Math.sin(h), Math.cos(h));
   touch(f, b);
+}
+
+// A trooper fires at the nearest of the other side's breakables it can see within 30 m (the
+// reactor first). True if it did.
+function shootBreakable(f, b, eye) {
+  const list = (f.breakables || []).filter((br) => br.hp > 0 && br.side !== b.side).sort((x, y) => (y.kind === 'reactor') - (x.kind === 'reactor'));
+  for (const br of list) {
+    const q = boxNear(br.box, b.x, b.z);
+    if (q.r > 30) continue;
+    // Aim a little short of its face, so the shot isn't stopped by the box itself.
+    const k = Math.max(0, (q.r - 0.3) / Math.max(q.r, 1e-6));
+    if (!clear(f, eye, { x: b.x + (q.x - b.x) * k, y: 1.0, z: b.z + (q.z - b.z) * k })) continue;
+    b.cd = AI.reload;
+    b.yaw = yawTo(q.x - b.x, q.z - b.z);
+    f.shots.push([b.id, r1(b.x), r1(b.z), r1(q.x), r1(q.z), 'hit']);
+    hurtBreakable(f, br, AI.damage * b.damageMul, b);
+    return true;
+  }
+  return false;
 }
 
 // --- The simulation -------------------------------------------------------------------------------
@@ -1265,7 +1333,7 @@ function frame(f) {
     left: Math.max(0, Math.round(MATCH_S - f.t)),
     score: { a: Math.floor(f.score.a), d: Math.floor(f.score.d) },
     reinforcements: { ...f.reinforcements },
-    bodies: [...f.bodies.values()].filter((b) => b.present).map((b) => [b.id, b.name, b.side, r1(b.x), r1(b.z), r1(b.yaw), Math.round(b.hp + b.shield), b.alive, b.ai, b.kills, b.deaths, b.weapon === 'power' && b.power ? b.power.weapon : b.guns[b.weapon]?.weapon || '']),
+    bodies: [...f.bodies.values()].filter((b) => b.present).map((b) => [b.id, b.name, b.side, r1(b.x), r1(b.z), r1(b.yaw), Math.round(b.hp + b.shield), b.alive, b.ai, b.kills, b.deaths, b.weapon === 'power' && b.power ? b.power.weapon : b.guns[b.weapon]?.weapon || '', b.elite ? 1 : 0, b.fodder ? 1 : 0]),
     doors: f.doors.slice(),
     hacked: f.hacked,
     plant: f.map.plant ? Math.round((100 * f.plant.progress) / HACK_S) : null,
@@ -1341,7 +1409,8 @@ function joined(f, name) {
     ruleName: RULES[f.rule].name,
     ruleText: RULES[f.rule].text,
     target: RULES[f.rule].target,
-    size: SIZE,
+    size: f.w,
+    depth: f.d,
     map: f.map,
     seconds: MATCH_S,
     hp: HP,
@@ -1523,8 +1592,33 @@ module.exports = {
   CUSTOM_MAX,
   STREAKS,
   LAYOUTS,
+  RADIUS,
+  EYE,
+  SHOTS_PER_S,
+  MOVES_PER_S,
+  USES_PER_S,
+  END_KEEP_MS,
+  TICK_MS,
+  SNAPSHOT_MS,
+  STEP_S,
+  SUPPLY_EVERY_S,
   buildMap,
   rotation,
+  random,
+  blockers,
+  pushOut,
+  boxNear,
+  newBody,
+  spawn,
+  team,
+  humans,
+  gunOf,
+  aiStep,
+  grenadesStep,
+  streaksStep,
+  finishReload,
+  hurtBreakable,
+  touch,
   checkClass,
   saveClass,
   classOf,

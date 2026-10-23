@@ -35,6 +35,8 @@ signal finished
 
 var info := {} # facility_joined
 var match_id := ""
+## The messages' prefix: facility_move, facility_state... (Supremacy's view, built on this one, sets "supremacy").
+var prefix := "facility"
 var side := "a"
 var ended := false
 
@@ -114,7 +116,7 @@ func _ready() -> void:
 	Net.message.connect(_on_message)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	var them := _side_name(_other(side))
-	_say("Facility Battle on %s, %s: %s against %s" % [str(info.get("planetName", "")), str(_map().get("name", "")), _side_name(side), them], Color(1.0, 0.85, 0.5))
+	_say("%s on %s, %s: %s against %s" % [str(info.get("modeName", "Facility Battle")), str(info.get("planetName", "")), str(_map().get("name", "")), _side_name(side), them], Color(1.0, 0.85, 0.5))
 	_say("%s. %s" % [str(info.get("ruleName", "")), str(info.get("ruleText", ""))], Color(1.0, 0.75, 0.4))
 	_say("You're %s. L: pick your class (Pick 10). Tab: scoreboard." % ("attacking" if side == "a" else "defending"), Color(0.75, 0.85, 0.9))
 	_open_classes(true)
@@ -129,6 +131,33 @@ func _exit_tree() -> void:
 
 func _map() -> Dictionary:
 	return info.get("map", {})
+
+
+## The current map's size in metres (x by z).
+func _map_w() -> float:
+	return float(_map().get("w", info.get("size", 80)))
+
+
+func _map_d() -> float:
+	return float(_map().get("d", info.get("depth", _map_w())))
+
+
+## A new map (Supremacy goes from the ground to a ship and back): the world is built again round the player.
+func rebuild_world() -> void:
+	_world.remove_child(_player)
+	_world.queue_free()
+	_bodies = {}
+	_pickups = {}
+	_grenades = {}
+	_doors = []
+	_turrets = []
+	_points = []
+	_flags = {}
+	_hill_ring = null
+	_plant_label = null
+	_tracers = []
+	_build_world()
+	_world.add_child(_player)
 
 
 func _other(s: String) -> String:
@@ -237,15 +266,16 @@ func _build_world() -> void:
 	sun.light_energy = 0.8
 	sun.shadow_enabled = true
 	_world.add_child(sun)
-	var size := float(info.get("size", 80))
+	var mw := _map_w()
+	var md := _map_d()
 	var m := _map()
-	# Floor, and the facility's outer wall.
-	_box(_world, Vector3(size + 20, 1, size + 20), Vector3(size / 2, -0.5, size / 2), Color(0.24, 0.25, 0.27))
+	# Floor, and the outer wall.
+	_box(_world, Vector3(mw + 20, 1, md + 20), Vector3(mw / 2, -0.5, md / 2), _floor_colour())
 	for k in 4:
 		var horizontal := k < 2
-		var at := 0.0 if k % 2 == 0 else size
-		var dims := Vector3(size + 2, 4.0, 1.0) if horizontal else Vector3(1.0, 4.0, size + 2)
-		var pos := Vector3(size / 2, 2.0, at + (-0.5 if k % 2 == 0 else 0.5)) if horizontal else Vector3(at + (-0.5 if k % 2 == 0 else 0.5), 2.0, size / 2)
+		var at := (0.0 if k % 2 == 0 else md) if horizontal else (0.0 if k % 2 == 0 else mw)
+		var dims := Vector3(mw + 2, 4.0, 1.0) if horizontal else Vector3(1.0, 4.0, md + 2)
+		var pos := Vector3(mw / 2, 2.0, at + (-0.5 if k % 2 == 0 else 0.5)) if horizontal else Vector3(at + (-0.5 if k % 2 == 0 else 0.5), 2.0, md / 2)
 		_box(_world, dims, pos, Color(0.3, 0.31, 0.35))
 	for w in m.get("walls", []):
 		var h := float(w[4])
@@ -276,7 +306,22 @@ func _build_world() -> void:
 	for s in ["a", "d"]:
 		for p in m.get("spawns", {}).get(s, []):
 			_disc(_world, 0.6, Vector3(float(p[0]), 0.03, float(p[1])), _side_colour(s).darkened(0.4))
-	# The rule's objectives.
+	_build_objectives(m)
+	# The gunship, when one is up.
+	_gunship = Node3D.new()
+	_box(_gunship, Vector3(3.0, 0.8, 6.0), Vector3.ZERO, Color(0.25, 0.27, 0.3), false)
+	_box(_gunship, Vector3(8.0, 0.15, 1.2), Vector3(0, 0.2, 0.5), Color(0.3, 0.32, 0.35), false)
+	_box(_gunship, Vector3(0.4, 0.3, 0.4), Vector3(0, -0.5, -2.0), Color(1.0, 0.4, 0.2), false, 3.0)
+	_gunship.visible = false
+	_world.add_child(_gunship)
+
+
+func _floor_colour() -> Color:
+	return Color(0.24, 0.25, 0.27)
+
+
+## The rule's objectives on the map: the hill, the control points, the flags.
+func _build_objectives(m: Dictionary) -> void:
 	match str(info.get("rule", "")):
 		"koth":
 			_hill_ring = Node3D.new()
@@ -306,13 +351,6 @@ func _build_world() -> void:
 				_box(flag, Vector3(0.9, 0.6, 0.04), Vector3(0.45, 2.25, 0), _side_colour(s), false, 2.0)
 				_tag(flag, "FLAG", 3.0, _side_colour(s), 40)
 				_flags[s] = flag
-	# The gunship, when one is up.
-	_gunship = Node3D.new()
-	_box(_gunship, Vector3(3.0, 0.8, 6.0), Vector3.ZERO, Color(0.25, 0.27, 0.3), false)
-	_box(_gunship, Vector3(8.0, 0.15, 1.2), Vector3(0, 0.2, 0.5), Color(0.3, 0.32, 0.35), false)
-	_box(_gunship, Vector3(0.4, 0.3, 0.4), Vector3(0, -0.5, -2.0), Color(1.0, 0.4, 0.2), false, 3.0)
-	_gunship.visible = false
-	_world.add_child(_gunship)
 
 
 func _build_player() -> void:
@@ -372,7 +410,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed("foot_reload"):
-		Net.send({"type": "facility_reload", "match": match_id})
+		Net.send({"type": prefix + "_reload", "match": match_id})
 	elif event.is_action_pressed("foot_weapon_1"):
 		_switch("primary")
 	elif event.is_action_pressed("foot_weapon_2"):
@@ -380,7 +418,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("foot_weapon_next") or event.is_action_pressed("foot_weapon_prev"):
 		_switch("secondary" if str(_me.get("weapon", "primary")) == "primary" else "primary")
 	elif event.is_action_pressed("foot_heal"):
-		Net.send({"type": "facility_stim", "match": match_id})
+		Net.send({"type": prefix + "_stim", "match": match_id})
 	elif event is InputEventKey and event.pressed and not event.echo:
 		var key: int = event.keycode
 		if key == KEY_3:
@@ -403,7 +441,7 @@ func _switch(w: String) -> void:
 	if w != "power" and not (_me.get("guns", {}) as Dictionary).has(w):
 		_say("Your class has no %s weapon" % w, Color(1.0, 0.6, 0.5))
 		return
-	Net.send({"type": "facility_switch", "match": match_id, "weapon": w})
+	Net.send({"type": prefix + "_switch", "match": match_id, "weapon": w})
 	_me["weapon"] = w
 
 
@@ -441,9 +479,8 @@ func _physics_process(delta: float) -> void:
 	else:
 		_player.velocity.y -= GRAVITY * delta
 	_player.move_and_slide()
-	var size := float(info.get("size", 80))
-	_player.position.x = clampf(_player.position.x, 0.5, size - 0.5)
-	_player.position.z = clampf(_player.position.z, 0.5, size - 0.5)
+	_player.position.x = clampf(_player.position.x, 0.5, _map_w() - 0.5)
+	_player.position.z = clampf(_player.position.z, 0.5, _map_d() - 0.5)
 	# Aiming down sights: a scope zooms further.
 	var aiming := walking and Input.is_action_pressed("foot_aim")
 	var fov := 80.0 if not aiming else (35.0 if bool(_me.get("scope", false)) and str(_me.get("weapon", "")) == "primary" else 60.0)
@@ -455,11 +492,11 @@ func _physics_process(delta: float) -> void:
 	_use_t -= delta
 	if walking and Input.is_action_pressed("interact") and _use_t <= 0.0:
 		_use_t = USE_EVERY
-		Net.send({"type": "facility_use", "match": match_id})
+		Net.send({"type": prefix + "_use", "match": match_id})
 	_move_t -= delta
 	if _move_t <= 0.0:
 		_move_t = 1.0 / MOVE_HZ
-		Net.send({"type": "facility_move", "match": match_id, "x": _player.position.x, "z": _player.position.z, "yaw": _player.rotation.y})
+		Net.send({"type": prefix + "_move", "match": match_id, "x": _player.position.x, "z": _player.position.z, "yaw": _player.rotation.y})
 
 
 ## One pull of the trigger, as the weapon allows (the server has the last word).
@@ -469,14 +506,14 @@ func fire() -> void:
 	if def.is_empty() or bool(_me.get("reloading", false)):
 		return
 	if _mag <= 0:
-		Net.send({"type": "facility_reload", "match": match_id})
+		Net.send({"type": prefix + "_reload", "match": match_id})
 		_fire_cd = 0.5
 		return
 	_mag -= 1
 	_fire_cd = float(def.get("gap", 0.1))
 	var from := _camera.global_position
 	var dir := _aim_dir()
-	Net.send({"type": "facility_fire", "match": match_id, "y": _player.position.y + EYE, "dx": dir.x, "dy": dir.y, "dz": dir.z})
+	Net.send({"type": prefix + "_fire", "match": match_id, "y": _player.position.y + EYE, "dx": dir.x, "dy": dir.y, "dz": dir.z})
 	var to := from + dir * float(def.get("range", 90))
 	var q := PhysicsRayQueryParameters3D.create(from, to, 0xFFFFFFFF, [_player.get_rid()])
 	var hit := _world.get_world_3d().direct_space_state.intersect_ray(q)
@@ -491,7 +528,7 @@ func throw_frag() -> void:
 		_say("No grenades left", Color(1.0, 0.6, 0.5))
 		return
 	var d := _aim_dir()
-	Net.send({"type": "facility_throw", "match": match_id, "dx": d.x, "dy": d.y, "dz": d.z})
+	Net.send({"type": prefix + "_throw", "match": match_id, "dx": d.x, "dy": d.y, "dz": d.z})
 
 
 func call_streak(kind: String) -> void:
@@ -500,7 +537,7 @@ func call_streak(kind: String) -> void:
 	if not earned.has(kind):
 		_say("%s: %d kills without dying" % [def.get("name", kind), int(def.get("kills", 0))], Color(0.8, 0.8, 0.85))
 		return
-	var msg := {"type": "facility_streak", "match": match_id, "streak": kind}
+	var msg := {"type": prefix + "_streak", "match": match_id, "streak": kind}
 	if bool(def.get("mark", false)):
 		var p := _crosshair_point()
 		msg.x = p.x
@@ -555,8 +592,7 @@ func _process(delta: float) -> void:
 	_tracers = keep
 	if _gunship.visible:
 		var a := _clock * 0.35
-		var size := float(info.get("size", 80))
-		_gunship.position = Vector3(size / 2 + cos(a) * 22.0, 22.0, size / 2 + sin(a) * 22.0)
+		_gunship.position = Vector3(_map_w() / 2 + cos(a) * 22.0, 22.0, _map_d() / 2 + sin(a) * 22.0)
 		_gunship.rotation.y = -a
 	_hit_flash.color.a = maxf(0.0, _hit_flash.color.a - delta * 1.5)
 	_board.visible = Input.is_action_pressed("foot_inventory") and not ended
@@ -568,10 +604,10 @@ func _process(delta: float) -> void:
 
 func _on_message(msg: Dictionary) -> void:
 	match str(msg.get("type", "")):
-		"facility_state":
+		var t when t == prefix + "_state":
 			if str(msg.get("match", "")) == match_id:
 				_snapshot(msg)
-		"facility_end":
+		var t when t == prefix + "_end":
 			if str(msg.get("match", "")) == match_id:
 				_end(msg)
 		"error":
@@ -676,6 +712,7 @@ func _update_bodies(rows: Array) -> void:
 			root.add_child(body)
 			_box(root, Vector3(0.5, 0.14, 0.2), Vector3(0, 1.55, -0.3), Color(0.5, 1.0, 0.9) if s == side else Color(1.0, 0.3, 0.2), false, 3.0)
 			var bar := _tag(root, "", 2.25, Color(0.5, 1.0, 0.9) if s == side else Color(1.0, 0.45, 0.35), 34)
+			_dress_body(root, row)
 			_world.add_child(root)
 			root.position = Vector3(to.x, 0, to.y)
 			_bodies[id] = {"node": root, "from": to, "to": to, "side": s, "bar": bar, "yaw": 0.0}
@@ -691,6 +728,11 @@ func _update_bodies(rows: Array) -> void:
 		if not seen.has(id):
 			_bodies[id].node.queue_free()
 			_bodies.erase(id)
+
+
+## A mode's touch on a body as it's first seen (Supremacy: fodder bots and elite troopers).
+func _dress_body(_root: Node3D, _row: Array) -> void:
+	pass
 
 
 func _update_facility(msg: Dictionary) -> void:
@@ -790,7 +832,7 @@ func _end(msg: Dictionary) -> void:
 ## Leave match: your side fights on (an AI trooper takes your place).
 func leave() -> void:
 	if not ended:
-		Net.send({"type": "facility_leave", "match": match_id})
+		Net.send({"type": prefix + "_leave", "match": match_id})
 	close()
 
 
@@ -813,7 +855,7 @@ func custom_classes() -> Array:
 
 ## Picks a class to fight with (now if you haven't spawned with one yet, else on the next respawn).
 func pick_class(id: String) -> void:
-	Net.send({"type": "facility_class", "match": match_id, "cls": id})
+	Net.send({"type": prefix + "_class", "match": match_id, "cls": id})
 	_say("Class: %s%s" % [_class_name(id), "" if not _alive() else " (from your next respawn)"], Color(0.6, 0.9, 1.0))
 	_close_classes()
 
@@ -981,7 +1023,7 @@ func save_class() -> void:
 	var items := _editor_items()
 	Net.send({"type": "loadout_save", "slot": _editor_slot, "name": _editor_name.text, "items": items})
 	_say("Saved %s: %s" % [_editor_name.text, _items_text(items)], Color(0.6, 0.9, 1.0))
-	Net.send({"type": "facility_class", "match": match_id, "cls": "custom:%d" % _editor_slot})
+	Net.send({"type": prefix + "_class", "match": match_id, "cls": "custom:%d" % _editor_slot})
 	_close_classes()
 
 
@@ -1169,15 +1211,26 @@ func _time(s: int) -> String:
 
 
 func _update_hud() -> void:
+	_top.text = _top_text()
+	_objective.text = _objective_text()
+	_update_vitals()
+
+
+## The line across the top: the rule, map, score, clock and reinforcements.
+func _top_text() -> String:
 	var s := _state
 	var score: Dictionary = s.get("score", {"a": 0, "d": 0})
 	var reinf: Dictionary = s.get("reinforcements", {"a": 0, "d": 0})
 	var target := int(info.get("target", 0))
-	_top.text = "%s · %s   ·   %s %d  –  %d %s  (to %d)   ·   %s   ·   Reinforcements %d / %d" % [
+	return "%s · %s   ·   %s %d  –  %d %s  (to %d)   ·   %s   ·   Reinforcements %d / %d" % [
 		str(info.get("ruleName", "")).to_upper(), str(_map().get("name", "")),
 		_side_name("a"), int(score.get("a", 0)), int(score.get("d", 0)), _side_name("d"), target,
 		_time(int(s.get("left", info.get("seconds", 600)))), int(reinf.get("a", 0)), int(reinf.get("d", 0))]
-	_objective.text = _objective_text()
+
+
+## Health, shield, ammo, streaks, the down notice, the use bar, the scoreboard and the feed.
+func _update_vitals() -> void:
+	_hp_bar.max_value = float(_me.get("hpMax", info.get("hp", 100)))
 	_hp_bar.value = float(_me.get("hp", 100))
 	_shield_bar.max_value = float(_me.get("shieldMax", 50))
 	_shield_bar.value = float(_me.get("shield", 0))
@@ -1260,6 +1313,11 @@ func _update_board() -> void:
 	_board_text.text = "\n".join(lines)
 
 
+## A mode's own objectives on the minimap (`map` draws, `k`: pixels a metre).
+func _minimap_objectives(_map_ctl: Control, _k: float) -> void:
+	pass
+
+
 ## What the minimap shows: walls, objectives, your side, and enemies your side has spotted.
 func minimap_data() -> Dictionary:
 	return {"emp": bool(_state.get("emp", false)), "spotted": _spotted}
@@ -1272,7 +1330,7 @@ class FacilityMinimap:
 	func _draw() -> void:
 		if view == null:
 			return
-		var k := self.size.x / float(view.info.get("size", 80))
+		var k := minf(self.size.x / view._map_w(), self.size.y / view._map_d())
 		draw_rect(Rect2(Vector2.ZERO, self.size), Color(0, 0, 0, 0.55))
 		var data := view.minimap_data()
 		if bool(data.emp):
@@ -1310,6 +1368,7 @@ class FacilityMinimap:
 					for s in fl:
 						var f: Array = fl[s]
 						draw_rect(Rect2(Vector2(float(f[0]), float(f[1])) * k - Vector2(3, 3), Vector2(6, 6)), view._side_colour(str(s)))
+		view._minimap_objectives(self, k)
 		for row in view._state.get("bodies", []):
 			if not bool(row[7]) or str(row[0]) == Net.my_name:
 				continue

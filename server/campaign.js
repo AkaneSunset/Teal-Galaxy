@@ -14,6 +14,7 @@
 // (in memory only) and starts matches through the battles of battle.js.
 
 const F = require('./factions');
+const SUP = require('./supremacy');
 const W = require('./war');
 
 const DAY = 24 * 3600_000;
@@ -24,12 +25,12 @@ const FINAL_MS = DAY; // the final push: wins count double
 const ZONE = 'America/New_York';
 const AI_SHARE = 0.5; // a win against AI only scores this much
 
-// Game modes. `points`: about 1 per 2.5 minutes of a typical match. Sector Battles, Sector Defense
-// and Facility Battles are built so far; the others show on the Campaign screen as coming. `alwaysAi`: fought
+// Game modes. `points`: about 1 per 2.5 minutes of a typical match. All but Space Battles are built
+// so far; it shows on the Campaign screen as coming. `alwaysAi`: fought
 // against AI troops only, so a win always scores half.
 const MODES = {
   sector: { name: 'Sector Battles', kind: 'RTS conquest', points: 10, minutes: 25, sides: 8, open: true },
-  supremacy: { name: 'Supremacy', kind: 'FPS control points, then a ship assault', points: 8, minutes: 20, sides: 16, open: false },
+  supremacy: { name: 'Supremacy', kind: 'FPS control points, then a ship assault', points: 8, minutes: 20, sides: 16, open: true },
   space: { name: 'Space Battles', kind: 'Starfighter assault', points: 6, minutes: 15, sides: 12, open: false },
   facility: { name: 'Facility Battles', kind: 'FPS team against team', points: 4, minutes: 10, sides: 8, open: true },
   defense: { name: 'Sector Defense', kind: 'FPS co-op waves against AI', points: 6, minutes: 15, sides: 4, open: true, alwaysAi: true },
@@ -177,9 +178,9 @@ const FILL_MS = 1000;
 // whose side of a running match has room joins it at once. Sector Defense squads are one faction:
 // they go in when four are queued, or after the wait with however many there are.
 // `battles` is battle.js createBattles(), `defenses` defense.js createDefenses(), `facilities`
-// facility.js createFacilities();
+// facility.js createFacilities(), `supremacies` supremacy.js createSupremacies();
 // `where(me)` says where a pilot is (the planet their carrier is over); `factionOf(me)` their side.
-function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, where, factionOf, send, changed, wait = null }) {
+function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, supremacies = null, where, factionOf, send, changed, wait = null }) {
   const queues = new Map(); // planet id -> [{ me, faction, mode, since }]
 
   function waitMs() {
@@ -212,9 +213,10 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     if (!MODES[mode].open) return fail(`${MODES[mode].name} isn't in the game yet`);
     if (!c.entrants.includes(faction)) return fail(`${F.the(faction)} isn't in the campaign for ${wp.name}: it needs ${Math.round(W.CARRIER_SHARE * 100)}% of the orbit when the week starts`);
     if (where(me).over !== wp.id) return fail(`bring your carrier into ${F.the(faction)}'s naval zone over ${wp.name} to queue`);
-    if (me.battle || me.defense || me.facility) return fail("you're in a match already");
+    if (me.battle || me.defense || me.facility || me.supremacy) return fail("you're in a match already");
     if (mode === 'defense' && !defenses) return fail('Sector Defense is off on this server');
     if (mode === 'facility' && !facilities) return fail('Facility Battles is off on this server');
+    if (mode === 'supremacy' && !supremacies) return fail('Supremacy is off on this server');
     leave(me, true);
     if (!queues.has(wp.id)) queues.set(wp.id, []);
     queues.get(wp.id).push({ me, faction, mode, since: now() });
@@ -243,7 +245,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
   // Into a match: out of the queue, into the battle on their side (or the defense squad).
   function place(e, b, side) {
     leave(e.me, true);
-    const r = side === 'squad' ? defenses.enlist(e.me, b) : e.mode === 'facility' ? facilities.enlist(e.me, b, side) : battles.enlistCampaign(e.me, b, side, e.faction);
+    const r = side === 'squad' ? defenses.enlist(e.me, b) : e.mode === 'facility' ? facilities.enlist(e.me, b, side) : e.mode === 'supremacy' ? supremacies.enlist(e.me, b, side) : battles.enlistCampaign(e.me, b, side, e.faction);
     tell(e.me);
     return r;
   }
@@ -264,6 +266,13 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       room: (m, side) => facilities.room(m, side),
       start: (wp, attacker, defender, c) => facilities.start(wp.id, wp.name, attacker, defender, { fortress: c.bonus === 'fortress' && defender === wp.owner }),
       log: 'A Facility Battle',
+    },
+    supremacy: {
+      running: (planet) => (supremacies ? supremacies.running(planet) : []),
+      sides: (m) => m.factions,
+      room: (m, side) => supremacies.room(m, side),
+      start: (wp, attacker, defender) => supremacies.start(wp.id, wp.name, attacker, defender, { holder: wp.owner, bonus: SUP.bonusOf(wp.id) }),
+      log: 'A Supremacy battle',
     },
   };
 
@@ -299,7 +308,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       const c = g.war.campaigns?.[planetId];
       const wp = W.planet(g, planetId);
       // Pilots who are no longer where they queued, or whose faction left, drop out.
-      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle || e.me.defense || e.me.facility) leave(e.me);
+      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle || e.me.defense || e.me.facility || e.me.supremacy) leave(e.me);
       if (c && wp && defenses) fillDefense(g, wp, c, t);
       if (c && wp) for (const mode of Object.keys(versus)) fillVersus(g, wp, c, t, mode);
     }

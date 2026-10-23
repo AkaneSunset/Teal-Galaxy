@@ -22,6 +22,7 @@ const B = require('./battle');
 const C = require('./campaign');
 const DF = require('./defense');
 const FC = require('./facility');
+const SUP = require('./supremacy');
 const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
@@ -67,6 +68,9 @@ const PILOT_ONLY = {
   facility_move: 'only pilots fight', facility_fire: 'only pilots fight', facility_reload: 'only pilots fight', facility_switch: 'only pilots fight',
   facility_throw: 'only pilots fight', facility_stim: 'only pilots fight', facility_use: 'only pilots fight', facility_streak: 'only pilots fight',
   facility_class: 'only pilots fight', facility_leave: 'only pilots fight', loadout_save: 'only pilots build classes',
+  supremacy_move: 'only pilots fight', supremacy_fire: 'only pilots fight', supremacy_reload: 'only pilots fight', supremacy_switch: 'only pilots fight',
+  supremacy_throw: 'only pilots fight', supremacy_stim: 'only pilots fight', supremacy_use: 'only pilots fight', supremacy_streak: 'only pilots fight',
+  supremacy_class: 'only pilots fight', supremacy_elite: 'only pilots fight', supremacy_leave: 'only pilots fight',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
 const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
@@ -134,11 +138,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   function playerView() {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -198,10 +202,18 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     onEnd: (f, winner, vsAi) => C.score(galaxy, f.planet, 'facility', winner, vsAi, now()),
   });
+  // Supremacy (FPS control points, then boarding the enemy's ship over the planet), scored the same
+  // way, on the same engine and classes as Facility Battles.
+  const supremacies = SUP.createSupremacies({
+    now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
+    ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
+    onEnd: (f, winner, vsAi) => C.score(galaxy, f.planet, 'supremacy', winner, vsAi, now()),
+  });
   // Planet campaigns: the week's matches, and the queues for them.
   C.tick(galaxy, now());
   const matchmaking = C.createMatchmaking({
-    galaxy: () => galaxy, now, battles, defenses, facilities, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
+    galaxy: () => galaxy, now, battles, defenses, facilities, supremacies, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
     send: (c, msg) => send(c.ws, msg), changed, wait: queueWait,
   });
 
@@ -692,6 +704,20 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = facilities.handle(me, msg);
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
+      case 'supremacy_move':
+      case 'supremacy_fire':
+      case 'supremacy_reload':
+      case 'supremacy_switch':
+      case 'supremacy_throw':
+      case 'supremacy_stim':
+      case 'supremacy_use':
+      case 'supremacy_streak':
+      case 'supremacy_class':
+      case 'supremacy_elite':
+      case 'supremacy_leave':
+        result = supremacies.handle(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
       case 'loadout_save':
         result = FC.saveClass(G.pilot(galaxy, me.name), msg.slot, msg.name, msg.items);
         if (!result.ok) return send(ws, { type: 'error', reason: result.reason });
@@ -750,6 +776,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       matchmaking.leave(me, true);
       defenses.leave(me);
       facilities.leave(me);
+      supremacies.leave(me);
       battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
@@ -777,6 +804,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     battles,
     defenses,
     facilities,
+    supremacies,
     matchmaking,
     close() {
       clearInterval(ticker);
@@ -784,6 +812,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       battles.close();
       defenses.close();
       facilities.close();
+      supremacies.close();
       matchmaking.close();
       clearTimeout(saveTimer);
       for (const ws of clients.keys()) ws.terminate();

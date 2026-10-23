@@ -260,7 +260,7 @@ in the demo war) and then fights the holder's AI (or another faction's in the ca
 whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
 match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
 RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
-way. Supremacy and Space Battles show on the screen as coming.
+way, and Supremacy too. Space Battles shows on the screen as coming.
 
 ### Sector Defense
 
@@ -349,6 +349,40 @@ left and everyone down loses.
 
 The server decides everything a pilot could cheat with: each weapon's rate of fire and magazine, what
 each shot hits, through walls and shut doors, and every kill.
+
+### Supremacy
+
+The fourth campaign mode: a big on-foot battle in two phases, best of up to 3 rounds, about 20 to 30
+minutes (`server/supremacy.js`, built on the Facility Battles engine; the view in `game/supremacy/`).
+Up to 16 a side: AI troopers fill the empty slots, and **fodder bots** (cheap, frail bots in each
+faction's own design: Compact Drudges, Ashen Skitters, Luminar Wisps, Coma Husks) fight on both sides.
+A win scores 8 campaign points (half against an all-AI side).
+
+1. **The ground**: a large outdoor sector (Highlands, Canyon or Outskirts) with 3 to 5 control points.
+   Stand on a point to capture it: alone it takes 10 seconds, faster with more of your side (up to 4x).
+   Every point you hold fills your bar; the first full bar wins the ground (after 5 minutes, the fuller
+   bar does).
+2. **Boarding**: the winners have 20 seconds to reach a shuttle (one at their drop ship and one at each
+   point they hold). Every pilot who boards in time adds 15 seconds to the attack.
+3. **The ship**: the fight moves aboard the losers' capital ship (the faction's actual navy ship over
+   the planet, named after its biggest warship there; each faction's ship has its own layout). There's a
+   very large main path to the reactor and a secondary route, joined by passages, with blast doors
+   across both (5,000 health; explosives do double). The boarders have 5 minutes, plus their boarding
+   time, to destroy the reactor (4,500 health). If they do, they win the round; if not, the ship's side
+   wins it. The crew come back slower aboard (8 seconds).
+
+After each round the fight goes back to the ground with the bars reset, and the damage done to a ship
+(doors breached, reactor damage) is kept for that side's next attack on it. First to 2 rounds wins.
+
+- **Respawns** are unlimited (4 seconds), at your drop ship or round a point you hold; aboard, at the
+  hangar or the reactor decks.
+- **Classes**: the same Pick 10 classes as Facility Battles (yours carry over); no kill streaks; power
+  weapons from front-supply drops.
+- **Elite troopers**: kills (10), fodder kills (2) and captures (25) earn battle credits. With 150, ask
+  to come back as an elite trooper (in the class menu, L): 150 health, more shield, 30% more damage.
+- **Planet bonus** for the holder, one per planet: 60 more seconds to attack aboard, battle credits 50%
+  faster, or kill streaks (Sensor Array, Supply Drop, Orbital Barrage).
+- Losing your navy ship in Supremacy is only for the match: its Builder keeps the real ship.
 
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
