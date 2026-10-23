@@ -12,7 +12,6 @@ const MASS := Color(0.45, 1.0, 0.45)
 const ENERGY := Color(1.0, 0.85, 0.3)
 const PANEL_BG := Color(0.02, 0.05, 0.08, 0.86)
 const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "gunship"]
-const BUILDABLE := ["extractor", "generator", "turret", "factory"]
 
 var view: Node # battle_view.gd
 var drop_count := 1
@@ -49,6 +48,8 @@ var _help: Label
 var _minimap: Control
 var _panels: Array[Control] = [] # hidden while driving
 var _take: Button
+var _resign: Button
+var _was_out := false
 
 
 func _ready() -> void:
@@ -99,6 +100,12 @@ func _ready() -> void:
 	leave.text = "Leave battle"
 	leave.pressed.connect(func(): view.leave())
 	row.add_child(leave)
+	_resign = Button.new()
+	_resign.focus_mode = Control.FOCUS_NONE
+	_resign.toggle_mode = true
+	_resign.toggled.connect(func(on): view.vote_resign(on))
+	_resign.tooltip_text = "Your side resigns when 66% of its commanders still in the fight vote to"
+	row.add_child(_resign)
 	_panels.append(top)
 
 	# Pilots by side (top left) and the feed (top right).
@@ -162,6 +169,11 @@ func _ready() -> void:
 	drop.add_child(dv)
 	var dh := HBoxContainer.new()
 	dv.add_child(dh)
+	var fold := Button.new()
+	fold.text = "▾"
+	fold.focus_mode = Control.FOCUS_NONE
+	dh.add_child(fold)
+	fold.tooltip_text = "Fold the call-in panel away"
 	_label(dh, "Call in by drop pod (tier 1, full price)", 15, TEAL).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for n in [1, 5, 10]:
 		var b := _button(dh, "x%d" % n, _set_count.bind(n))
@@ -173,11 +185,18 @@ func _ready() -> void:
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
 	dv.add_child(grid)
-	for t in DROPPABLE:
+	fold.pressed.connect(func():
+		grid.visible = not grid.visible
+		for b in _count_buttons:
+			b.visible = grid.visible
+		fold.text = "▾" if grid.visible else "▸"
+		fold.tooltip_text = "Fold the call-in panel away" if grid.visible else "Open the call-in panel")
+	for t in view.economy.get("droppable", DROPPABLE):
 		var b := _button(grid, "", func(): view.call_in(t, drop_count))
 		b.custom_minimum_size = Vector2(150, 30)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_drop_buttons[t] = b
+	drop.set_meta("drop", true)
 	_panels.append(drop)
 
 	# Driving a unit.
@@ -261,8 +280,12 @@ func _process(delta: float) -> void:
 	_title.text = "%s  ·  %s" % [str(info.get("planetName", "")), str(info.get("sectorName", ""))]
 	_mass.text = "Mass %d  (+%.1f/s)" % [int(view.mass), view.income]
 	_mass_bar.value = view.mass
-	_energy.text = "Energy %d  (+%.0f/s)" % [int(view.energy), view.energy_income]
+	_energy.text = ("Energy %d  (%+.0f/s)" % [int(view.energy), view.energy_income]) + ("  STALLED" if view.stalled else "")
+	_energy.tooltip_text = "Out of energy: your extractors have stopped. Build Power Generators." if view.stalled else ""
+	_energy.add_theme_color_override("font_color", Color(1.0, 0.4, 0.35) if view.stalled else ENERGY)
+	_energy_bar.max_value = view.energy_cap
 	_energy_bar.value = view.energy
+	_mass_bar.max_value = view.mass_cap
 	_units.text = "Units %d / %d" % [view.my_unit_count(), 120]
 	var left := maxf(0.0, (float(view.ends_at) - Net.now_ms()) / 1000.0)
 	_clock.text = "%02d:%02d left" % [int(left) / 60, int(left) % 60]
@@ -285,8 +308,17 @@ func _process(delta: float) -> void:
 		b.disabled = view.mass + 0.01 < cost or view.energy + 0.01 < energy or view.ended
 		b.tooltip_text = _unit_tip(t)
 	var driving: bool = view.driving()
+	# The resign vote: how many of your side's commanders still in the fight have voted.
+	var voters: Array = view.pilots.filter(func(p): return str(p.get("side", "")) == view.my_side and not p.get("out", false))
+	var votes: int = voters.filter(func(p): return p.get("resign", false)).size()
+	_resign.text = ("Resigning %d/%d" if _resign.button_pressed else "Resign %d/%d") % [votes, voters.size()]
+	var out: bool = view.out()
+	_resign.disabled = out or view.ended
+	if out and not _was_out:
+		banner_note("Your ACU was destroyed. You're out: you can watch to the end.")
+	_was_out = out
 	for p in _panels:
-		p.visible = not driving and not view.ended
+		p.visible = not driving and not view.ended and not (out and (p == _command or p.has_meta("drop"))) # out: no orders, no drops
 	_drive.visible = driving and not view.ended
 	if driving:
 		var u: Units.Unit = view.units.get(view.drive_id)
@@ -307,7 +339,7 @@ func _pilots_text() -> String:
 		var who := []
 		for p in view.pilots:
 			if str(p.get("side", "")) == side:
-				who.append(str(p.name))
+				who.append(str(p.name) + (" (out)" if p.get("out", false) else " (resign)" if p.get("resign", false) else ""))
 		var faction = info.get("attacker") if side == "a" else info.get("defender")
 		var label: String = view.side_name(side)
 		if side == "d" and faction == null:
@@ -327,8 +359,10 @@ func _unit_tip(t: String) -> String:
 		s += ", %d damage every %ss, range %d m" % [int(c.damage), str(c.reload), int(c.range)]
 	if t == "aa":
 		s += " (hits air only)"
-	if t == "engineer":
+	if t == "engineer" or t == "acu":
 		s += ". Builds extractors, generators, turrets and factories"
+	if t == "acu":
+		s += ". Your command: if it falls you're out, and it goes up in a big blast"
 	if t == "generator":
 		s += ". %d energy a second" % int(c.get("power", 0))
 	if int(c.get("tier", 1)) > 1:
@@ -346,6 +380,7 @@ static func price(mass: float, energy: float) -> String:
 func _update_command() -> void:
 	var counts := {}
 	var engineers := false
+	var builds_key := "" # which build list: an engineer's, or (only the ACU selected) the ACU's
 	var factory := -1
 	var mine := 0
 	for id in view.selected:
@@ -355,9 +390,11 @@ func _update_command() -> void:
 		counts[u.type] = int(counts.get(u.type, 0)) + 1
 		if u.mine:
 			mine += 1
-			if u.type == "engineer":
+			if view.builder(u.type):
 				engineers = true
-			if u.type == "factory" and u.progress >= 1.0:
+				if builds_key != "engineer":
+					builds_key = u.type
+			if view.catalog.get(u.type, {}).has("upgrade") and u.progress >= 1.0:
 				factory = u.id
 	if counts.is_empty():
 		_selection.text = "Nothing selected. Call units in from the right; they land in your landing zone."
@@ -371,11 +408,14 @@ func _update_command() -> void:
 	_orders.visible = mine > 0
 	_take.disabled = view.selected.size() != 1
 	var want_build := engineers
-	if _build.visible != want_build or (want_build and _build.get_child_count() == 0):
+	if _build.visible != want_build or (want_build and (_build.get_child_count() == 0 or _build.get_meta("key", "") != builds_key)):
 		_build.visible = want_build
-		if want_build and _build.get_child_count() == 0:
+		for c in _build.get_children():
+			c.free()
+		_build.set_meta("key", builds_key)
+		if want_build:
 			_label(_build, "Build:", 14, Color(0.8, 0.85, 0.9))
-			for s in BUILDABLE:
+			for s in view.catalog.get(builds_key, {}).get("builds", []):
 				var c: Dictionary = view.catalog.get(s, {})
 				var b := _button(_build, "%s %s" % [str(c.get("name", s)), price(float(c.get("cost", 0)), float(c.get("energy", 0)))], func(): view.arm("build:" + s))
 				b.tooltip_text = _unit_tip(s)
@@ -384,30 +424,38 @@ func _update_command() -> void:
 	if not want_produce:
 		_produce_key = ""
 		return
-	# The factory's buttons: what its tier makes, at the factory's half price, and its upgrade.
+	# The factory's buttons: what its tier makes, at the factory's half price, and its upgrade (an
+	# extractor or generator: what it gives at its tier, and its upgrade).
 	var f: Dictionary = view.factories.get(factory, {"tier": 1, "upgrade": null})
 	var tier := int(f.tier)
+	var ftype: String = view.units[factory].type if view.units.has(factory) else "factory"
+	var fc: Dictionary = view.catalog.get(ftype, {})
 	var key := "%d/%d/%s" % [factory, tier, f.upgrade != null]
 	if key != _produce_key:
 		_produce_key = key
 		for c in _produce.get_children():
 			c.free()
 		var share := float(view.economy.get("factoryDiscount", 0.5))
-		_label(_produce, "Tier %d factory, half price:" % tier, 14, Color(0.8, 0.85, 0.9))
-		for t in view.catalog.get("factory", {}).get("produces", []):
+		if fc.has("produces"):
+			_label(_produce, "Tier %d %s, half price:" % [tier, str(fc.get("name", "factory")).to_lower()], 14, Color(0.8, 0.85, 0.9))
+		elif ftype == "extractor":
+			_label(_produce, "Tier %d Mass Extractor: %s mass a second, uses %s energy a second" % [tier, str(fc.mass[tier]), str(fc.drain[tier])], 14, Color(0.8, 0.85, 0.9))
+		elif ftype == "generator":
+			_label(_produce, "Tier %d Power Generator: %s energy a second" % [tier, str(fc.powers[tier])], 14, Color(0.8, 0.85, 0.9))
+		for t in fc.get("produces", []):
 			var c: Dictionary = view.catalog.get(t, {})
 			if int(c.get("tier", 1)) > tier:
 				continue
 			var b := _button(_produce, "%s %s" % [str(c.get("name", t)), price(float(c.get("cost", 0)) * share, float(c.get("energy", 0)) * share)], func(): view.produce(t, drop_count))
 			b.tooltip_text = _unit_tip(t)
 		_upgrade_label = null
-		var tiers := int(view.catalog.get("factory", {}).get("tiers", 3))
+		var tiers := int(fc.get("tiers", 3))
 		if f.upgrade != null:
 			_upgrade_label = _label(_produce, "", 14, ENERGY)
 		elif tier < tiers:
-			var up: Dictionary = view.catalog.get("factory", {}).get("upgrade", {}).get(str(tier + 1), {})
+			var up: Dictionary = fc.get("upgrade", {}).get(str(tier + 1), {})
 			var b := _button(_produce, "Upgrade to tier %d  %s" % [tier + 1, price(float(up.get("cost", 0)), float(up.get("energy", 0)))], func(): view.upgrade_factory(factory))
-			b.tooltip_text = "Tier %d makes the Mk %s units: bigger, faster and stronger. The factory makes nothing while it upgrades." % [tier + 1, "I".repeat(tier + 1)]
+			b.tooltip_text = ("Tier %d makes the Mk %s units: bigger, faster and stronger. The factory makes nothing while it upgrades." % [tier + 1, "I".repeat(tier + 1)]) if fc.has("produces") else "More output at tier %d; it works on at its old tier while it upgrades." % (tier + 1)
 	if _upgrade_label and f.upgrade != null:
 		_upgrade_label.text = "Upgrading to tier %d: %d%%" % [int(f.upgrade[0]), roundi(float(f.upgrade[1]) * 100.0)]
 
@@ -426,6 +474,12 @@ func feed(text: String, colour := Color(0.85, 0.9, 0.95)) -> void:
 	l.set_meta("t", 0.0)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_feed.add_child(l)
+
+
+## A message that stays a while (being out of the battle, say).
+func banner_note(text: String) -> void:
+	notice(text, Color(1.0, 0.55, 0.45))
+	_notice_t = 10.0
 
 
 ## A message in the middle of the screen for a few seconds (a refusal, a hint).

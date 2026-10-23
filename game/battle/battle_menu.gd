@@ -1,7 +1,9 @@
 class_name BattleMenu
 extends Control
 ## The Sector Battles screen: opened from the carrier's holo table (and a station's War terminal)
-## for the contested planet below. Shows the planet's sectors on a flat map and in a list, with
+## for the contested planet below. At the top, the planet's campaign (campaign.js): the week's
+## scoreboard, time left, the planet's bonus, and a Queue button per game mode; matchmaking puts the
+## pilot in a match (battle_joined) when one fills. Below, the planet's sectors as before. Shows the planet's sectors on a flat map and in a list, with
 ## their owners, which ones your faction can attack (the server's rules, war.js canAttack and
 ## capture, mirrored by war_info.gd), the battles running there (attacker, defender, pilots), and
 ## the buttons: Attack sector (battle_start) and Join battle (battle_join). Away from any planet it
@@ -36,6 +38,14 @@ var _away: Label
 var _body: Control
 var _waiting := false # a battle_start or battle_join is on its way
 var _pulse := 0.0
+var _camp_head: Label
+var _camp_modes: HFlowContainer
+var _camp_status: Label
+var _modes_key := "" # what the mode buttons were drawn for
+
+## The pilot's place in a matchmaking queue (campaign_queued): {"planet", "mode", "since"}, or {}.
+## The explorer keeps it current whether or not this screen is open.
+static var queued := {}
 
 
 ## Opens the screen over `host` for war planet `planet_id` ("" when the carrier is over no
@@ -83,6 +93,21 @@ func _ready() -> void:
 	top.add_child(close)
 	_sub = _label(page, "", 15, DIM)
 	_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	# The planet's campaign: scoreboard, bonus, and the mode queues.
+	var camp := PanelContainer.new()
+	page.add_child(camp)
+	var cv := VBoxContainer.new()
+	cv.add_theme_constant_override("separation", 6)
+	camp.add_child(cv)
+	_camp_head = _label(cv, "", 16, Color(0.9, 0.94, 0.97))
+	_camp_head.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_camp_modes = HFlowContainer.new()
+	_camp_modes.add_theme_constant_override("h_separation", 8)
+	_camp_modes.add_theme_constant_override("v_separation", 6)
+	cv.add_child(_camp_modes)
+	_camp_status = _label(cv, "", 15, TEAL)
+	_camp_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
 	_away = _label(page, "", 18, DIM)
 	_away.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -163,6 +188,7 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	_pulse += delta
 	_map.queue_redraw()
+	_refresh_campaign_clock()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -189,9 +215,17 @@ func _on_message(msg: Dictionary) -> void:
 	match str(msg.get("type", "")):
 		"battle_joined":
 			# Into the battle: the RTS view takes over the screen (BattleView.active), then we go.
+			# (The explorer may have opened it already, for a match matchmaking started.)
 			_waiting = false
-			BattleView.open(host if host and host.is_inside_tree() else self, msg)
+			if not BattleView.active:
+				BattleView.open(host if host and host.is_inside_tree() else self, msg)
 			_close()
+		"campaign_queued":
+			_modes_key = ""
+			refresh()
+		"defense_joined", "facility_joined", "supremacy_joined", "starfight_joined":
+			_waiting = false
+			_close() # the explorer opens the Sector Defense or Facility Battles view
 		"error":
 			if _waiting or is_visible_in_tree():
 				_waiting = false
@@ -210,6 +244,7 @@ func refresh() -> void:
 	var mine := WarInfo.my_faction()
 	_body.visible = not wp.is_empty()
 	_away.visible = wp.is_empty()
+	_refresh_campaign(wp)
 	if wp.is_empty():
 		_title.text = "No contested world below"
 		_sub.text = "Your side: %s" % WarInfo.faction_name(mine) if mine != "" else "You haven't picked a side yet"
@@ -228,6 +263,82 @@ func refresh() -> void:
 	_refresh_list(wp)
 	_refresh_detail(wp)
 	_refresh_battles(wp)
+
+
+# --- The planet's campaign ------------------------------------------------------------------
+
+static func campaign(planet: String) -> Dictionary:
+	return Net.state.get("war", {}).get("campaigns", {}).get(planet, {})
+
+
+static func time_text(ms: float) -> String:
+	var s := maxi(0, int(ms / 1000.0))
+	if s >= 86400:
+		return "%dd %dh" % [s / 86400, (s % 86400) / 3600]
+	if s >= 3600:
+		return "%dh %02dm" % [s / 3600, (s % 3600) / 60]
+	return "%d:%02d" % [s / 60, s % 60]
+
+
+func _refresh_campaign(wp: Dictionary) -> void:
+	var c := campaign(str(wp.get("id", "")))
+	_camp_head.get_parent().get_parent().visible = not c.is_empty()
+	if c.is_empty():
+		return
+	var mine := WarInfo.my_faction()
+	var cat: Dictionary = Net.catalog.get("campaign", {})
+	var parts := []
+	var entrants: Array = c.get("entrants", [])
+	for f in entrants:
+		parts.append("%s %d" % [WarInfo.faction_name(f), int(c.points.get(f, 0))])
+	var bonus: Dictionary = cat.get("bonuses", {}).get(str(c.get("bonus", "")), {})
+	_camp_head.text = "Campaign for %s: %s
+Planet bonus, %s: %s" % [wp.get("name", ""), "   ·   ".join(parts) if not parts.is_empty() else "no factions in it", str(bonus.get("name", "")), str(bonus.get("text", ""))]
+	# The mode buttons: queue for one, or leave the queue you're in.
+	var key := "%s/%s/%s/%s" % [wp.id, mine, queued.get("planet", ""), queued.get("mode", "")]
+	if key != _modes_key:
+		_modes_key = key
+		for b in _camp_modes.get_children():
+			b.free()
+		var modes: Dictionary = cat.get("modes", {})
+		for m in modes:
+			var md: Dictionary = modes[m]
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(0, 36)
+			if not bool(md.get("open", false)):
+				b.text = "%s: coming soon" % md.name
+				b.disabled = true
+			elif str(queued.get("planet", "")) == str(wp.id) and str(queued.get("mode", "")) == m:
+				b.text = "Leave the %s queue" % md.name
+				b.pressed.connect(func(): Net.send({"type": "campaign_unqueue"}))
+			else:
+				b.text = "Queue: %s (%d pts)" % [md.name, int(md.points)]
+				b.disabled = mine == "" or not entrants.has(mine)
+				b.pressed.connect(func(): Net.send({"type": "campaign_queue", "planet": wp.id, "mode": m}))
+			b.tooltip_text = "%s: %s, about %d minutes. A win scores %d campaign points (half against AI, double in the final push)." % [md.name, md.kind, int(md.minutes), int(md.points)]
+			_camp_modes.add_child(b)
+	_refresh_campaign_clock()
+
+
+func _refresh_campaign_clock() -> void:
+	if _camp_status == null:
+		return
+	var wp := WarInfo.planet(planet_id)
+	var c := campaign(planet_id)
+	if c.is_empty() or wp.is_empty():
+		return
+	var t := Net.now_ms()
+	var lines := ["%s left in this campaign%s" % [time_text(float(c.endsAt) - t), "  ·  FINAL PUSH: wins count double" if t >= float(c.finalAt) else "  ·  final push in " + time_text(float(c.finalAt) - t)]]
+	var mine := WarInfo.my_faction()
+	if mine != "" and not c.get("entrants", []).has(mine):
+		lines.append("%s isn't in this campaign: it needs 25%% of the orbit when the week starts." % WarInfo.faction_name(mine))
+	var waiting: Dictionary = Net.state.get("queues", {}).get(planet_id, {}).get(str(queued.get("mode", "sector")), {})
+	if str(queued.get("planet", "")) == planet_id:
+		var who := []
+		for f in waiting:
+			who.append("%d %s" % [int(waiting[f]), WarInfo.faction_name(f)])
+		lines.append(("In the queue for %s: %s  ·  waiting: %s. " + ("Squads of up to 4 go in together, or on their own after a short wait." if str(queued.mode) == "defense" else "With no opponents queued, you fight the AI after a short wait." + (" AI troopers fill empty slots." if str(queued.mode) in ["facility", "supremacy"] else " AI pilots fill empty slots." if str(queued.mode) == "space" else ""))) % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(queued.mode), {}).get("name", queued.mode), time_text(t - float(queued.since)), ", ".join(who)])
+	_camp_status.text = "\n".join(lines)
 
 
 func _refresh_list(wp: Dictionary) -> void:

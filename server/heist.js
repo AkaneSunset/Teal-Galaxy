@@ -23,6 +23,13 @@ const ITEMS = {
   drive: { name: 'Design drive', cat: 'plan', size: [1, 1], stack: 1, value: 1100, rarity: 'rare' },
   blueprint: { name: 'Blueprint case', cat: 'plan', size: [2, 3], stack: 1, value: 2600, rarity: 'epic', secure: false },
   keycard: { name: 'Access keycard', cat: 'access', size: [1, 1], stack: 1, value: 150, rarity: 'uncommon' },
+  // Ores and alloys from a Builder's Extractor and its refineries (galaxy.js EXTRACTOR_TIERS).
+  copper: { name: 'Copper ore', cat: 'ore', size: [1, 1], stack: 20, value: 3, rarity: 'common' },
+  titanium: { name: 'Titanium ore', cat: 'ore', size: [1, 1], stack: 20, value: 8, rarity: 'common' },
+  iridium: { name: 'Iridium ore', cat: 'ore', size: [1, 1], stack: 10, value: 20, rarity: 'uncommon' },
+  xenite: { name: 'Xenite crystal', cat: 'ore', size: [1, 1], stack: 5, value: 60, rarity: 'rare' },
+  ti_alloy: { name: 'Titanium alloy', cat: 'material', size: [1, 1], stack: 5, value: 160, rarity: 'uncommon' },
+  ir_alloy: { name: 'Iridium alloy', cat: 'material', size: [1, 1], stack: 3, value: 400, rarity: 'rare' },
   // War supplies from the outposts. Shipped home they go in stock like materials; Builders sell
   // them at the Carrier Dock, fill pilots' contracts with them, or donate them to the war.
   fuel: { name: 'Fuel cell', cat: 'supply', size: [1, 1], stack: 10, value: 12, rarity: 'common' },

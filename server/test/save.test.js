@@ -21,6 +21,13 @@ function oldSave() {
   delete g.director;
   delete g.contracts;
   delete g.nextContractId;
+  // Six pads around the command centre, any building on any pad: no Command Centre building.
+  for (const p of g.system.planets) p.buildings = [];
+  g.system.planets[0].buildings = [
+    { slot: 0, type: 'mine', level: 2 },
+    { slot: 1, type: 'spaceport', level: 1 },
+    { slot: 3, type: 'mine', level: 1 },
+  ];
   for (const e of Object.values(g.bases)) {
     for (const k of ['merit', 'market', 'alerts']) delete e[k];
     e.unlocked = ['mine', 'extractor', 'habitat', 'spaceport', 'refinery', 'lab', 'spire', 'foundry'];
@@ -66,6 +73,11 @@ test('an old save with satellite sites, attacks in flight and no war loads and p
     assert.deepStrictEqual([e.merit, e.market, e.alerts], [0, {}, []]);
   }
   assert.deepStrictEqual(g.pilots['Pilot A'].hold, {});
+  // The old pads move onto the nodes: one Extractor (the best Mine), the Star Port, and a Command
+  // Centre at the level that keeps both outposts.
+  const aster = g.system.planets.find((p) => p.id === 'aster');
+  assert.deepStrictEqual(aster.buildings.map((b) => [b.slot, b.type, b.level]), [[1, 'extractor', 2], [0, 'spaceport', 1], [8, 'command', 3]]);
+  assert.deepStrictEqual(g.system.planets.find((p) => p.owner === 'Rin').buildings.map((b) => [b.slot, b.type, b.level]), [[8, 'command', 1]]);
   // The old sites keep working where they are, never dormant, open to any raider.
   const [a, b] = g.system.planets.filter((p) => p.kind === 'satellite');
   assert.strictEqual(a.dormant, false);
@@ -77,6 +89,8 @@ test('an old save with satellite sites, attacks in flight and no war loads and p
   assert.deepStrictEqual(G.chooseFaction(g, 'builder', 'Akane', 'ashen').moved, [a.id, b.id]);
   assert.deepStrictEqual([a.parent, a.sector, b.sector], ['vesper', 'vesper-1', 'vesper-2']);
   assert.strictEqual(a.name, 'Vesper 1 Extractor');
+  assert.match(G.foundSite(g, 'Akane', 'munitions', 'vesper', 'vesper-1').reason, /allows 2 outposts/);
+  G.setCommandLevel(g, 'aster', 5);
   assert.ok(G.foundSite(g, 'Akane', 'munitions', 'vesper', 'vesper-1').ok);
   assert.match(G.foundSite(g, 'Akane', 'fuel', 'cinder', 'cinder-1').reason, /doesn't hold Cinder/);
   G.tick(g, 2000);

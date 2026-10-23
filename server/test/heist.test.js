@@ -11,6 +11,7 @@ const { startServer } = require('../server');
 // Akane's outpost on Cinder, held by her faction (the Terran Compact), and raiders from the Ashen
 // Collective, who may break into it.
 function outpost(g, type, owner = 'Akane') {
+  G.setCommandLevel(g, G.claimBase(g, owner).id, 5); // room for every outpost
   if (!g.bases[owner].faction) G.chooseFaction(g, 'builder', owner, 'compact');
   for (const pilot of ['Pilot A', 'Pilot B']) if (!g.pilots[pilot]?.faction) G.chooseFaction(g, 'explorer', pilot, 'ashen');
   const r = G.foundSite(g, owner, type, 'cinder', 'cinder-1');
@@ -520,6 +521,7 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     phone.send({ type: 'choose_faction', faction: 'compact' });
     pc.send({ type: 'choose_faction', faction: 'ashen' });
     await phone.next((m) => m.type === 'state' && m.state.pilots['Pilot A']?.faction === 'ashen' && m.state.bases.Akane.faction === 'compact');
+    G.setCommandLevel(server.galaxy, 'aster', 2); // outposts open at level 2
     phone.send({ type: 'found_site', facility: 'refinery', planet: 'cinder', sector: 'cinder-1' });
     await phone.next((m) => m.type === 'state' && m.state.system.planets.length === 2);
     const site = server.galaxy.system.planets[1].id;

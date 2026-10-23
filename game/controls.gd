@@ -48,6 +48,10 @@ const ACTIONS := [
 	# A fleet carrier (the demo's ship) is walkable: leave the pilot's chair and walk around it.
 	["leave_seat", "Leave seat (walk your carrier)", [KEY_G], ["button", JOY_BUTTON_RIGHT_STICK]],
 	["outside_view", "Outside view (carrier)", [KEY_V], null],
+	# Space Battles: a starfighter's weapons.
+	["ship_fire", "Space Battles: fire lasers", ["mouse", MOUSE_BUTTON_LEFT], null],
+	["ship_secondary", "Space Battles: missile / torpedo", ["mouse", MOUSE_BUTTON_RIGHT], null],
+	["ship_target", "Space Battles: target ahead", [KEY_T], null],
 	# On foot, inside a facility.
 	["foot_forward", "On foot: forward", [KEY_W], ["axis", JOY_AXIS_LEFT_Y, -1]],
 	["foot_back", "On foot: back", [KEY_S], ["axis", JOY_AXIS_LEFT_Y, 1]],

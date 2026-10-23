@@ -90,6 +90,21 @@ static func model(type: String) -> Dictionary:
 	var top_at := Vector3.ZERO
 	var muzzle := 2.0
 	match type:
+		"acu":
+			# The Armoured Command Unit: a walker twice a tank's height, a cannon arm and a build arm.
+			for sx in [-1.4, 1.4]:
+				_box(body, Vector3(1.2, 4.2, 1.6), Vector3(sx, 2.1, 0), DARK, PLAIN)
+				_box(body, Vector3(1.6, 0.6, 2.6), Vector3(sx, 0.3, 0.3), GREY, PLAIN)
+			_box(body, Vector3(4.6, 1.2, 3.0), Vector3(0, 4.6, 0), GREY, PAINT)
+			_box(body, Vector3(3.8, 2.4, 3.4), Vector3(0, 6.3, 0), LIGHT, PAINT)
+			_box(body, Vector3(2.0, 0.9, 0.3), Vector3(0, 6.9, 1.75), GLASS, PLAIN)
+			_box(body, Vector3(4.0, 0.25, 3.6), Vector3(0, 7.6, 0), WHITE, SIDE_GLOW)
+			_cyl(body, 0.9, 0.5, Vector3(0, 5.6, -1.8), CYAN, GLOW, 10, Basis(Vector3.RIGHT, PI / 2.0))
+			_box(body, Vector3(1.0, 1.0, 4.4), Vector3(2.7, 5.6, 1.2), DARK, PLAIN) # the cannon arm
+			_box(body, Vector3(0.5, 0.5, 1.6), Vector3(2.7, 5.6, 4.0), GREY, PLAIN)
+			_box(body, Vector3(0.8, 0.8, 3.0), Vector3(-2.6, 5.4, 0.8), GREY, PLAIN) # the build arm
+			_box(body, Vector3(0.6, 0.6, 0.6), Vector3(-2.6, 5.4, 2.5), CYAN, GLOW)
+			muzzle = 4.8
 		"engineer":
 			_tracks(body, 1.3, 3.8, 0.9)
 			_box(body, Vector3(2.8, 1.1, 3.4), Vector3(0, 1.3, 0), GREY, PAINT)
@@ -178,6 +193,57 @@ static func model(type: String) -> Dictionary:
 				_cyl(body, 0.7, 0.2, Vector3(sx, -0.7, -0.3), Color.WHITE, SIDE_GLOW, 10)
 			_box(body, Vector3(0.35, 0.35, 1.6), Vector3(0, -0.85, 3.0), DARK, PLAIN)
 			muzzle = 3.8
+		"fighter":
+			_box(body, Vector3(1.4, 1.0, 5.4), Vector3(0, 0, 0), GREY, PAINT)
+			_box(body, Vector3(1.0, 0.6, 1.2), Vector3(0, 0.45, 1.4), GLASS, PLAIN, Vector3(deg_to_rad(15), 0, 0))
+			_box(body, Vector3(6.4, 0.2, 2.0), Vector3(0, 0, -0.8), DARK, PLAIN, Vector3(0, 0, 0))
+			for sx in [-2.8, 2.8]:
+				_box(body, Vector3(0.6, 0.12, 1.4), Vector3(sx, 0.1, -0.8), Color.WHITE, SIDE_GLOW)
+			_box(body, Vector3(0.2, 1.2, 1.0), Vector3(0, 0.7, -2.4), GREY, PAINT)
+			_box(body, Vector3(0.7, 0.5, 0.3), Vector3(0, 0, -2.85), CYAN, GLOW)
+			muzzle = 2.8
+		"bomber":
+			_box(body, Vector3(2.6, 1.6, 7.0), Vector3(0, 0, 0), GREY, PAINT)
+			_box(body, Vector3(1.6, 0.8, 1.6), Vector3(0, 0.6, 2.8), GLASS, PLAIN, Vector3(deg_to_rad(15), 0, 0))
+			_box(body, Vector3(11.0, 0.35, 2.6), Vector3(0, 0.1, -0.4), DARK, PLAIN)
+			for sx in [-3.6, 3.6]:
+				_cyl(body, 0.7, 2.2, Vector3(sx, -0.2, -0.4), GREY, PAINT, 10, Basis(Vector3.RIGHT, PI / 2.0))
+				_box(body, Vector3(1.0, 0.15, 2.2), Vector3(sx, 0.32, -0.4), Color.WHITE, SIDE_GLOW)
+			_box(body, Vector3(1.6, 0.6, 2.4), Vector3(0, -1.0, 0), DARK, PLAIN) # the bomb bay
+			muzzle = 1.0
+		"airfactory":
+			_box(body, Vector3(24, 1.0, 22), Vector3(0, 0.5, 0), DARK, PLAIN)
+			_box(body, Vector3(20, 6.0, 14), Vector3(0, 4.0, -2.0), GREY, PLAIN)
+			_cone(body, 10.0, 7.0, 3.0, Vector3(0, 8.5, -2.0), GREY, PAINT, 4, Basis(Vector3.UP, PI / 4.0))
+			_box(body, Vector3(14, 0.3, 8.0), Vector3(0, 1.1, 7.0), LIGHT, PLAIN) # the launch deck
+			for sx in [-5.0, 5.0]:
+				_box(body, Vector3(0.6, 0.2, 7.0), Vector3(sx, 1.35, 7.0), Color.WHITE, SIDE_GLOW)
+			_box(body, Vector3(1.2, 9.0, 1.2), Vector3(8.5, 5.5, -7.0), DARK, PLAIN)
+			_box(body, Vector3(1.8, 0.8, 1.8), Vector3(8.5, 10.3, -7.0), CYAN, GLOW)
+		"aaturret":
+			_cyl(body, 4.2, 2.0, Vector3(0, 1.0, 0), DARK, PLAIN, 8)
+			_cyl(body, 4.6, 0.25, Vector3(0, 0.3, 0), Color.WHITE, SIDE_GLOW, 8)
+			top = _begin()
+			top_at = Vector3(0, 2.2, 0)
+			_box(top, Vector3(3.0, 1.6, 3.0), Vector3(0, 0.8, 0), GREY, PAINT)
+			for sx in [-0.8, 0.8]:
+				_box(top, Vector3(0.4, 0.4, 4.0), Vector3(sx, 1.9, 1.4), DARK, PLAIN, Vector3(deg_to_rad(-35), 0, 0))
+			muzzle = 4.0
+		"shield":
+			_cyl(body, 4.0, 1.0, Vector3(0, 0.5, 0), DARK, PLAIN, 8)
+			_cyl(body, 1.4, 8.0, Vector3(0, 5.0, 0), GREY, PAINT, 8)
+			for k in 4:
+				var a := k * PI / 2.0
+				_box(body, Vector3(0.8, 4.0, 0.8), Vector3(cos(a) * 2.8, 2.5, sin(a) * 2.8), LIGHT, PAINT, Vector3(0, -a, 0))
+			_cyl(body, 2.2, 0.6, Vector3(0, 9.3, 0), CYAN, GLOW, 12)
+		"massstorage":
+			_cyl(body, 4.6, 1.0, Vector3(0, 0.5, 0), DARK, PLAIN, 8)
+			_cyl(body, 3.8, 3.4, Vector3(0, 2.7, 0), GREY, PAINT, 8)
+			_cyl(body, 3.9, 0.3, Vector3(0, 3.2, 0), MASS, GLOW, 8)
+		"energystorage":
+			_cyl(body, 4.6, 1.0, Vector3(0, 0.5, 0), DARK, PLAIN, 8)
+			_cyl(body, 3.8, 3.4, Vector3(0, 2.7, 0), GREY, PAINT, 8)
+			_cyl(body, 3.9, 0.3, Vector3(0, 3.2, 0), AMBER, GLOW, 8)
 		"extractor":
 			_cyl(body, 6.2, 1.2, Vector3(0, 0.6, 0), DARK, PLAIN, 8)
 			_cyl(body, 5.0, 0.4, Vector3(0, 1.4, 0), GREY, PAINT, 8)

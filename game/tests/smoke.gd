@@ -5,8 +5,8 @@ extends Node
 ## then in two terminals, at the same time:
 ##   godot --headless --path game res://tests/smoke.tscn -- --role=builder
 ##   godot --headless --path game res://tests/smoke.tscn -- --role=explorer
-## The Builder joins the Terran Compact, posts the ice job, founds a Fuel Depot on a sector of
-## Cinder with the ice and opens the War screen. The pilot joins the Ashen Collective, mines and
+## The Builder joins the Terran Compact, posts the ice job, checks outposts wait for Command Centre
+## level 2 and opens the War screen. The pilot joins the Ashen Collective, mines and
 ## delivers the ice, and opens the war map and the War terminal.
 ## The admin check: start the server with ADMIN_KEY=<key> too and add `--admin-key=<key>` after
 ## `--role=`, and both check the Coma Conglomerate is on the faction cards and the Coma director's
@@ -96,33 +96,12 @@ func _builder_steps() -> void:
 			if not _mode._jobs.text.contains("done") or _mode._contracts.get_child_count() == 0:
 				_finish(false, "the Jobs page should list the done job and the contracts")
 				return
-			# The ice and the metal left pay for a Fuel Depot (30 metal, 10 ice), founded from the
-			# Build shop on a sector the faction holds.
-			_mode._shop_pick("fuel")
-			_step = 5
-		5:
-			var pick: Button = null
-			for grid in _mode._found.get_children():
-				if grid is GridContainer:
-					for b in grid.get_children():
-						if pick == null and not b.disabled:
-							pick = b
-			if pick == null:
-				_finish(false, "the sector picker offered no sector of a planet the Terran Compact holds")
+			# A new base's Command Centre (level 1) founds no outposts: the shop says to upgrade it.
+			_mode._refresh_shop(Net.state)
+			if not _mode._shop_hint.text.contains("Command Centre to level 2"):
+				_finish(false, "the outpost shop should ask for Command Centre level 2, not '%s'" % _mode._shop_hint.text)
 				return
-			pick.pressed.emit()
-			_step = 6
-		6:
-			var sites: Array = _mode._my_sites()
-			if sites.is_empty():
-				return
-			var site: Dictionary = sites[0]
-			var sector := WarInfo.sector(WarInfo.planet(str(site.get("parent", ""))), str(site.get("sector", "")))
-			if site.get("faction") != "compact" or sector.get("owner") != "compact" or site.get("dormant", true) or _mode._view != site.id:
-				_finish(false, "the outpost should stand awake on a Compact sector, on screen: %s" % [[site.get("faction"), site.get("sector"), site.get("dormant")]])
-				return
-			_outpost = site.name
-			_mode.show_view("")
+			_outpost = "no outposts before Command Centre level 2"
 			_mode.open_war()
 			_step = 7
 		7:
@@ -137,7 +116,7 @@ func _builder_steps() -> void:
 				if war._director.get_child_count() == 0:
 					_finish(false, "the Director tab opened empty")
 					return
-			_finish(true, "joined the Terran Compact, job done, founded %s, War screen open, %s" % [_outpost, _director_said()])
+			_finish(true, "joined the Terran Compact, job done, %s, War screen open, %s" % [_outpost, _director_said()])
 
 
 func _explorer_steps() -> void:

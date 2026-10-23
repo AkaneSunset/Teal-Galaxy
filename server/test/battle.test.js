@@ -163,7 +163,7 @@ test('mass and drops: paid up front, landing by drop pod six seconds later, a ca
   const b = battle();
   const p = b.pilots.get('A');
   assert.strictEqual(p.mass, 400);
-  assert.deepStrictEqual(B.drop(b, 'A', 'tank', 4), { ok: false, reason: 'not enough mass: 4 Tanks cost 520 mass and 2600 energy' });
+  assert.deepStrictEqual(B.drop(b, 'A', 'tank', 4), { ok: false, reason: 'not enough mass: 4 Tanks cost 520 mass and 1300 energy' });
   assert.strictEqual(B.drop(b, 'A', 'node', 1).reason, 'no such unit');
   assert.strictEqual(B.drop(b, 'A', 'turret', 1).reason, 'no such unit', 'structures are built, not dropped');
   assert.strictEqual(B.drop(b, 'A', 'scout', 11).reason, 'drop 1 to 10 at a time');
@@ -329,7 +329,7 @@ test('orders are limited to 20 a second, drives to 30; other battles and unknown
     assert.ok(m.handle(a, { type: 'battle_order', battle: 'b999', units: [u.id], order: 'stop' }).quiet);
     a.orderWindow = 0;
     assert.ok(m.handle(a, { type: 'battle_order', battle: r.battle, units: [777], order: 'stop' }).quiet);
-    assert.strictEqual(m.handle(a, { type: 'battle_drop', battle: r.battle, unit: 'tank', count: 9 }).reason, 'not enough mass: 9 Tanks cost 1170 mass and 5850 energy');
+    assert.strictEqual(m.handle(a, { type: 'battle_drop', battle: r.battle, unit: 'tank', count: 9 }).reason, 'not enough mass: 9 Tanks cost 1170 mass and 2925 energy');
     m.handle(a, { type: 'battle_possess', battle: r.battle, unit: u.id });
     let drives = 0;
     for (let i = 0; i < 40; i++) {
@@ -552,7 +552,7 @@ test('the defender AI meets a small attack too, and k sets how big its army is',
   const army = (b) => units(b, (u) => u.side === 'd' && u.owner === '' && !['engineer', 'node', 'turret', 'extractor', 'outpost', 'factory'].includes(u.type)).reduce((a, u) => a + C[u.type].cost, 0);
   const compact = play();
   assert.ok(compact.ai.waves >= 1, 'it counter-attacked (after five minutes)');
-  assert.ok(units(compact, (u) => u.side === 'a').length < 7, 'and the wave fought');
+  assert.ok(units(compact, (u) => u.side === 'a' && u.type === 'striker').length < 7, 'and the wave fought');
   // A militia (k 0.6) fields less.
   const weak = battle({ ai: true, defender: null });
   weak.ai.k = 0.6;
@@ -599,7 +599,7 @@ test('the defender wins when time runs out, or when the attackers abandon the fi
     assert.strictEqual(b.endsAt, clock.t + 30 * 60_000);
     clock.t = b.endsAt;
     m.tick();
-    assert.deepStrictEqual(a.inbox.find((x) => x.type === 'battle_end'), { type: 'battle_end', battle: r.battle, winner: 'compact', side: 'd', text: 'Attack failed: the Terran Compact held Cinder 3' });
+    assert.deepStrictEqual(a.inbox.find((x) => x.type === 'battle_end'), { type: 'battle_end', battle: r.battle, winner: 'compact', side: 'd', text: 'Attack failed: the Terran Compact held Cinder 3 (the clock ran out)' });
     assert.strictEqual(W.planet(g, 'cinder').sectors.find((s) => s.id === 'cinder-3').owner, 'compact');
     assert.match(g.war.log.at(-1).text, /Ashen Collective's attack on Cinder 3 failed/);
   } finally {
@@ -607,17 +607,16 @@ test('the defender wins when time runs out, or when the attackers abandon the fi
     m.close();
   }
 
-  // Abandoned: no attacker units, structures or pilots for 60 s.
+  // The attackers' units fall but their ACU stands: still on. The ACU falls: the defenders win.
   const b = battle();
   const u = B.spawn(b, 'scout', 'a', 'A', 100, 100);
   B.removePilot(b, 'A');
-  run(b, 70);
-  assert.strictEqual(b.result, null, 'a unit of theirs still stands');
   u.hp = 0;
-  run(b, 59);
-  assert.strictEqual(b.result, null);
-  run(b, 1.2);
-  assert.deepStrictEqual([b.result, b.how], ['d', 'abandoned']);
+  run(b, 70);
+  assert.strictEqual(b.result, null, 'their ACU still stands');
+  units(b, (x) => x.type === 'acu')[0].hp = 0;
+  run(b, 0.2);
+  assert.deepStrictEqual([b.result, b.how], ['d', 'acus']);
 
   // Abandoned too: units still on the field, but none of the attackers' pilots for five minutes.
   const left = battle();
@@ -679,14 +678,14 @@ test('snapshots: every unit, the dead, shots, building progress, pilots, rounded
   run(b, 0.1);
   const f = B.frame(b);
   const s = B.stateFor(b, f, 'A');
-  assert.deepStrictEqual(Object.keys(s).sort(), ['battle', 'build', 'dead', 'endsAt', 'energy', 'energyIncome', 'factories', 'feed', 'income', 'mass', 'pilots', 'shots', 't', 'type', 'units'].sort());
+  assert.deepStrictEqual(Object.keys(s).sort(), ['battle', 'build', 'dead', 'endsAt', 'energy', 'energyCap', 'energyIncome', 'factories', 'feed', 'income', 'mass', 'massCap', 'pilots', 'shots', 'stalled', 't', 'type', 'units'].sort());
   assert.strictEqual(s.type, 'battle_state');
   assert.strictEqual(s.t, 0.1);
   assert.strictEqual(s.mass, 400.2);
-  assert.deepStrictEqual(s.units.find((u) => u[0] === t.id), [t.id, 'tank', 'a', 'A', 123.5, 654.3, 750, 0, 'idle']);
+  assert.deepStrictEqual(s.units.find((u) => u[0] === t.id), [t.id, 'tank', 'a', 'A', 123.5, 654.3, 750, 0, 'idle', 0, null, 1]);
   assert.deepStrictEqual(s.units.find((u) => u[1] === 'node').slice(1, 4), ['node', 'd', '']);
   assert.ok(s.build.some(([, progress]) => progress === 0));
-  assert.deepStrictEqual(s.pilots, [{ name: 'A', side: 'a' }, { name: 'D', side: 'd' }]);
+  assert.deepStrictEqual(s.pilots, [{ name: 'A', side: 'a', out: false, resign: false }, { name: 'D', side: 'd', out: false, resign: false }]);
   assert.strictEqual(B.stateFor(b, f, 'D').mass, 400.2);
 });
 
@@ -759,8 +758,8 @@ test('over the wire: an attacker from a carrier over Cinder, a defender from its
 
     // Snapshots for both; the attacker's drop shows up, lands, and takes orders.
     att.send({ type: 'battle_drop', battle: joined.battle, unit: 'tank', count: 2 });
-    const dropped = await att.next((m) => m.type === 'battle_state' && m.units.some((u) => u[3] === 'Akane'));
-    const mine = dropped.units.filter((u) => u[3] === 'Akane').map((u) => u[0]);
+    const dropped = await att.next((m) => m.type === 'battle_state' && m.units.some((u) => u[3] === 'Akane' && u[1] === 'tank'));
+    const mine = dropped.units.filter((u) => u[3] === 'Akane' && u[1] !== 'acu').map((u) => u[0]);
     assert.strictEqual(mine.length, 2);
     assert.ok(dropped.mass < 400 - 260 + 20, `paid: ${dropped.mass}`);
     assert.ok((await def.next((m) => m.type === 'battle_state' && m.pilots.length === 2)).units.some((u) => u[3] === 'Akane'));
@@ -801,16 +800,16 @@ test('energy: everything costs mass and energy; the carrier gives 10 a second, e
   const p = b.pilots.get('A');
   assert.strictEqual(p.energy, B.ENERGY_START);
   p.mass = 5000;
-  p.energy = 600;
-  assert.strictEqual(B.drop(b, 'A', 'tank', 1).reason, 'not enough energy: 1 Tank cost 130 mass and 650 energy');
+  p.energy = 300;
+  assert.strictEqual(B.drop(b, 'A', 'tank', 1).reason, 'not enough energy: 1 Tank cost 130 mass and 325 energy');
   assert.ok(B.drop(b, 'A', 'striker', 2).ok);
-  assert.strictEqual(p.energy, 50);
+  assert.strictEqual(p.energy, 24);
   assert.strictEqual(B.energyIncome(b, 'A'), 10);
   const e = B.spawn(b, 'engineer', 'a', 'A', 800, 300);
   assert.ok(B.order(b, 'A', { units: [e.id], order: 'build', structure: 'generator', x: 800, z: 320 }).ok);
   run(b, 6);
   const gen = units(b, (u) => u.type === 'generator')[0];
-  assert.ok(gen?.built, 'a generator: 45 mass, no energy');
+  assert.ok(gen?.built, 'a generator: 20 mass, no energy');
   assert.strictEqual(B.energyIncome(b, 'A'), 30);
   const before = p.energy;
   run(b, 1);
@@ -847,4 +846,160 @@ test('the carrier drops tier 1 only; factories upgrade to tiers 2 and 3 and make
   assert.match(B.upgradeFactory(b, 'A', f.id).reason, /tier 3, the top/);
   const s = B.stateFor(b, B.frame(b), 'A');
   assert.deepStrictEqual(s.factories, [[f.id, 3, null, 0]]);
+});
+
+test('command: every attacker lands an ACU, and the defender gets a Command Node and drop zone for each', () => {
+  const b = battle();
+  const acus = () => units(b, (u) => u.type === 'acu');
+  assert.strictEqual(acus().length, 1);
+  assert.strictEqual(acus()[0].owner, 'A');
+  assert.strictEqual(acus()[0].state, 'drop', 'it comes down by drop pod');
+  assert.strictEqual(B.aliveNodes(b).length, 1);
+  B.addPilot(b, 'A2', 'a', 'ashen');
+  B.addPilot(b, 'A3', 'a', 'ashen');
+  assert.strictEqual(acus().length, 3);
+  const nodes = B.aliveNodes(b);
+  assert.strictEqual(nodes.length, 3, 'one Node per attacking commander');
+  assert.ok(nodes.every((n, i) => nodes.every((m, j) => i === j || Math.hypot(n.x - m.x, n.z - m.z) > 200)), 'spread across the map');
+  // The AI's drops come down by each of its Nodes in turn.
+  const near = (u) => nodes.findIndex((n) => Math.hypot(u.x - n.x, u.z - n.z) < 90);
+  const pods = [0, 1, 2].map(() => B.dropUnits(b, 'd', '', 'scout', 1)[0]);
+  assert.strictEqual(new Set(pods.map(near)).size, 3, 'one drop by each Node');
+  // A defending pilot takes command of a free Node; their drops land by it.
+  B.addPilot(b, 'D', 'd', 'compact');
+  const mine = nodes.find((n) => n.commander === 'D');
+  assert.ok(mine);
+  b.pilots.get('D').mass = 5000;
+  const r = B.drop(b, 'D', 'scout', 1);
+  const u = b.units.get(r.units[0]);
+  assert.ok(Math.hypot(u.x - mine.x, u.z - mine.z) < 90, 'by their own Node');
+  // The ACU builds what an engineer does.
+  run(b, 7);
+  const acu = acus().find((x) => x.owner === 'A');
+  assert.ok(B.order(b, 'A', { units: [acu.id], order: 'build', structure: 'generator', x: acu.x + 25, z: acu.z + 10 }).ok);
+  assert.strictEqual(acu.orders[0].order, 'build');
+});
+
+test("command: a fallen ACU blasts what's round it and puts its commander out; the last one loses the battle", () => {
+  const b = battle();
+  B.addPilot(b, 'A2', 'a', 'ashen');
+  run(b, 7);
+  const acu = units(b, (u) => u.type === 'acu' && u.owner === 'A')[0];
+  const nearby = B.spawn(b, 'tank', 'd', '', acu.x + 15, acu.z);
+  const far = B.spawn(b, 'tank', 'd', '', acu.x + 200, acu.z);
+  const friend = B.spawn(b, 'striker', 'a', 'A2', acu.x - 10, acu.z);
+  acu.hp = 0;
+  run(b, 0.2);
+  assert.ok(!b.units.has(nearby.id), 'the blast destroyed the tank beside it');
+  assert.ok(!b.units.has(friend.id), "and a friend too close to it");
+  assert.strictEqual(far.hp, B.CATALOG.tank.hp, 'but not one 200 m off');
+  assert.strictEqual(b.pilots.get('A').out, true);
+  assert.strictEqual(b.result, null, "A2's ACU still stands");
+  b.pilots.get('A').mass = 5000;
+  assert.match(B.drop(b, 'A', 'scout', 1).reason, /you're out of this battle/);
+  assert.match(B.order(b, 'A', { units: [], order: 'stop' }).reason, /you're out/);
+  units(b, (u) => u.type === 'acu')[0].hp = 0;
+  run(b, 0.2);
+  assert.deepStrictEqual([b.result, b.how], ['d', 'acus']);
+});
+
+test('command: the attackers win when every Command Node is down; a side resigns at 66% of its commanders', () => {
+  const b = battle();
+  B.addPilot(b, 'A2', 'a', 'ashen');
+  const nodes = B.aliveNodes(b);
+  assert.strictEqual(nodes.length, 2);
+  nodes[0].hp = 0;
+  run(b, 0.2);
+  assert.strictEqual(b.result, null, 'one Node still stands');
+  nodes[1].hp = 0;
+  run(b, 0.2);
+  assert.deepStrictEqual([b.result, b.how], ['a', 'node']);
+
+  const r = battle();
+  B.addPilot(r, 'A2', 'a', 'ashen');
+  B.addPilot(r, 'A3', 'a', 'ashen');
+  assert.deepStrictEqual(B.resign(r, 'A', true), { ok: true, votes: 1, voters: 3 });
+  assert.strictEqual(r.result, null);
+  B.resign(r, 'A2', true);
+  assert.deepStrictEqual([r.result, r.how], ['d', 'resign'], 'two of three is 66%');
+  const t = battle();
+  B.addPilot(t, 'A2', 'a', 'ashen');
+  B.resign(t, 'A', true);
+  B.resign(t, 'A', false);
+  B.resign(t, 'A2', true);
+  assert.strictEqual(t.result, null, 'a vote taken back no longer counts');
+});
+
+test('economy tiers: extractors and generators upgrade; an extractor uses 5 generators of energy and stops at zero', () => {
+  const b = battle();
+  const p = b.pilots.get('A');
+  const ex = B.spawn(b, 'extractor', 'a', 'A', 300, 300);
+  assert.strictEqual(B.income(b, 'A'), 2 + B.EXTRACTOR_MASS[1]);
+  assert.strictEqual(B.energyIncome(b, 'A'), 10 - 5 * B.GENERATOR_POWER_T[1], 'one extractor uses 100 energy a second');
+  const gens = [0, 1, 2, 3, 4].map((i) => B.spawn(b, 'generator', 'a', 'A', 400 + i * 20, 300));
+  assert.strictEqual(B.energyIncome(b, 'A'), 10, 'five generators run it');
+  // Upgrade a generator and the extractor.
+  [p.mass, p.energy] = [5000, 25000];
+  assert.ok(B.upgradeFactory(b, 'A', gens[0].id).ok);
+  run(b, 200 / 20 + 0.2);
+  assert.strictEqual(gens[0].tier, 2);
+  assert.strictEqual(B.energyIncome(b, 'A'), 10 + 60 - 20);
+  assert.ok(B.upgradeFactory(b, 'A', ex.id).ok);
+  run(b, 300 / 20 + 0.2);
+  assert.strictEqual(ex.tier, 2);
+  assert.strictEqual(B.income(b, 'A'), 2 + B.EXTRACTOR_MASS[2]);
+  // Out of energy, the extractor stops; the carrier's mass still comes.
+  for (const g of gens) g.hp = 0;
+  run(b, 0.2);
+  p.energy = 1;
+  run(b, 1);
+  assert.strictEqual(p.energy, 0);
+  assert.strictEqual(B.income(b, 'A'), 2);
+  const m = p.mass;
+  run(b, 1);
+  assert.ok(Math.abs(p.mass - m - 2) < 0.01);
+});
+
+test('air factories make air units at tiers; shields soak damage; storage raises the caps', () => {
+  const b = battle();
+  const p = b.pilots.get('A');
+  [p.mass, p.energy] = [5000, 25000];
+  const af = B.spawn(b, 'airfactory', 'a', 'A', 800, 400);
+  assert.strictEqual(B.produce(b, 'A', af.id, 'tank', 1).reason, 'an air factory makes air units only');
+  assert.match(B.produce(b, 'A', af.id, 'fighter_t2', 1).reason, /upgrade it to tier 2/);
+  assert.ok(B.produce(b, 'A', af.id, 'fighter', 1).ok);
+  run(b, B.CATALOG.fighter.cost / 20 + 0.3);
+  assert.strictEqual(units(b, (u) => u.type === 'fighter').length, 1);
+  // A shield generator charges its dome and takes the hits on what's under it.
+  const sh = B.spawn(b, 'shield', 'a', 'A', 500, 500);
+  const t = B.spawn(b, 'tank', 'a', 'A', 510, 500);
+  run(b, 10);
+  assert.ok(sh.shieldHp > 300);
+  const before = sh.shieldHp;
+  const hp = t.hp;
+  b.units.get(t.id).hp; // (the hit comes from an enemy tank)
+  const foe = B.spawn(b, 'tank', 'd', '', 560, 500);
+  foe.cd = 0;
+  run(b, 0.1);
+  assert.strictEqual(t.hp, hp, 'the dome soaked the shot');
+  assert.ok(sh.shieldHp < before);
+  // Storage: more room for mass and energy.
+  B.spawn(b, 'massstorage', 'a', 'A', 700, 700);
+  B.spawn(b, 'energystorage', 'a', 'A', 720, 700);
+  const s = B.stateFor(b, B.frame(b), 'A');
+  assert.deepStrictEqual([s.massCap, s.energyCap], [B.MASS_CAP + 1500, B.ENERGY_CAP + 8000]);
+});
+
+test('veterancy: kills earn stars that heal and toughen a unit', () => {
+  const b = battle();
+  const t = B.spawn(b, 'tank', 'a', 'A', 300, 300);
+  for (let i = 0; i < 3; i++) {
+    const v = B.spawn(b, 'scout', 'd', '', 320, 300);
+    v.lastHit = t.id;
+    v.hp = 0;
+    run(b, 0.1);
+  }
+  assert.strictEqual(t.vet, 1, 'three tier 1 kills: a star');
+  assert.ok(Math.abs(t.maxHp - B.CATALOG.tank.hp * 1.1) < 1e-6);
+  assert.deepStrictEqual(B.frame(b).units.find((u) => u[0] === t.id)[9], 1);
 });

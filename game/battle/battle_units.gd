@@ -47,6 +47,9 @@ class Unit:
 	var orders: Array = [] # [{"order": "move", "p": Vector2}] the pilot gave it, for the waypoint lines
 	var idle_for := 0.0
 	var hit_at := -100.0 # real time it last lost health
+	var vet := 0 # veterancy stars
+	var shield := -1.0 # a shield generator's dome strength (-1: not one)
+	var tier := 1 # a factory's, extractor's or generator's tier
 
 	func ground() -> Vector2:
 		return Vector2(pos.x, pos.z)

@@ -161,7 +161,7 @@ func _update_route_label() -> void:
 # --- Drawing -------------------------------------------------------------------
 
 func _centre() -> Array:
-	return ship_pos if level == Level.LOCAL else System.STAR.pos
+	return ship_pos if level == Level.LOCAL else System.star().pos
 
 
 func _metres_per_pixel() -> float:
@@ -204,8 +204,8 @@ func _draw_map() -> void:
 	_area.draw_string(font, c0 + Vector2(ring_step / mpp + 4, -4), System.format_distance(ring_step), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(colour, 0.5))
 
 	if level == Level.SYSTEM:
-		for body in System.PLANETS + System.homes:
-			_area.draw_arc(c0, System.distance(body.pos, System.STAR.pos) / mpp, 0, TAU, 128, Color(colour, 0.2), 1.0)
+		for body in System.planets():
+			_area.draw_arc(c0, System.distance(body.pos, System.star().pos) / mpp, 0, TAU, 128, Color(colour, 0.2), 1.0)
 
 	# Route.
 	var last := _to_screen(ship_pos)
@@ -283,7 +283,7 @@ func _draw_war_map(font: Font) -> void:
 		_area.draw_circle(p, 18.0, Color(0.02, 0.05, 0.08))
 		_area.draw_arc(p, 18.0, 0, TAU, 48, ring, 2.5)
 		if s.get("home", false):
-			_area.draw_circle(p, 6.0, System.STAR.color)
+			_area.draw_circle(p, 6.0, System.star().color)
 		# The planets ride on the upper half of a ring round the system; its name goes underneath.
 		for i in planets.size():
 			var wp: Dictionary = planets[i]

@@ -239,6 +239,174 @@ system counts as wholly its faction's). Once it holds a sector of a planet, the 
 one it holds. Capital worlds can't be attacked at all. Builders with outposts on a planet get an alert
 when one of their faction's sectors there falls.
 
+### Planet campaigns
+
+Every contested planet (not the capital worlds) is also fought over in **week-long campaigns**, in the
+spirit of Helldivers 2. A campaign runs from Monday 12:00 US Eastern time to the next (the demo war runs
+one every 30 minutes); its last day (the demo's last 5 minutes) is the **final push**, when wins count
+double. The planet's holder and every faction with 25% of its system's orbit when the campaign starts are
+in it. Pilots of those factions queue for a game mode from the **Sector Battles** screen (the carrier's
+holo table, or the War terminal), aboard a carrier over the planet. Every match their faction wins scores
+**campaign points** by how long the mode takes (Sector Battles 10; a win against AI only scores half), and
+when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
+points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
+commanders start Sector Battles with 15% more mass, a fortress world's holder gets an extra wave of lives
+in Sector Defense and of reinforcements in Facility Battles, and a shipyard world's holder flies with 10%
+more hull in Space Battles.
+
+Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
+matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
+in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
+whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
+match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
+RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
+way, and Supremacy and Space Battles too.
+
+### Sector Defense
+
+The second campaign mode, in the spirit of Halo's Firefight: a squad of 1 to 4 pilots of one faction
+holds a walled position on the planet against waves of AI troops (`server/defense.js`, the view in
+`game/defense/`). Queue for it like Sector Battles; four queued go in at once, fewer after the wait (a
+queued pilot also joins a squad of their faction on the planet with room, between waves). The enemy is
+the holder's troops, or, for the holder's own squads, another faction's in the campaign.
+
+- **3 sets of 5 waves**, each harder than the last (troopers, drones, elites, brutes), a **Warlord** boss
+  ending each set. Waves come in through the gaps in the wall; a break of 10 seconds between waves, 20
+  between sets.
+- **Shared lives**: the squad starts with 7 and gets 3 more after each set. A fallen pilot comes back 5
+  seconds later for a life; with none left they stay down, and when everyone is down the match is lost.
+- **Modifiers** switch on as the sets go on: from set 2 *Tough* (enemies have 50% more health), from set 3
+  *Fury* (they hit 40% harder) and *Famine* (fewer supply drops).
+- **Supply drops** land between waves: ammo, med packs, shield cells, and rocket launchers (4 rockets;
+  always at the end of a set). Walk over one to take it.
+- Shields (60) soak damage first and recharge 4 seconds after the last hit; health (100) doesn't.
+- **Cover blocks fire, both ways.** Walls and cover stop rifle shots and rockets (a rocket bursts on the
+  wall, and its blast doesn't come through). Enemies that can't see you hold their fire and work their
+  way round the cover; over low cover they can only see your head and hit half as often. The server
+  checks every shot, yours and theirs, against the cover.
+- **Maps**: *Outpost* and *Ridge* are survival maps. *Relay Station* is an objective map: half of each
+  wave goes for the **shield generator** in the middle (unless a pilot is close to them). It's patched up
+  a quarter between waves; if it's destroyed, the match is lost. The match picks its map.
+- **Bonus round**: after the last wave of set 3 the match is won, and endless waves follow (all modifiers
+  on, a Warlord every fifth wave, no more lives). Every 10 kills add a campaign point to the win, until
+  the squad falls (or leaves, or the generator falls). Nothing in the bonus round can lose the match.
+- W A S D walk, Shift run, Space jump, mouse look, left mouse fire, R reload, 1 rifle, 2 rocket launcher,
+  Esc pause (*Leave match*).
+
+Holding all 15 waves wins the match for the squad's faction (6 points, halved to 3: it's always against
+AI, plus the bonus round's points, all doubled in the final push); a squad that falls, or loses its
+objective, scores for the enemy's. The enemies, the waves and every hit are decided on the server: each
+screen reports where its pilot stands and every shot it fires.
+
+### Facility Battles
+
+The third campaign mode: team against team on foot inside an outpost facility, about 10 minutes
+(`server/facility.js`, the view in `game/facility/`). The planet's holder defends. Sides are 4 to 8
+strong: AI troopers fill the empty slots on both sides, and step aside as pilots join. A win scores 4
+campaign points (half against an all-AI side). Each match plays one of four rule sets, picked at random:
+
+- **King of the Hill**: score while your side alone stands on the hill, which moves every 60 seconds.
+  First to 150.
+- **Domination**: take the 3 control points (stand on one alone for 5 seconds); each held point scores
+  1 every 2 seconds. First to 250.
+- **Team Deathmatch**: first to 50 kills.
+- **Capture the Flag**: carry the enemy's flag to your base while your own is home. First to 3. A dropped
+  flag goes back after 20 seconds, or at once when its side touches it.
+
+Otherwise the most points when time runs out wins (a tie is a draw: no points). Each side shares
+**reinforcements**: 12 for every slot on it (48 at 4v4). Every respawn costs one, and a side with none
+left and everyone down loses.
+
+- **Maps**: hand-made, not Builders' real outposts. Each planet plays its defender's rotation: that
+  faction's Compound, Foundry and Reactor (the same take on them every match there), plus the generic
+  Proving Grounds.
+- **The facility**: doors slide open for anyone close and stop shots while shut. The defenders have
+  turrets, which attackers can shoot down and defenders repair (hold F beside one for 4 seconds).
+  Attackers can hack the power plant (hold F for 6 seconds) to open the locked shortcut doors for good.
+- **Pick 10 classes**: before the match (and whenever you're down; L at any time) pick a class. Four come
+  ready-made (Assault, Close Quarters, Marksman, Heavy), and you can build up to three of your own from
+  10 points: primary and secondary weapons, up to 3 attachments on the primary (Scope, Extended mag,
+  Fast mag, Suppressor), up to 3 perks (Lightweight, Armor, Ghost, Scavenger, Hardline) and equipment
+  (frag grenades, stims). The server keeps your classes on your pilot, for every mode that uses them.
+- **Kill streaks**, by kills without dying (Hardline: one fewer), kept until used:
+  - 3: Sensor Array (every enemy on your map, 20 s)
+  - 4: Supply Drop (a power weapon where you mark)
+  - 5: Orbital Barrage (on the mark)
+  - 7: Gunship (30 s)
+  - 10: Localized EMP (scrambles their map, ends their active streaks)
+  - 25: Tactical Nuke (10 s, then your side wins)
+
+  Keys 5 to 0 call them; a marked one lands where your crosshair is.
+- **Power weapons** (Railgun, Rocket launcher) come only from front-supply drops every 90 seconds and from
+  Supply Drops. Take one by walking over it; 3 switches to it.
+- **The minimap** shows your side, and enemies who fire unsuppressed, are seen by your AI troopers (unless
+  they're Ghosts), or are caught by a Sensor Array.
+- AI troopers push the objective when attacking and hold the choke points when defending, finding their
+  way round the facility.
+- W A S D walk, Shift run, Space jump, mouse look and fire, right mouse aim, R reload, 1/2/3 weapons,
+  G grenade, H stim, F repair or hack, 5-0 kill streaks, L class, Tab scoreboard, Esc pause (*Leave
+  match*).
+
+The server decides everything a pilot could cheat with: each weapon's rate of fire and magazine, what
+each shot hits, through walls and shut doors, and every kill.
+
+### Supremacy
+
+The fourth campaign mode: a big on-foot battle in two phases, best of up to 3 rounds, about 20 to 30
+minutes (`server/supremacy.js`, built on the Facility Battles engine; the view in `game/supremacy/`).
+Up to 16 a side: AI troopers fill the empty slots, and **fodder bots** (cheap, frail bots in each
+faction's own design: Compact Drudges, Ashen Skitters, Luminar Wisps, Coma Husks) fight on both sides.
+A win scores 8 campaign points (half against an all-AI side).
+
+1. **The ground**: a large outdoor sector (Highlands, Canyon or Outskirts) with 3 to 5 control points.
+   Stand on a point to capture it: alone it takes 10 seconds, faster with more of your side (up to 4x).
+   Every point you hold fills your bar; the first full bar wins the ground (after 5 minutes, the fuller
+   bar does).
+2. **Boarding**: the winners have 20 seconds to reach a shuttle (one at their drop ship and one at each
+   point they hold). Every pilot who boards in time adds 15 seconds to the attack.
+3. **The ship**: the fight moves aboard the losers' capital ship (the faction's actual navy ship over
+   the planet, named after its biggest warship there; each faction's ship has its own layout). There's a
+   very large main path to the reactor and a secondary route, joined by passages, with blast doors
+   across both (5,000 health; explosives do double). The boarders have 5 minutes, plus their boarding
+   time, to destroy the reactor (4,500 health). If they do, they win the round; if not, the ship's side
+   wins it. The crew come back slower aboard (8 seconds).
+
+After each round the fight goes back to the ground with the bars reset, and the damage done to a ship
+(doors breached, reactor damage) is kept for that side's next attack on it. First to 2 rounds wins.
+
+- **Respawns** are unlimited (4 seconds), at your drop ship or round a point you hold; aboard, at the
+  hangar or the reactor decks.
+- **Classes**: the same Pick 10 classes as Facility Battles (yours carry over); no kill streaks; power
+  weapons from front-supply drops.
+- **Elite troopers**: kills (10), fodder kills (2) and captures (25) earn battle credits. With 150, ask
+  to come back as an elite trooper (in the class menu, L): 150 health, more shield, 30% more damage.
+- **Planet bonus** for the holder, one per planet: 60 more seconds to attack aboard, battle credits 50%
+  faster, or kill streaks (Sensor Array, Supply Drop, Orbital Barrage).
+- Losing your navy ship in Supremacy is only for the match: its Builder keeps the real ship.
+
+### Space Battles
+
+The fifth campaign mode: starfighters over the planet, 15 minutes at most (`server/space.js`, the cockpit
+in `game/space/`). 12 pilots a side (AI pilots in the empty slots) and more AI fighters filling the sky.
+Each side has a capital ship and two escort frigates, with turrets that track the nearest fighter; a
+capital ship lost here is lost for the battle only. Destroy the enemy capital ship: its two **shield
+generators** first (its subsystems can't be hurt while one stands), then its **engines, bridge and
+reactor**. If neither falls in 15 minutes, the side that did more damage to the other's capital ship and
+frigates wins. A win scores 6 campaign points (half against an all-AI side) and adds **1% to the winner's
+orbital control** of the system until the campaign week ends, on top of what its navies hold.
+
+- **Ship classes**, picked every launch (when you're shot down, pick the next): **Fighter** (fast, good
+  against fighters: lasers and 6 lock-on missiles), **Interceptor** (fastest, light guns, 4 missiles),
+  **Bomber** (slow and tough: 6 torpedoes against capital ships and frigates). You launch from your own
+  fleet carrier, in a row behind your capital ship; you're back 5 seconds after being shot down.
+- **Flying** is the game's flight model: throttle, boost, drift and pips (1-4) as usual.
+- **Weapons**: left mouse fires lasers; T targets what's ahead (a bomber targets the enemy capital ship's
+  weak points that can be hurt now, then its frigates); hold a fighter ahead to lock on and right mouse
+  fires a missile, or a torpedo from a bomber. Front-supply drops (fly through them) give a shield boost
+  or more ordnance.
+- The server checks the speed, the rate of fire, what each bolt hits (capital hulls and frigates block
+  shots), and flies the missiles, torpedoes and AI.
+
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
 *Take sector (demo)*, and every rule above applies.
@@ -500,9 +668,25 @@ sky, the planet and the stations out of the windows. Sit in the chair again (**F
 | Deck | What's there |
 | --- | --- |
 | Bridge | The pilot's chair on its dais, the wide forward window, crew consoles; COMMS (**F**) opens or closes your carrier to visitors |
-| Command Deck | The **holo table** (**F**: [Sector Battles](#sector-battles) for the planet below, with its sectors floating over the table), the war log, the planet-below screen |
+| Command Deck | The **holo table** (**F**: [Sector Battles](#sector-battles) for the planet below, with its sectors floating over the table), the **GALAXY MAP** terminal (**F**: [FTL jump](#ftl-jumps)), the war log, the planet-below screen |
 | Crew Lounge | The lobby: sofas, the bar and its stools (**F** to sit), who's aboard, the pilots' channel |
 | Hangar Deck | Down the lift: parked tanks, strikers, gunships and landers, the launch doors, and the airlock to the station when docked |
+
+#### FTL jumps
+
+A fleet carrier is the only ship with an FTL drive. The **GALAXY MAP** terminal on its Command Deck
+shows every system of the war map with its lanes and where you are; pick a system to see its planets
+(who holds each, whether its campaign is on), then **jump**: to the system, or straight into a planet's
+orbit, as in Helldivers 2. The drive spools up for 5 seconds (the view washes out to blue) and the
+carrier comes out at the far end: in a planet's orbit it lies off the planet's orbital station, in
+range to queue for that planet's campaign. Anyone aboard rides along. Docked, the clamps let go first;
+a queue you were in is left. Only the carrier's owner can jump it, only from aboard, and not in the
+middle of a battle (`carrier_jump`; the server checks).
+
+Teal Prime is the home system as it always was. The war map's other systems (the four faction capitals,
+Marrow Reach and The Drift) are made up when you arrive: a star, and their planets on their orbits,
+the same for everyone, each with its orbital station. Other carriers are only seen in the system they're
+in. Shot down far from home, you're back at Aster High Port.
 
 **Docking and pads.** Near a station, slow down and press **F** to ask for a berth (`dock_request`).
 Each copy of a station has 32 pads, and a full station opens another copy, so the pads decide how many
@@ -533,24 +717,44 @@ by an AI (plus any of its pilots who join), or a militia if nobody holds it. You
 time: starting another gives up the last one unless other pilots are still fighting it.
 
 The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
-4000 energy; your carrier gives 2 mass and 10 energy a second, each Mass Extractor 3 mass more and each
-**Power Generator** (45 mass) 20 energy more. Call units in by drop pod from the panel on the right; they
-land in your landing zone 6 seconds later. The carrier drops **tier 1 units only, at full price**.
-Engineers build extractors on mass points, generators, turrets and land factories.
+4000 energy; your carrier gives 2 mass and 10 energy a second. Call units in by drop pod from the panel
+on the right (the ▾ button folds it away); they land in your landing zone 6 seconds later. The carrier
+drops **tier 1 units only, at full price**.
 
-**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever).
-Select one and its panel shows what its tier makes and its upgrade: tier 2 (400 mass, 2500 energy) and
-tier 3 (900 mass, 6000 energy), paid as it works, making nothing meanwhile. Each tier makes the Mk II or
-Mk III Striker, Tank, Artillery and AA: bigger, faster, tougher and harder hitting than the tier below
-(per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter bigger) and dearer.
-The defender's AI pays mass only.
-The defender's AI keeps a guard round its base and, after giving you five minutes to dig in, sends
-waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction fields
-more than a militia. **Destroy the Command Node** to take the sector (*Sector taken*); the defenders win if they
-hold for 30 minutes, if the attackers have nothing on the field for a minute, or if none of the
-attackers' pilots has been in the battle for five minutes. An attack is called off if the planet locks
-meanwhile (another sector's battle took it). Either way a banner says so and you're back at the holo
-table.
+**Your ACU.** Every attacking commander lands an **Armoured Command Unit**: a walker tougher than a handful
+of tier 1 units that fights and builds everything an engineer's tier 1 list has. You never get another:
+when it falls it goes up in a blast that wrecks most things within 45 metres (yours too) and **you're out**
+(you can watch, but not give orders or call anything in).
+
+**Economy.** Engineers (and the ACU) build **Mass Extractors** on mass points (3 mass a second), **Power
+Generators** (20 mass, 20 energy a second) and storage that raises your caps (Mass Storage +1500, Energy
+Storage +8000). Every extractor **uses as much energy as five generators of its tier make**, and when your
+energy runs out (*STALLED*) your extractors stop until you build more power. Select an extractor or
+generator to upgrade it: extractors make 3, 7 and 16 mass a second at tiers 1 to 3 (and use 100, 300 and
+800 energy), generators 20, 60 and 160 energy. Energy prices are half what they were before extractors used
+energy.
+
+**Factories** make units on the planet for **half price** (mass and energy; it takes as long as ever): the
+**Land Factory** (Strikers, Tanks, Artillery, AA, engineers, scouts) and the **Air Factory** (Fighters
+against air, Bombers against the ground, Gunships). Select one and its panel shows what its tier makes and
+its upgrade: tier 2 (400 mass, 2500 energy) and tier 3 (900 mass, 6000 energy), paid as it works, making
+nothing meanwhile. Each tier makes the Mk II or Mk III units: bigger, faster, tougher and harder hitting
+than the tier below (per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x range, drawn a quarter
+bigger) and dearer. Defences: Turrets, **AA Turrets** and the **Shield Generator** (engineers only), whose
+dome soaks the damage done to everything under it while it has charge (it uses 50 energy a second).
+
+**Veterancy.** Units earn up to five stars (gold pips over the health bar) from kills; each star restores
+a quarter of their health, adds a tenth to it and mends them faster.
+
+**Winning.** The defender gets a **Command Node** (and a drop zone by it) for every attacking commander; a
+defending pilot who joins takes command of one nobody commands. The attackers win when **every Command
+Node** is destroyed; the defenders win when **every attacking ACU** is destroyed or the 30 minutes run out.
+A side **resigns** when 66% of its commanders still in the fight vote to (*Resign*, top bar). The
+defender's AI pays mass only; it keeps a guard round its base and, after giving you five minutes to dig in,
+sends waves at your strongest group (*Enemy wave incoming*); its army grows with yours, and a faction
+fields more than a militia. An attack is called off if the planet locks meanwhile, and the attackers lose
+if none of their pilots has been in the battle for five minutes. Either way a banner says so and you're
+back at the holo table.
 
 | Command | Keys and mouse |
 | --- | --- |
@@ -566,12 +770,30 @@ table.
 | Take control | **P** with one unit selected: WASD drives it, the mouse aims, left mouse fires (+25% damage); **P** or Esc hands it back |
 | Leave battle | The button at the top: your units stay on the field, and Join battle brings you back |
 
-## Play the Builder on your real phone
+## Play the Builder on your real phone (Android)
 
-Run the server on your computer, then export the game to Android from Godot
-(Project > Export, add an Android preset). On the phone's start screen set the server to
-`ws://<your computer's Wi-Fi address>:8080` (and, if you run the galaxy, type its admin key) and
-choose Builder. Both devices must be on the same Wi-Fi.
+1. Start the server on your computer (`cd server && npm start`). It prints the address to use, such as
+   `Phone: ws://192.168.1.20:8080`. If the phone can't connect, allow Node through the computer's firewall.
+2. Install the APK on the phone: copy `teal-galaxy.apk` over (or download it), open it, and allow
+   installing from that app when Android asks.
+3. Open Teal Galaxy, type your name and the server address, and tap **Play**. Both devices must be on
+   the same Wi-Fi. The phone remembers both for next time.
+
+The phone app is the Builder only, held sideways either way up. Android's back button closes the open
+panel, the shop or the War screen a step at a time, and leaves the app when nothing is open.
+
+**Building the APK yourself.** `game/export_presets.cfg` has an **Android** preset (arm64, internet
+permission, the app icon). In Godot install the export templates (Editor > Manage Export Templates),
+set the Android SDK and a keystore in Editor Settings > Export > Android, then Project > Export > Android.
+Or headless, with the keystore in environment variables:
+
+```bash
+export GODOT_ANDROID_KEYSTORE_RELEASE_PATH=/path/to/your.keystore
+export GODOT_ANDROID_KEYSTORE_RELEASE_USER=<alias> GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD=<password>
+godot --headless --path game --export-release Android ../build/teal-galaxy.apk
+```
+
+Sign every build with the same keystore so a new APK installs over the old one.
 
 ## Tests
 

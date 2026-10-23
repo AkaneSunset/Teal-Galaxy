@@ -57,6 +57,10 @@ var mass := 0.0
 var income := 0.0
 var energy := 0.0
 var energy_income := 0.0
+var mass_cap := 5000.0
+var energy_cap := 25000.0
+var stalled := false # out of energy: your extractors have stopped
+var _domes := {} # shield generator id -> its dome
 var factories := {} # your factories: id -> {"tier", "upgrade": [to, done] or null, "queued"}
 var economy := {} # battle_joined's economy: caps, the factory discount, what drops
 var ends_at := 0.0
@@ -185,6 +189,29 @@ func _exit_tree() -> void:
 
 
 ## Leave battle: your units stay on the field (idle), you go back to the carrier.
+## Units and the ACU that build (engineers, the ACU): the catalog says what they build.
+func builder(type: String) -> bool:
+	return catalog.get(type, {}).has("builds")
+
+
+## This pilot as the latest snapshot has them: {"name", "side", "out", "resign"}.
+func me() -> Dictionary:
+	for p in pilots:
+		if str(p.get("name", "")) == Net.my_name:
+			return p
+	return {}
+
+
+## Your ACU fell: you watch, but can't give orders.
+func out() -> bool:
+	return bool(me().get("out", false))
+
+
+## The resign button: vote to resign, or take the vote back.
+func vote_resign(yes: bool) -> void:
+	Net.send({"type": "battle_resign", "battle": battle_id, "yes": yes})
+
+
 func leave() -> void:
 	if not ended:
 		Net.send({"type": "battle_leave", "battle": battle_id})
@@ -429,6 +456,9 @@ func _snapshot(msg: Dictionary) -> void:
 	income = float(msg.get("income", income))
 	energy = float(msg.get("energy", energy))
 	energy_income = float(msg.get("energyIncome", energy_income))
+	mass_cap = float(msg.get("massCap", mass_cap))
+	energy_cap = float(msg.get("energyCap", energy_cap))
+	stalled = bool(msg.get("stalled", false))
 	factories = {}
 	for f in msg.get("factories", []):
 		factories[int(f[0])] = {"tier": int(f[1]), "upgrade": f[2], "queued": int(f[3])}
@@ -476,6 +506,11 @@ func _snapshot(msg: Dictionary) -> void:
 			if not u.pod_down:
 				_fx.dust(Vector3(at.x, terrain.height(at.x, at.y), at.y))
 		u.state = state
+		if row.size() > 11:
+			u.vet = int(row[9])
+			u.shield = float(row[10]) if row[10] != null else -1.0
+			u.tier = int(row[11])
+			u.max_hp = float(catalog.get(u.type, {}).get("hp", 100)) * pow(1.1, u.vet)
 		u.progress = 1.0
 		if u.mine and not u.orders.is_empty():
 			_track_orders(u)
@@ -501,6 +536,7 @@ func _snapshot(msg: Dictionary) -> void:
 			colour = Color(0.45, 0.95, 0.88)
 		_hud.feed(s, colour)
 	_update_mass_marks()
+	_update_domes()
 
 
 ## What the pilot told a unit, crossed off as it gets there (for the waypoint lines).
@@ -548,6 +584,11 @@ func _shots(list: Array) -> void:
 			grid[k] = []
 		grid[k].append(u)
 	for s in list:
+		if s.size() > 5 and str(s[5]) == "blast": # an ACU going up
+			var at := Vector2(float(s[1]), float(s[2]))
+			_fx.explode(Vector3(at.x, terrain.height(at.x, at.y), at.y), 45.0, Color(0.6, 0.95, 1.0))
+			_hud.notice("An ACU went up!", Color(1.0, 0.6, 0.4))
+			continue
 		var u: Units.Unit = units.get(int(s[0]))
 		var to := Vector2(float(s[1]), float(s[2]))
 		if u == null:
@@ -579,6 +620,42 @@ func _shots(list: Array) -> void:
 		elif u.type == "striker":
 			muzzle = u.pos + Vector3(0, 3.3, 0) + dir * 2.2
 		_fx.shot(muzzle, Vector3(to.x, y, to.y), str(s[3]), side_colour(u.side), sim_rate)
+
+
+## Shield domes: a translucent sphere over each shield generator while its dome is up, fainter as
+## it weakens.
+func _update_domes() -> void:
+	for id in _domes.keys():
+		var u: Units.Unit = units.get(id)
+		if u == null:
+			_domes[id].queue_free()
+			_domes.erase(id)
+	for u: Units.Unit in units.values():
+		if u.shield < 0.0:
+			continue
+		var sh: Dictionary = catalog.get(u.type, {}).get("shield", {})
+		if not _domes.has(u.id):
+			var mi := MeshInstance3D.new()
+			var sphere := SphereMesh.new()
+			sphere.radius = float(sh.get("radius", 30))
+			sphere.height = sphere.radius * 2.0
+			sphere.radial_segments = 32
+			sphere.rings = 16
+			var m := StandardMaterial3D.new()
+			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m.cull_mode = BaseMaterial3D.CULL_DISABLED
+			m.albedo_color = Color(0.35, 0.85, 1.0, 0.12)
+			sphere.material = m
+			mi.mesh = sphere
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(mi)
+			_domes[u.id] = mi
+		var dome: MeshInstance3D = _domes[u.id]
+		dome.position = u.pos
+		var share := u.shield / maxf(float(sh.get("hp", 1)), 1.0)
+		dome.visible = share > 0.02
+		(dome.mesh.material as StandardMaterial3D).albedo_color.a = 0.05 + 0.12 * share
 
 
 func _update_mass_marks() -> void:
@@ -678,7 +755,7 @@ func _pods_and_beams() -> void:
 			elif not u.pod_down:
 				u.pod_down = true
 				_fx.dust(u.pos)
-		elif u.type == "engineer" and u.state == "build":
+		elif builder(u.type) and u.state == "build":
 			var target := _build_target(u)
 			if target:
 				var nozzle := u.pos + Basis(Vector3.UP, u.yaw) * Vector3(0.7, 3.6, 2.0)
@@ -904,7 +981,7 @@ func order_units(ids: Array, kind: String, p := Vector2.ZERO, queue := false, ta
 			continue
 		if not queue or kind == "stop":
 			u.orders.clear()
-		if kind != "stop" and (kind != "build" or u.type == "engineer"):
+		if kind != "stop" and (kind != "build" or builder(u.type)):
 			u.orders.append({"order": kind, "p": p if kind != "attack" else units[target].to if units.has(target) else p, "target": target})
 		u.idle_for = 0.0
 	var colour := Color(0.4, 1.0, 0.45) if kind == "move" else (Color(1.0, 0.8, 0.3) if kind == "build" else Color(1.0, 0.4, 0.3))
@@ -922,7 +999,7 @@ func order_to(p: Vector2, target: Units.Unit = null) -> void:
 	if target and not target.friend:
 		order_units(ids, "attack", target.to, queue, target.id)
 		return
-	var engineers := ids.filter(func(id): return units[id].type == "engineer")
+	var engineers := ids.filter(func(id): return units[id].type == "engineer") # (the ACU fights; it builds only from the build menu)
 	var point := _mass_point_near(p, 10.0)
 	if not engineers.is_empty() and not point.is_empty() and _point_free(point):
 		order_units(engineers, "build", Vector2(point.x, point.z), queue, -1, "extractor")
@@ -1014,9 +1091,9 @@ func _place_build(screen: Vector2) -> void:
 	if site == null:
 		_hud.notice("Extractors go on a free mass point" if s == "extractor" else "Something is already built there", Color(1.0, 0.5, 0.42))
 		return
-	var engineers := _my_selected().filter(func(id): return units[id].type == "engineer")
+	var engineers := _my_selected().filter(func(id): return builder(units[id].type))
 	if engineers.is_empty():
-		_hud.notice("Only engineers build")
+		_hud.notice("Only engineers and your ACU build")
 		armed = ""
 		return
 	order_units(engineers, "build", site, Input.is_key_pressed(KEY_SHIFT), -1, s)
@@ -1046,7 +1123,7 @@ func _plural(type: String, n: int) -> String:
 func produce(type: String, count: int) -> void:
 	for id in _my_selected(false):
 		var u: Units.Unit = units[id]
-		if u.type == "factory" and u.progress >= 1.0:
+		if catalog.get(u.type, {}).has("produces") and u.progress >= 1.0:
 			Net.send({"type": "battle_produce", "battle": battle_id, "factory": u.id, "unit": type, "count": count})
 			_hud.feed("%s: %d %s queued" % [str(catalog.factory.name), count, _plural(type, count)], Color(0.45, 0.95, 0.88))
 			return

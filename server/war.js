@@ -268,8 +268,8 @@ function power(ships) {
 // A fleet that arrived where another faction is in orbit (`joining`) has no say until it has fought
 // a round there, so a fleet called home before every round never wins any control. In the demo
 // war every faction is shown at least CARRIER_SHARE of a system that isn't a capital (the shares
-// may then add up past 1).
-function shares(g, systemId) {
+// may then add up past 1). Space Battle wins add their share on top, until they run out (spaceWin).
+function shares(g, systemId, now = Date.now()) {
   const out = Object.fromEntries(Object.keys(F.FACTIONS).map((f) => [f, 0]));
   let total = 0;
   for (const fl of g.war.fleets) {
@@ -280,7 +280,17 @@ function shares(g, systemId) {
   }
   if (total > 0) for (const f of Object.keys(out)) out[f] /= total;
   if (demo && system(g, systemId) && !system(g, systemId).capitalOf) for (const f of Object.keys(out)) out[f] = Math.max(out[f], CARRIER_SHARE);
+  for (const w of g.war.spaceWins?.[systemId] || []) if (w.until > now && Object.hasOwn(out, w.faction)) out[w.faction] = Math.min(1, out[w.faction] + w.share);
   return out;
+}
+
+// A Space Battle won over a system: `share` more orbital control of it for `faction` until `until`
+// (the end of the campaign week), on top of what its navies hold.
+function spaceWin(g, systemId, faction, until, share = 0.01, now = Date.now()) {
+  if (!system(g, systemId) || system(g, systemId).capitalOf || !F.FACTIONS[faction]) return false;
+  g.war.spaceWins ||= {};
+  (g.war.spaceWins[systemId] ||= []).push({ faction, share, until });
+  return recompute(g, now);
 }
 
 function shipList(ships) {
@@ -502,7 +512,12 @@ function warTick(g, now = Date.now()) {
 // Returns whether any of it changed.
 function recompute(g, now = Date.now()) {
   const before = JSON.stringify([g.war.orbital, g.war.planets.map((p) => p.contenders)]);
-  for (const s of g.war.systems) g.war.orbital[s.id] = shares(g, s.id);
+  for (const [id, wins] of Object.entries(g.war.spaceWins || {})) {
+    const left = wins.filter((w) => w.until > now);
+    if (left.length) g.war.spaceWins[id] = left;
+    else delete g.war.spaceWins[id];
+  }
+  for (const s of g.war.systems) g.war.orbital[s.id] = shares(g, s.id, now);
   for (const wp of g.war.planets) wp.contenders = contenders(g, wp, now);
   const changed = JSON.stringify([g.war.orbital, g.war.planets.map((p) => p.contenders)]) !== before;
   return updateDormancy(g, now) || changed;
@@ -564,6 +579,7 @@ module.exports = {
   planet,
   planetOwner,
   systemShare,
+  spaceWin,
   foothold,
   canAttack,
   contenders,

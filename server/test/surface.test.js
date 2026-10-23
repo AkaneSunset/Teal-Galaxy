@@ -23,7 +23,7 @@ function oldSite(g, owner, type, n) {
 test('outposts stand in their sector, apart from each other and from other sectors', () => {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity;
-  G.claimBase(g, 'Akane');
+  G.setCommandLevel(g, G.claimBase(g, 'Akane').id, 5);
   G.demoTopUp(g.bases.Akane);
   G.chooseFaction(g, 'builder', 'Akane', 'compact');
   const sector = (id) => W.planet(g, 'cinder').sectors.find((s) => s.id === id);
@@ -44,7 +44,7 @@ test('outposts stand in their sector, apart from each other and from other secto
 test('sites from before the war get a place on load; places never move, and outposts are left alone', () => {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity;
-  G.claimBase(g, 'Akane');
+  G.setCommandLevel(g, G.claimBase(g, 'Akane').id, 5);
   G.demoTopUp(g.bases.Akane);
   const a = oldSite(g, 'Akane', 'refinery', 1);
   const b = oldSite(g, 'Akane', 'lab', 2);
@@ -57,7 +57,7 @@ test('sites from before the war get a place on load; places never move, and outp
   assert.deepStrictEqual(a.surface, kept);
   assert.ok(Array.isArray(b.surface) && S.angleBetween(a.surface, b.surface) >= 60);
 
-  G.claimBase(g, 'Rin');
+  G.setCommandLevel(g, G.claimBase(g, 'Rin').id, 5);
   G.demoTopUp(g.bases.Rin);
   G.chooseFaction(g, 'builder', 'Rin', 'luminar');
   const op = G.foundSite(g, 'Rin', 'fuel', 'halcyon', 'halcyon-3').site;

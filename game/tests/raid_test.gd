@@ -39,6 +39,7 @@ var _server := "ws://127.0.0.1:8080"
 var _key := "" # the site being raided
 var _port := "" # the planet whose High Port the pilot docks at
 var _laid_out := false
+var _sector := "" # the sector of Halcyon the outpost goes on
 var _overview: Camera3D
 var _t := 0.0 # time in the current combat check
 var _pouch_before := {}
@@ -92,7 +93,27 @@ func _process(delta: float) -> void:
 			Net.send({"type": "choose_faction", "faction": "ashen"})
 			_send_builder({"type": "hello", "role": "builder", "name": BUILDER})
 			_send_builder({"type": "choose_faction", "faction": "luminar"})
-			_send_builder({"type": "found_site", "facility": "refinery", "planet": "halcyon", "sector": sector})
+			_sector = sector
+			_step = "command"
+		"command":
+			# A new base's Command Centre (level 1) founds no outposts: the Builder takes it to level 2
+			# first, then founds the outpost.
+			_builder.poll()
+			var home := {}
+			for p in Net.state.system.planets:
+				if p.get("owner", "") == BUILDER and p.get("kind", "") != "satellite":
+					home = p
+			if home.is_empty():
+				return
+			var level := 1
+			for b in home.get("buildings", []):
+				if b.get("type", "") == "command":
+					level = int(b.get("level", 1))
+			if level < 2:
+				_send_builder({"type": "upgrade_building", "planet": home.id, "slot": 8})
+				_wait = 0.5
+				return
+			_send_builder({"type": "found_site", "facility": "refinery", "planet": "halcyon", "sector": _sector})
 			_step = "fly"
 		"fly":
 			_builder.poll()
