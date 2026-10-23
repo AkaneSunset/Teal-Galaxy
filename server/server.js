@@ -24,6 +24,7 @@ const DF = require('./defense');
 const FC = require('./facility');
 const SUP = require('./supremacy');
 const SB = require('./space');
+const O = require('./orders');
 const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
@@ -77,7 +78,7 @@ const PILOT_ONLY = {
   starfight_move: 'only pilots fly', starfight_fire: 'only pilots fly', starfight_missile: 'only pilots fly', starfight_torpedo: 'only pilots fly', starfight_class: 'only pilots fly', starfight_leave: 'only pilots fly',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
-const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
+const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order'];
 
 // Whether a hello's admin_key is the server's ADMIN_KEY (none set: nobody is an admin). The bytes
 // are compared in constant time, so the key can't be found a character at a time; a key of another
@@ -190,21 +191,43 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     send: (c, msg) => send(c.ws, msg),
   });
 
+  // A match won, for the faction orders it counts toward (the winning side's players credited).
+  function won(planet, mode, winner, loser, names) {
+    if (winner && O.matchWon(galaxy, { planet, mode, winner, loser, names }, now())) changed();
+  }
+
+  // Order rewards: credits to a pilot, or to a Builder's base.
+  function pay(name, credits) {
+    if (Object.hasOwn(galaxy.pilots, name)) galaxy.pilots[name].credits = (galaxy.pilots[name].credits || 0) + credits;
+    else if (galaxy.bases?.[name]) galaxy.bases[name].credits = (galaxy.bases[name].credits || 0) + credits;
+  }
+
   const battles = B.createBattles({
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
-    onCampaignEnd: (b, winner, vsAi) => C.score(galaxy, b.planet, 'sector', winner, vsAi, now()),
+    onCampaignEnd: (b, winner, vsAi) => {
+      const side = winner === b.attacker ? 'a' : 'd';
+      won(b.planet, 'sector', winner, side === 'a' ? b.defender : b.attacker, [...b.pilots.values()].filter((p) => p.side === side).map((p) => p.name));
+      return C.score(galaxy, b.planet, 'sector', winner, vsAi, now());
+    },
   });
   // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
   const defenses = DF.createDefenses({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
-    onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now(), d.result === 'won' ? DF.bonusPoints(d) : 0),
+    onEnd: (d, winner) => {
+      const squad = d.result === 'won';
+      won(d.planet, 'defense', winner, squad ? d.enemy : d.faction, squad ? [...d.pilots.values()].map((p) => p.name) : []);
+      return C.score(galaxy, d.planet, 'defense', winner, true, now(), squad ? DF.bonusPoints(d) : 0);
+    },
   });
   // Facility Battles (FPS team against team, AI filling empty slots), scored the same way. Pilots'
   // Pick 10 classes are kept on their records.
   const facilities = FC.createFacilities({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
-    onEnd: (f, winner, vsAi) => C.score(galaxy, f.planet, 'facility', winner, vsAi, now()),
+    onEnd: (f, winner, vsAi) => {
+      won(f.planet, 'facility', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && b.side === f.result).map((b) => b.name));
+      return C.score(galaxy, f.planet, 'facility', winner, vsAi, now());
+    },
   });
   // Supremacy (FPS control points, then boarding the enemy's ship over the planet), scored the same
   // way, on the same engine and classes as Facility Battles.
@@ -212,13 +235,17 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
-    onEnd: (f, winner, vsAi) => C.score(galaxy, f.planet, 'supremacy', winner, vsAi, now()),
+    onEnd: (f, winner, vsAi) => {
+      won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name));
+      return C.score(galaxy, f.planet, 'supremacy', winner, vsAi, now());
+    },
   });
   // Space Battles (starfighters over the planet): a win scores for the campaign and adds 1% to the
   // winner's orbital control of the system until the campaign week ends.
   const spaceBattles = SB.createSpaces({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onEnd: (f, winner, vsAi) => {
+      won(f.planet, 'space', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.craft.values()].filter((c) => !c.ai && c.side === f.result).map((c) => c.name));
       const pts = C.score(galaxy, f.planet, 'space', winner, vsAi, now());
       const wp = W.planet(galaxy, f.planet);
       const c = galaxy.war.campaigns?.[f.planet];
@@ -610,6 +637,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'donate':
         result = G.donate(galaxy, me.name, msg.item, msg.qty);
+        if (result.ok) O.donated(galaxy, galaxy.bases?.[me.name]?.faction ?? null, me.name, msg.qty * (G.MERIT_VALUE[msg.item] || 0), now());
         break;
       case 'dock_buy':
         result = G.dockBuy(galaxy, me.name, msg.builder, msg.item, msg.qty);
@@ -655,6 +683,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'admin_recall':
         result = D.recall(galaxy, msg.fleet, now());
+        break;
+      case 'admin_order':
+        // The Coma director issues a faction's (or every faction's) order by hand.
+        result = O.issue(galaxy, { faction: msg.faction, title: msg.title, briefing: msg.briefing, tasks: msg.tasks }, now());
         break;
       case 'admin_capture':
         result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
@@ -843,6 +875,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     try {
       if (G.tick(galaxy, now())) changed();
       if (C.tick(galaxy, now())) changed();
+      if (O.tick(galaxy, pay, now())) changed();
     } catch (err) {
       console.error('error in the galaxy tick:', err);
     }

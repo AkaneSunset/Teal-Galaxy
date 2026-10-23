@@ -21,6 +21,7 @@ const DirectorPanel := preload("res://director_panel.gd")
 signal closed
 signal wants_faction # the pilot has no side yet and asked to pick one
 signal wants_battles(planet_id: String) # the Sector Battles screen for this planet
+signal wants_orders # your faction's orders from its High Command
 
 var colour := Color(0.35, 0.95, 0.88)
 var planet_id := "cinder"
@@ -186,6 +187,11 @@ func _ready() -> void:
 	_battles.tooltip_text = "Attack a sector from a carrier in this orbit, or join a battle running here"
 	_battles.pressed.connect(func(): wants_battles.emit(planet_id))
 	takes.add_child(_battles)
+	var orders := Button.new()
+	orders.text = "Orders"
+	orders.tooltip_text = "Your faction's orders from its High Command"
+	orders.pressed.connect(func(): wants_orders.emit())
+	takes.add_child(orders)
 	_take_coma = Button.new()
 	_take_coma.text = "Take for Coma"
 	_take_coma.add_theme_color_override("font_color", WarInfo.faction_color("coma").lightened(0.3))

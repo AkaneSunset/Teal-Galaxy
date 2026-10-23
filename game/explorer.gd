@@ -41,6 +41,7 @@ const WarInfo := preload("res://war_info.gd")
 const FactionPicker := preload("res://faction_picker.gd")
 const WarPanel := preload("res://war_panel.gd")
 const JumpPanel := preload("res://jump_panel.gd")
+const OrdersPanel := preload("res://orders_panel.gd")
 const TradePanel := preload("res://trade_panel.gd")
 const Carrier := preload("res://carrier.gd")
 const Place := preload("res://place.gd")
@@ -137,6 +138,8 @@ var _picker: Control # the faction choice, for a pilot with no side yet
 var _picker_dismissed := false # "Not now": the ship's menu offers it again
 var _war_panel: Control
 var _jump_panel: Control # the carrier's galaxy map (GALAXY MAP terminal): FTL jumps
+var _orders_panel: Control # your faction's orders (HIGH COMMAND terminal, or the War terminal's Orders)
+var _orders_seen := "" # the orders you've been told of
 var _jump := {} # a jump under way: {"system", "planet", "owner", "left", "total", "arrived"}
 var _jump_veil: ColorRect
 var _jump_text: Label
@@ -607,6 +610,10 @@ func _build_hud() -> void:
 	war_layer.add_child(_jump_panel)
 	_jump_panel.closed.connect(_close_panel)
 	_jump_panel.jump_requested.connect(_request_jump)
+	_orders_panel = OrdersPanel.new()
+	_orders_panel.visible = false
+	war_layer.add_child(_orders_panel)
+	_orders_panel.closed.connect(_close_panel)
 	# The jump itself: the view washes out to the FTL tunnel's blue, then back in at the far end.
 	_jump_veil = ColorRect.new()
 	_jump_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -625,6 +632,7 @@ func _build_hud() -> void:
 	_war_panel.closed.connect(_close_panel)
 	_war_panel.wants_faction.connect(_show_picker)
 	_war_panel.wants_battles.connect(_open_battles)
+	_war_panel.wants_orders.connect(func(): _hide_panels(); _open_orders())
 	_trade = TradePanel.new()
 	_trade.visible = false
 	war_layer.add_child(_trade)
@@ -1458,6 +1466,8 @@ func _on_service(kind: String) -> void:
 			_open_war()
 		"jump":
 			_open_jump()
+		"orders":
+			_open_orders()
 		"contracts":
 			_open_trade("contracts")
 		"dock_market":
@@ -1878,7 +1888,7 @@ func _panel_open() -> bool:
 ## Opens one of the war's screens (the faction choice, the War terminal, the dock market or
 ## contracts) over what you're doing: flying, seated in your ship, or standing at a console.
 func _open_panel(panel: Control) -> void:
-	for p in [_picker, _war_panel, _trade, _jump_panel]:
+	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel]:
 		p.visible = p == panel
 	if "colour" in panel:
 		panel.colour = controls.hud_color()
@@ -1907,7 +1917,7 @@ func _close_panel() -> void:
 
 
 func _hide_panels() -> void:
-	for p in [_picker, _war_panel, _trade, _jump_panel]:
+	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel]:
 		p.visible = false
 
 
@@ -1923,6 +1933,36 @@ func _here() -> String:
 
 
 ## The War terminal, on a planet: the one you're at if it's contested, else the first of the system.
+# --- Faction orders --------------------------------------------------------------
+
+## The HIGH COMMAND terminal: your faction's orders (orders_view.gd).
+func _open_orders() -> void:
+	_orders_panel.open()
+	_open_panel(_orders_panel)
+
+
+## A new order from your High Command (or a Coma offensive): word of it, once.
+func _tell_new_orders(side: String) -> void:
+	if side == "":
+		return
+	var op = Net.state.get("war", {}).get("orders", {}).get("op")
+	if not (op is Dictionary):
+		return
+	var running: Array = []
+	for o in op.get("factions", {}).get(side, {}).get("orders", []) + op.get("coma", []):
+		if str(o.status) == "active":
+			running.append(o)
+	var key := ",".join(running.map(func(o): return str(o.id)))
+	if key == _orders_seen:
+		return
+	var first := _orders_seen == ""
+	_orders_seen = key
+	if first or running.is_empty():
+		return
+	var o: Dictionary = running[-1]
+	_say("New orders from %s: \"%s\". See HIGH COMMAND on your carrier, or the War terminal." % [o.issuer, o.title])
+
+
 # --- FTL jumps (fleet carriers only) ---------------------------------------------
 
 ## The GALAXY MAP terminal aboard your fleet carrier: where to jump it.
@@ -2339,6 +2379,7 @@ func _on_state(_state: Dictionary) -> void:
 	_picker.refresh()
 	if _war_panel.visible:
 		_war_panel.refresh()
+	_tell_new_orders(side)
 	if _trade.visible:
 		_trade.refresh()
 	if _docked != "" and _raid == null and _station and _dock_panel.visible:

@@ -11,8 +11,9 @@ extends "res://place.gd"
 ## Two levels joined by a lift:
 ##   Command level (floor y = 0), bow to stern:
 ##     Bridge          the pilot's chair on its dais, a wide forward window, side consoles
-##     Command Deck    the holo table (F: Sector Battles), the GALAXY MAP terminal (F: FTL jump to
-##                     any system or planet), the war log wall, a window and the planet-below screen
+##     Command Deck    the holo table (F: Sector Battles), the HIGH COMMAND terminal (F: your faction's
+##                     orders), the GALAXY MAP terminal (F: FTL jump to any system or planet), the war
+##                     log wall, a window and the planet-below screen
 ##     Main corridor   with the lift lobby to starboard
 ##     Crew Lounge     the lobby: seats, the bar, who's aboard, the crew channel
 ##   Hangar Deck (floor y = -16): a tall bay with parked drones (tanks, strikers, gunships) and
@@ -338,7 +339,10 @@ func _build_command_deck() -> void:
 	for k in 4:
 		var a := k * TAU / 4.0 + PI / 4.0
 		var at := c + Vector3(cos(a), 0, sin(a)) * 6.8
-		_console(self, at, (c - at).normalized(), ["TACTICAL", "FLEET", "DRONE CONTROL", "GALAXY MAP"][k], ["Sectors below", "Carrier group", "Drones ready", "FTL jump ready"][k], 1.6)
+		_console(self, at, (c - at).normalized(), ["HIGH COMMAND", "FLEET", "DRONE CONTROL", "GALAXY MAP"][k], ["Orders", "Carrier group", "Drones ready", "FTL jump ready"][k], 1.6)
+		if k == 0:
+			# High Command: your faction's orders (explorer.gd, orders_view.gd).
+			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), func(): return "High Command: press %s for your faction's orders" % _key(), func(): service.emit("orders"))
 		if k == 3:
 			# The galaxy map: jump the carrier to any system or planet (explorer.gd, jump_panel.gd).
 			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), _jump_prompt, func(): service.emit("jump"))

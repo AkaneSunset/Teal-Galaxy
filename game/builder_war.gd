@@ -37,6 +37,7 @@ var _orbit: Control # the orbital control bars of the picked system
 var _detail: VBoxContainer
 var _supply: VBoxContainer
 var _director: VBoxContainer
+var _orders: VBoxContainer # your faction's orders from its High Command (orders_view.gd)
 var _key := "" # what the right-hand side was built from; it's rebuilt only when that changes
 var _ticks: Array[Callable] = [] # text that changes between rebuilds (ETAs, locks, stock)
 var _send := {} # ship id -> how many to send
@@ -71,7 +72,7 @@ func _ready() -> void:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(gap)
-	for t in [["map", "Map", "nav_map"], ["supply", "Supply", "vault"], ["director", "Director", "settings"]]:
+	for t in [["map", "Map", "nav_map"], ["orders", "Orders", "mission_complete"], ["supply", "Supply", "vault"], ["director", "Director", "settings"]]:
 		var b := Button.new()
 		b.text = t[1]
 		b.icon = load(ui.ICONS + t[2] + ".png")
@@ -115,6 +116,8 @@ func _ready() -> void:
 	_director = VBoxContainer.new()
 	_director.add_theme_constant_override("separation", 6)
 	right.add_child(_director)
+	_orders = preload("res://orders_view.gd").new()
+	right.add_child(_orders)
 	show_tab("map")
 
 
@@ -136,6 +139,7 @@ func show_tab(id: String) -> void:
 	_detail.visible = id == "map"
 	_supply.visible = id == "supply"
 	_director.visible = id == "director"
+	_orders.visible = id == "orders"
 	_key = ""
 	if not Net.state.is_empty():
 		refresh(Net.state)
@@ -156,6 +160,12 @@ func refresh(state: Dictionary) -> void:
 	_tab_buttons.director.visible = ui._admin()
 	if _tab == "director" and not ui._admin():
 		show_tab("map")
+		return
+	if _tab == "orders":
+		# The orders keep their own key (they tick down every second).
+		var f = e.get("faction")
+		_orders.show_for(state, str(f) if f != null else "", Net.my_name)
+		_map.queue_redraw()
 		return
 	var key := JSON.stringify({"map": _detail_key, "supply": _supply_key, "director": _director_key}[_tab].call(state, war))
 	if key != _key:
@@ -853,6 +863,19 @@ func _build_director(state: Dictionary, war: Dictionary) -> void:
 	var title: Label = ui._label(_director, 22)
 	title.text = "Coma director"
 	_note(_director, "The Coma Conglomerate's AI. It sends armadas to win orbits, pushing hardest on the strongest player faction. Players see the armadas, never these settings.")
+	# Game Master: faction orders by hand (server admin_order), in place of the ones running.
+	var orders := HBoxContainer.new()
+	orders.add_theme_constant_override("separation", 6)
+	_director.add_child(orders)
+	var ol: Label = ui._label(orders, 15)
+	ol.text = "Orders:"
+	for f in ["compact", "ashen", "luminar", "all"]:
+		var b := Button.new()
+		b.text = "Coma offensive (all)" if f == "all" else "New %s order" % ui._faction_name(f).get_slice(" ", 1 if f == "compact" else 0)
+		b.tooltip_text = "Issue a fresh order in place of the one running" if f != "all" else "One order for all three factions: beat the Coma"
+		var fid: String = f
+		b.pressed.connect(func(): Net.send({"type": "admin_order", "faction": fid}))
+		orders.add_child(b)
 
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 12)

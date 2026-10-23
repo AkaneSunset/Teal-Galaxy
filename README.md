@@ -262,6 +262,35 @@ match is fought on one of the planet's sector maps but takes no sector: its winn
 RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
 way, and Supremacy and Space Battles too.
 
+### Faction orders
+
+Each faction's High Command gives orders, as Helldivers 2's Major Orders do (`server/orders.js`). They
+come in **operations** of three orders, two weeks long from a campaign Monday (the demo war: an hour,
+twenty minutes an order). Win two of the three and the operation is won.
+
+- **Issuers and voices:** Terran High Command, the Collective's Choir and the Accord Council each issue
+  their faction's orders, with briefings and outcomes in their own voice.
+- **Coma offensive:** now and then one slot is a single order for all three player factions: win matches
+  against the Coma. Its outcome counts for everyone.
+- **Kinds of order:** an offensive (lead a planet's campaign at the deadline, and win matches there),
+  hold the line (nobody may outscore you on your planets, and the Builders send war supply), or a war
+  effort (win matches in one mode, and the war supply).
+- **What counts:** normal play. Campaign match wins in any mode count, credited to the players on the
+  winning side. Builders' donations to war supply count by their War Merit.
+- **Targets:** they scale with the faction, and the briefing says how: 3 wins and 2 more per pilot (up
+  to 12), 60 War Merit and 30 per Builder (up to 10). A faction with no Builders isn't asked for
+  donations.
+- **Rewards:** a won order pays 250 credits to everyone who took part and 50 to every member. A won
+  operation pays 750 credits to every member, plus a commendation with the operation's name. A failed
+  order pays nothing, and High Command puts its own spin on it.
+- **Where to see them:** the **HIGH COMMAND** terminal on a carrier's Command Deck, the War terminal's
+  **Orders**, and the Builder app's War screen (**Orders** tab). Each shows the operation, the three
+  slots, the running order's briefing and tasks with live progress, the deadline, the reward and your own
+  part, plus an **archive** of past operations. Pilots are told when a new order comes in, and every
+  order and outcome goes in the war log.
+- **The Coma director** (an admin) can issue a faction's order by hand, or a Coma offensive for all, from
+  the Director tab (`admin_order`).
+
 ### Sector Defense
 
 The second campaign mode, in the spirit of Halo's Firefight: a squad of 1 to 4 pilots of one faction

@@ -111,12 +111,20 @@ func _builder_steps() -> void:
 				return
 			if not _director_as_expected(war._tab_buttons.director.visible):
 				return
+			# The Orders tab: the Compact's orders from Terran High Command.
+			war.show_tab("orders")
+			war.refresh(Net.state)
+			var said: Array = war._orders.find_children("*", "Label", true, false).map(func(l): return l.text)
+			if not said.has("HIGH COMMAND ORDERS") or not (" ".join(said).contains("Operation ") or " ".join(said).contains("No operation yet")):
+				_finish(false, "the Orders tab should show the faction's orders: %s" % str(said))
+				return
+			war.show_tab("map")
 			if _admin:
 				war.show_tab("director")
 				if war._director.get_child_count() == 0:
 					_finish(false, "the Director tab opened empty")
 					return
-			_finish(true, "joined the Terran Compact, job done, %s, War screen open, %s" % [_outpost, _director_said()])
+			_finish(true, "joined the Terran Compact, job done, %s, War screen open (with its Orders), %s" % [_outpost, _director_said()])
 
 
 func _explorer_steps() -> void:
