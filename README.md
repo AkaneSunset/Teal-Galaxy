@@ -668,9 +668,25 @@ sky, the planet and the stations out of the windows. Sit in the chair again (**F
 | Deck | What's there |
 | --- | --- |
 | Bridge | The pilot's chair on its dais, the wide forward window, crew consoles; COMMS (**F**) opens or closes your carrier to visitors |
-| Command Deck | The **holo table** (**F**: [Sector Battles](#sector-battles) for the planet below, with its sectors floating over the table), the war log, the planet-below screen |
+| Command Deck | The **holo table** (**F**: [Sector Battles](#sector-battles) for the planet below, with its sectors floating over the table), the **GALAXY MAP** terminal (**F**: [FTL jump](#ftl-jumps)), the war log, the planet-below screen |
 | Crew Lounge | The lobby: sofas, the bar and its stools (**F** to sit), who's aboard, the pilots' channel |
 | Hangar Deck | Down the lift: parked tanks, strikers, gunships and landers, the launch doors, and the airlock to the station when docked |
+
+#### FTL jumps
+
+A fleet carrier is the only ship with an FTL drive. The **GALAXY MAP** terminal on its Command Deck
+shows every system of the war map with its lanes and where you are; pick a system to see its planets
+(who holds each, whether its campaign is on), then **jump**: to the system, or straight into a planet's
+orbit, as in Helldivers 2. The drive spools up for 5 seconds (the view washes out to blue) and the
+carrier comes out at the far end: in a planet's orbit it lies off the planet's orbital station, in
+range to queue for that planet's campaign. Anyone aboard rides along. Docked, the clamps let go first;
+a queue you were in is left. Only the carrier's owner can jump it, only from aboard, and not in the
+middle of a battle (`carrier_jump`; the server checks).
+
+Teal Prime is the home system as it always was. The war map's other systems (the four faction capitals,
+Marrow Reach and The Drift) are made up when you arrive: a star, and their planets on their orbits,
+the same for everyone, each with its orbital station. Other carriers are only seen in the system they're
+in. Shot down far from home, you're back at Aster High Port.
 
 **Docking and pads.** Near a station, slow down and press **F** to ask for a berth (`dock_request`).
 Each copy of a station has 32 pads, and a full station opens another copy, so the pads decide how many

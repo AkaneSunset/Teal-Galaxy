@@ -55,6 +55,7 @@ const BUILDER_ONLY = {
   place_piece: BASE, remove_piece: BASE, clear_obstacle: BASE, upgrade_building: BASE,
   found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', set_ask: 'only Builders run a Star Port', market_sell: 'only Builders run a Star Port', set_refinery: 'only Builders run an Extractor', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war',
 };
+const JUMP_S = 5; // a fleet carrier's FTL jump spools up this long
 const PILOT_ONLY = {
   collect: 'only pilots carry cargo', deliver: 'only pilots carry cargo', sell: 'only pilots sell to the Fence',
   dock_buy: 'only pilots buy at a Carrier Dock', post_contract: 'only pilots post contracts', cancel_contract: 'only pilots post contracts', demo_capture: 'only pilots take sectors',
@@ -72,6 +73,7 @@ const PILOT_ONLY = {
   supremacy_move: 'only pilots fight', supremacy_fire: 'only pilots fight', supremacy_reload: 'only pilots fight', supremacy_switch: 'only pilots fight',
   supremacy_throw: 'only pilots fight', supremacy_stim: 'only pilots fight', supremacy_use: 'only pilots fight', supremacy_streak: 'only pilots fight',
   supremacy_class: 'only pilots fight', supremacy_elite: 'only pilots fight', supremacy_leave: 'only pilots fight',
+  carrier_jump: 'only pilots fly carriers',
   starfight_move: 'only pilots fly', starfight_fire: 'only pilots fly', starfight_missile: 'only pilots fly', starfight_torpedo: 'only pilots fly', starfight_class: 'only pilots fly', starfight_leave: 'only pilots fly',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
@@ -233,6 +235,29 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
 
   // Where a pilot is, for the battle rules: the planet the carrier they're aboard is over (its
   // owner flying in that orbit, or docked at that planet's station), and the station they're at.
+  // An FTL jump, from the galaxy map aboard your own fleet carrier (the only ship that has the
+  // drive): to another system, or straight into a planet's orbit, after JUMP_S seconds spooling up.
+  // Anyone aboard rides along. Out of any queue, and released from a berth, first.
+  function carrierJump(me, msg) {
+    if (!W.isDemo()) return { ok: false, reason: 'only fleet carriers can jump, and pilots here fly ships with no FTL drive' };
+    if (me.space !== `ship:${me.name}`) return { ok: false, reason: 'jump from the galaxy map aboard your own fleet carrier' };
+    if (me.battle || me.defense || me.facility || me.supremacy || me.spaceMatch) return { ok: false, reason: "you can't jump in the middle of a battle" };
+    const wp = msg.planet ? W.planet(galaxy, String(msg.planet)) : null;
+    if (msg.planet && !wp) return { ok: false, reason: 'no such planet' };
+    const sys = W.system(galaxy, wp ? wp.system : String(msg.system || ''));
+    if (!sys) return { ok: false, reason: 'no such system' };
+    const t = now();
+    if ((me.jumpUntil || 0) > t) return { ok: false, reason: 'the carrier is already jumping' };
+    if (me.pad) spaces.undock(me);
+    matchmaking.leave(me);
+    me.jumpUntil = t + JUMP_S * 1000;
+    me.system = sys.id;
+    me.over = null;
+    const note = { type: 'carrier_jump', owner: me.name, system: sys.id, planet: wp ? wp.id : null, seconds: JUMP_S };
+    for (const [w, c] of clients) if (c === me || c.space === `ship:${me.name}`) send(w, note);
+    return { ok: true };
+  }
+
   function where(me) {
     const ship = me.space?.startsWith('ship:') ? me.space.slice(5) : null;
     const owner = ship && pilots().find((c) => c.name === ship);
@@ -665,8 +690,14 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'ship':
         // Ship positions are relayed, not saved. `over`: the war planet whose orbit the ship is in;
         // `berth`: the pad it holds ({station, copy, pad}), so the others can tell station copies apart.
+        // `system`: the war map system the ship is in (a fleet carrier can jump between them).
         me.over = typeof msg.over === 'string' && W.planet(galaxy, msg.over) ? msg.over : null;
-        broadcast({ type: 'ship', id: me.id, name: me.name, pos: msg.pos, rot: msg.rot, over: me.over ?? undefined, berth: me.pad ?? undefined }, ws);
+        me.system = typeof msg.system === 'string' && W.system(galaxy, msg.system) ? msg.system : 'teal-prime';
+        broadcast({ type: 'ship', id: me.id, name: me.name, pos: msg.pos, rot: msg.rot, over: me.over ?? undefined, berth: me.pad ?? undefined, system: me.system }, ws);
+        return;
+      case 'carrier_jump':
+        result = carrierJump(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
       // --- Shared spaces: stations, carriers and bases on foot ---
       // (Too many of these in a second are dropped without a word; walk has its own limit, and

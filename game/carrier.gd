@@ -11,8 +11,8 @@ extends "res://place.gd"
 ## Two levels joined by a lift:
 ##   Command level (floor y = 0), bow to stern:
 ##     Bridge          the pilot's chair on its dais, a wide forward window, side consoles
-##     Command Deck    the holo table (F: Sector Battles), the war log wall, a window and the
-##                     planet-below screen
+##     Command Deck    the holo table (F: Sector Battles), the GALAXY MAP terminal (F: FTL jump to
+##                     any system or planet), the war log wall, a window and the planet-below screen
 ##     Main corridor   with the lift lobby to starboard
 ##     Crew Lounge     the lobby: seats, the bar, who's aboard, the crew channel
 ##   Hangar Deck (floor y = -16): a tall bay with parked drones (tanks, strikers, gunships) and
@@ -338,7 +338,10 @@ func _build_command_deck() -> void:
 	for k in 4:
 		var a := k * TAU / 4.0 + PI / 4.0
 		var at := c + Vector3(cos(a), 0, sin(a)) * 6.8
-		_console(self, at, (c - at).normalized(), ["TACTICAL", "FLEET", "DRONE CONTROL", "ORBITAL"][k], ["Sectors below", "Carrier group", "Drones ready", "Orbit stable"][k], 1.6)
+		_console(self, at, (c - at).normalized(), ["TACTICAL", "FLEET", "DRONE CONTROL", "GALAXY MAP"][k], ["Sectors below", "Carrier group", "Drones ready", "FTL jump ready"][k], 1.6)
+		if k == 3:
+			# The galaxy map: jump the carrier to any system or planet (explorer.gd, jump_panel.gd).
+			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), _jump_prompt, func(): service.emit("jump"))
 	# The war log on the starboard wall, the planet below to port beside the window.
 	_boards.war_log = _screen(self, Vector3(x1 - 0.5, 3.2, -25.0), Vector3.LEFT, Vector2(12.0, 4.0), "WAR LOG", "", 60, 40, ALERT) # in front of the ribs
 	_boards.below = _screen(self, Vector3(x0 + 0.25, 3.0, -19.0), Vector3.RIGHT, Vector2(4.8, 3.2), "PLANET BELOW", "", 40, 24)
@@ -667,6 +670,12 @@ func _toggle_visitors() -> void:
 	Net.send({"type": "ship_open", "open": open_to_visitors})
 	_boards.comms.text = "Fleet channel open\nVisitors: %s" % ("welcome" if open_to_visitors else "not allowed")
 	_say("Your carrier is %s to visitors." % ("open" if open_to_visitors else "closed"), 3.0)
+
+
+func _jump_prompt() -> String:
+	if not mine:
+		return "Galaxy map: only %s can jump this carrier" % owner_name
+	return "Galaxy map: press %s to jump the carrier to any system or planet" % _key()
 
 
 func _holo_prompt() -> String:

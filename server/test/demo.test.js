@@ -112,3 +112,60 @@ test('the welcome says whether the demo war is on: carriers for everyone', async
     await server.close();
   }
 });
+
+test('a fleet carrier jumps from its galaxy map to any system or planet, and only a fleet carrier', async () => {
+  // An app's connection: every message kept, waited for by type.
+  const connect = async (port, name) => {
+    const ws = new WebSocket(`ws://localhost:${port}`);
+    const inbox = [];
+    ws.on('message', (d) => inbox.push(JSON.parse(d)));
+    await new Promise((res) => ws.on('open', res));
+    ws.send(JSON.stringify({ type: 'hello', role: 'explorer', name }));
+    const next = async (pred) => {
+      for (let i = 0; i < 200; i++) {
+        const k = inbox.findIndex(pred);
+        if (k >= 0) return inbox.splice(k, 1)[0];
+        await new Promise((res) => setTimeout(res, 10));
+      }
+      throw new Error(`${name}: no such message`);
+    };
+    await next((m) => m.type === 'welcome');
+    return { send: (m) => ws.send(JSON.stringify(m)), next, close: () => ws.close() };
+  };
+  let server = startServer({ port: 9152, tickMs: 60000, demoWar: true });
+  try {
+    const a = await connect(9152, 'Pilot A');
+    const b = await connect(9152, 'Pilot B');
+    a.send({ type: 'carrier_jump', planet: 'scar' });
+    assert.match((await a.next((m) => m.type === 'error')).reason, /aboard your own fleet carrier/);
+    a.send({ type: 'enter_space', space: 'ship:Pilot A', pos: [0, 0, 0], yaw: 0, anim: 'idle' });
+    await a.next((m) => m.type === 'space_joined');
+    a.send({ type: 'carrier_jump', planet: 'nowhere' });
+    assert.match((await a.next((m) => m.type === 'error')).reason, /no such planet/);
+    // Straight into Scar's orbit, in Marrow Reach, two lanes from home.
+    a.send({ type: 'carrier_jump', planet: 'scar' });
+    const note = await a.next((m) => m.type === 'carrier_jump');
+    assert.deepStrictEqual([note.owner, note.system, note.planet, note.seconds], ['Pilot A', 'marrow', 'scar', 5]);
+    a.send({ type: 'carrier_jump', system: 'drift' });
+    assert.match((await a.next((m) => m.type === 'error')).reason, /already jumping/);
+    // Out the far end, the others see which system the carrier is in.
+    a.send({ type: 'ship', pos: [1, 2, 3], rot: [0, 0, 0], over: 'scar', system: 'marrow' });
+    const seen = await b.next((m) => m.type === 'ship' && m.name === 'Pilot A');
+    assert.deepStrictEqual([seen.system, seen.over], ['marrow', 'scar']);
+    a.close();
+    b.close();
+  } finally {
+    await server.close();
+  }
+  // Without the demo war's fleet carriers, no ship has the drive.
+  server = startServer({ port: 9153, tickMs: 60000, demoWar: false });
+  try {
+    const a = await connect(9153, 'Pilot A');
+    a.send({ type: 'carrier_jump', system: 'marrow' });
+    assert.match((await a.next((m) => m.type === 'error')).reason, /only fleet carriers can jump/);
+    a.close();
+  } finally {
+    await server.close();
+    W.setDemo(false);
+  }
+});

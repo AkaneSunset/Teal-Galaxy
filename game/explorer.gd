@@ -40,6 +40,7 @@ const Surface := preload("res://surface.gd")
 const WarInfo := preload("res://war_info.gd")
 const FactionPicker := preload("res://faction_picker.gd")
 const WarPanel := preload("res://war_panel.gd")
+const JumpPanel := preload("res://jump_panel.gd")
 const TradePanel := preload("res://trade_panel.gd")
 const Carrier := preload("res://carrier.gd")
 const Place := preload("res://place.gd")
@@ -135,6 +136,11 @@ var _settings: Control
 var _picker: Control # the faction choice, for a pilot with no side yet
 var _picker_dismissed := false # "Not now": the ship's menu offers it again
 var _war_panel: Control
+var _jump_panel: Control # the carrier's galaxy map (GALAXY MAP terminal): FTL jumps
+var _jump := {} # a jump under way: {"system", "planet", "owner", "left", "total", "arrived"}
+var _jump_veil: ColorRect
+var _jump_text: Label
+const JUMP_FLASH_S := 1.2 # the flash out of the jump
 var _trade: Control # the Carrier Dock market and supply contracts
 var _refusal: PanelContainer # why the server turned this pilot away (a Coma character without the admin key)
 var _refusal_text: Label
@@ -364,6 +370,11 @@ func _berth_pos(station_id: String, pad: int) -> Array:
 ## Every Builder home planet gets a High Port; planets beyond Aster are added to the sky as they appear.
 ## Every contested world of the system gets its orbital station once the war map arrives.
 func _sync_stations() -> void:
+	if not System.home():
+		for wp in WarInfo.planets_in(System.current):
+			if not _stations.has(wp.id) and not System.builder_planet(wp.id).is_empty():
+				_add_station(wp.id, System.orbital_name(wp.name), System.orbital_pos(wp.id), true)
+		return
 	var index := 0
 	for p in Net.state.system.planets:
 		if p.get("kind", "") == "satellite" or p.id == "aster":
@@ -375,7 +386,7 @@ func _sync_stations() -> void:
 		index += 1
 		if not _stations.has(p.id):
 			_add_station(p.id, System.station_name(p.name), System.station_pos(p.id))
-	for wp in WarInfo.planets_in(str(Net.state.system.get("id", "teal-prime"))):
+	for wp in WarInfo.planets_in(System.current):
 		if not _stations.has(wp.id) and not System.builder_planet(wp.id).is_empty():
 			_add_station(wp.id, System.orbital_name(wp.name), System.orbital_pos(wp.id), true)
 
@@ -591,6 +602,26 @@ func _build_hud() -> void:
 	_war_panel = WarPanel.new()
 	_war_panel.visible = false
 	war_layer.add_child(_war_panel)
+	_jump_panel = JumpPanel.new()
+	_jump_panel.visible = false
+	war_layer.add_child(_jump_panel)
+	_jump_panel.closed.connect(_close_panel)
+	_jump_panel.jump_requested.connect(_request_jump)
+	# The jump itself: the view washes out to the FTL tunnel's blue, then back in at the far end.
+	_jump_veil = ColorRect.new()
+	_jump_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_jump_veil.color = Color(0.55, 0.75, 1.0, 0.0)
+	_jump_veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	war_layer.add_child(_jump_veil)
+	_jump_text = Label.new()
+	_jump_text.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_jump_text.offset_left = -500
+	_jump_text.offset_right = 500
+	_jump_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_jump_text.add_theme_font_size_override("font_size", 30)
+	_jump_text.add_theme_color_override("font_color", Color(0.05, 0.1, 0.2))
+	_jump_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	war_layer.add_child(_jump_text)
 	_war_panel.closed.connect(_close_panel)
 	_war_panel.wants_faction.connect(_show_picker)
 	_war_panel.wants_battles.connect(_open_battles)
@@ -690,6 +721,7 @@ func _refresh_focus() -> void:
 # --- Flying ------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	_jump_step(delta)
 	_check_battle()
 	_sync_space(delta)
 	if _land_wait != "":
@@ -760,7 +792,7 @@ func _send_ship(delta: float) -> void:
 	var still := crew or _station != null or _battle or (_docked != "" and _approach.is_empty())
 	_send_timer = SEND_EVERY * (5.0 if still else 1.0)
 	var r: Vector3 = (_crew.basis if crew else flight.basis).get_euler()
-	var msg := {"type": "ship", "pos": _crew.pos if crew else _pos, "rot": [r.x, r.y, r.z]}
+	var msg := {"type": "ship", "pos": _crew.pos if crew else _pos, "rot": [r.x, r.y, r.z], "system": str(_crew.get("system", System.current)) if crew else System.current}
 	var over := _over_planet()
 	if crew:
 		over = _docked if not WarInfo.planet(_docked).is_empty() else ""
@@ -803,7 +835,7 @@ func _place_world(delta: float, view := Basis(), cam: Camera3D = null) -> void:
 		port.visible = port.position.length() < LOCAL_RANGE
 		port.get_node("Ring").rotate_y(0.03 * delta)
 	_field.position = System.diff(System.FIELD_POS, _pos)
-	_field.visible = _field.position.length() < LOCAL_RANGE
+	_field.visible = System.home() and _field.position.length() < LOCAL_RANGE
 
 	for id in _others:
 		var o: Dictionary = _others[id]
@@ -813,9 +845,10 @@ func _place_world(delta: float, view := Basis(), cam: Camera3D = null) -> void:
 		# Carriers berthed in another copy of the station you're docked at lie where others of
 		# your copy do: only your copy's are drawn.
 		var elsewhere: bool = _docked != "" and not o.get("berth", {}).is_empty() and str(o.berth.get("station", "")) == _docked and int(o.berth.get("copy", 1)) != int(_berth.get("copy", 1))
-		o.node.visible = o.node.position.length() < LOCAL_RANGE and o.name != _crew.get("owner", "") and not elsewhere
+		var here: bool = str(o.get("system", "teal-prime")) == System.current # another system's ships aren't here
+		o.node.visible = here and o.node.position.length() < LOCAL_RANGE and o.name != _crew.get("owner", "") and not elsewhere
 
-	var to_star := System.diff(System.STAR.pos, _pos).normalized()
+	var to_star := System.diff(System.star().pos, _pos).normalized()
 	_sun.basis = Basis.looking_at(-to_star, Vector3.UP if absf(to_star.y) < 0.99 else Vector3.RIGHT)
 	_sky.follow(_pos, view * cam.global_basis)
 	if _station:
@@ -868,6 +901,8 @@ func _collide() -> void:
 
 
 func _respawn() -> void:
+	if not System.home():
+		_enter_system("teal-prime")
 	_pos = System.SPAWN_POS.duplicate()
 	flight.repair()
 	flight.basis = Basis()
@@ -884,11 +919,13 @@ func _nav_items() -> Array:
 	for id in _stations:
 		var st: Dictionary = _stations[id]
 		items.append({"id": "port-" + id, "name": st.name, "kind": "landmark", "pos": st.pos, "standoff": 5_500.0, "local": id == "aster", "near": id})
-	items.append({"id": "field", "name": System.FIELD_NAME, "kind": "landmark", "pos": System.FIELD_POS, "standoff": 2_500.0, "local": true})
+	if System.home():
+		items.append({"id": "field", "name": System.FIELD_NAME, "kind": "landmark", "pos": System.FIELD_POS, "standoff": 2_500.0, "local": true})
 	for w in _waypoints:
 		items.append({"id": w.id, "name": w.name, "kind": "waypoint", "pos": w.pos, "standoff": 0.0})
 	for id in _others:
-		items.append({"id": "pilot-%d" % id, "name": _others[id].name, "kind": "pilot", "pos": _others[id].shown, "standoff": 500.0})
+		if str(_others[id].get("system", "teal-prime")) == System.current:
+			items.append({"id": "pilot-%d" % id, "name": _others[id].name, "kind": "pilot", "pos": _others[id].shown, "standoff": 500.0})
 	return items
 
 
@@ -1254,6 +1291,8 @@ func _go_space(space: String) -> void:
 ## Back aboard your own carrier, in from the airlock.
 func _home_to_carrier() -> void:
 	if not _crew.is_empty():
+		if str(_crew.get("system", System.current)) != System.current:
+			_enter_system(str(_crew.system)) # your carrier stayed where you boarded the other
 		_pos = _crew.pos
 		flight.basis = _crew.basis
 		_crew = {}
@@ -1274,7 +1313,7 @@ func _boarded(msg: Dictionary) -> void:
 	_boarding = ""
 	_space_id = str(msg.space)
 	if _crew.is_empty():
-		_crew = {"owner": owner, "pos": _pos.duplicate(), "basis": flight.basis}
+		_crew = {"owner": owner, "pos": _pos.duplicate(), "basis": flight.basis, "system": System.current}
 	else:
 		_crew.owner = owner
 	_enter_carrier(owner, "hangar")
@@ -1417,6 +1456,8 @@ func _on_service(kind: String) -> void:
 			flight.repair()
 		"war":
 			_open_war()
+		"jump":
+			_open_jump()
 		"contracts":
 			_open_trade("contracts")
 		"dock_market":
@@ -1837,7 +1878,7 @@ func _panel_open() -> bool:
 ## Opens one of the war's screens (the faction choice, the War terminal, the dock market or
 ## contracts) over what you're doing: flying, seated in your ship, or standing at a console.
 func _open_panel(panel: Control) -> void:
-	for p in [_picker, _war_panel, _trade]:
+	for p in [_picker, _war_panel, _trade, _jump_panel]:
 		p.visible = p == panel
 	if "colour" in panel:
 		panel.colour = controls.hud_color()
@@ -1866,7 +1907,7 @@ func _close_panel() -> void:
 
 
 func _hide_panels() -> void:
-	for p in [_picker, _war_panel, _trade]:
+	for p in [_picker, _war_panel, _trade, _jump_panel]:
 		p.visible = false
 
 
@@ -1882,6 +1923,106 @@ func _here() -> String:
 
 
 ## The War terminal, on a planet: the one you're at if it's contested, else the first of the system.
+# --- FTL jumps (fleet carriers only) ---------------------------------------------
+
+## The GALAXY MAP terminal aboard your fleet carrier: where to jump it.
+func _open_jump() -> void:
+	if not (_carrier and _station is Carrier and _station.mine and _crew.is_empty()):
+		if _station:
+			_station._say("Only a fleet carrier's captain can jump it, from its galaxy map.", 4.0)
+		return
+	_jump_panel.open(System.current, _over_planet())
+	_open_panel(_jump_panel)
+
+
+## Asks the server to jump your carrier (released from its berth first, if it's docked).
+func _request_jump(system_id: String, planet_id: String) -> void:
+	if not _jump.is_empty():
+		_jump_panel.say("A jump is already under way.")
+		return
+	if _docked != "":
+		Net.send({"type": "undock"})
+		_berth = {}
+		_docked = ""
+		_at_spaceport = false
+	Net.send({"type": "carrier_jump", "system": system_id, "planet": planet_id})
+	_jump_panel.say("Plotting the jump...")
+
+
+## The server cleared a jump: yours (you fly it), or the one your host carrier is making (you ride).
+func _start_jump(msg: Dictionary) -> void:
+	var owner := str(msg.get("owner", ""))
+	if owner != Net.my_name and owner != str(_crew.get("owner", "")):
+		return
+	var seconds := float(msg.get("seconds", 5.0))
+	_jump = {"system": str(msg.get("system", "teal-prime")), "planet": str(msg.get("planet", "")) if msg.get("planet") != null else "", "owner": owner, "left": seconds, "total": seconds, "arrived": false}
+	if _jump_panel.visible:
+		_close_panel()
+	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else WarInfo.system(_jump.system).get("name", _jump.system))
+	_say("FTL jump to %s in %d seconds" % [to, ceili(seconds)])
+
+
+func _jump_step(delta: float) -> void:
+	if _jump.is_empty():
+		return
+	_jump.left -= delta
+	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else WarInfo.system(_jump.system).get("name", _jump.system))
+	if not _jump.arrived:
+		# Spooling up: the view washes out toward the jump.
+		var k := clampf(1.0 - _jump.left / maxf(0.1, _jump.total), 0.0, 1.0)
+		_jump_veil.color.a = k * k
+		_jump_text.text = "FTL JUMP · %s · %d" % [to.to_upper(), ceili(maxf(0.0, _jump.left))]
+		if _jump.left <= 0.0:
+			_arrive(_jump.system, _jump.planet, _jump.owner == Net.my_name)
+			_jump.arrived = true
+			_jump.left = JUMP_FLASH_S
+		return
+	# Through: the view comes back in at the far end.
+	_jump_veil.color.a = clampf(_jump.left / JUMP_FLASH_S, 0.0, 1.0)
+	_jump_text.text = ""
+	if _jump.left <= 0.0:
+		_jump = {}
+		_jump_veil.color.a = 0.0
+		_say("Arrived: %s" % to)
+
+
+## Out of the jump: into the system, and (flying it) to where the carrier comes out: in the planet's
+## orbit, off its orbital station, or out in the system near its first world.
+func _arrive(system_id: String, planet_id: String, mine: bool) -> void:
+	if system_id != System.current:
+		_enter_system(system_id)
+	if not mine:
+		return
+	var at: Array
+	if planet_id != "" and not System.builder_planet(planet_id).is_empty():
+		at = System.offset(System.orbital_pos(planet_id), Vector3(0, 0, 10_000))
+	elif System.home():
+		at = System.SPAWN_POS.duplicate()
+	elif not System.planets().is_empty():
+		at = System.offset(System.orbital_pos(System.planets()[0].id), Vector3(0, 0, 60_000_000))
+	else:
+		at = [0.0, 0.0, -80_000_000_000.0]
+	teleport(at)
+	_send_timer = 0.0 # tell everyone at once
+
+
+## Into another system: its star and planets in the sky, its orbital stations; the stations, ships
+## and field of the one you left are gone from view.
+func _enter_system(system_id: String) -> void:
+	var planets: Array = []
+	for wp in WarInfo.planets_in(system_id):
+		planets.append({"id": wp.id, "name": wp.name})
+	System.enter(system_id, str(WarInfo.system(system_id).get("name", system_id)), planets)
+	_sky.rebuild()
+	for id in _stations:
+		(_stations[id].node as Node3D).queue_free()
+	_stations = {}
+	if System.home():
+		_add_station("aster", System.PORT_NAME, System.PORT_POS)
+	_sync_stations()
+	_set_route([])
+
+
 func _open_war(planet_id := "") -> void:
 	if planet_id == "":
 		planet_id = _here() if not WarInfo.planet(_here()).is_empty() else ""
@@ -2431,8 +2572,15 @@ func _on_net_message(msg: Dictionary) -> void:
 					_refresh_dock()
 		"ship":
 			if _others.has(int(msg.get("id", -1))):
-				_others[int(msg.id)].over = str(msg.get("over", ""))
-				_others[int(msg.id)].berth = msg.get("berth", {}) if msg.get("berth") is Dictionary else {}
+				var o: Dictionary = _others[int(msg.id)]
+				o.over = str(msg.get("over", ""))
+				o.berth = msg.get("berth", {}) if msg.get("berth") is Dictionary else {}
+				o.system = str(msg.get("system", "teal-prime"))
+				# Aboard someone's carrier that jumped: we went with it.
+				if not _crew.is_empty() and o.name == _crew.owner and o.system != System.current and _jump.is_empty():
+					_enter_system(o.system)
+		"carrier_jump":
+			_start_jump(msg)
 
 
 func _on_ship_moved(id: int, pilot_name: String, pos: Vector3, rot: Vector3) -> void:
