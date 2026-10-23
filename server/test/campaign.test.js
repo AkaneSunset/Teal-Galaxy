@@ -80,7 +80,7 @@ test('queueing: rules, then two factions are matched at once; a lone faction fig
   const ash = h.pilot('Ash', 'ashen', 'cinder');
   assert.match(h.mm.join(h.pilot('Nobody', null, 'cinder'), 'cinder', 'sector').reason, /faction/);
   assert.match(h.mm.join(h.pilot('Far', 'ashen', null), 'cinder', 'sector').reason, /naval zone over Cinder/);
-  assert.match(h.mm.join(ash, 'cinder', 'space').reason, /isn't in the game yet/);
+  assert.match(h.mm.join(ash, 'cinder', 'tag').reason, /no such game mode/);
   assert.match(h.mm.join(ash, 'bastion', 'sector').reason, /no campaign/);
   assert.ok(h.mm.join(ash, 'cinder', 'sector').ok);
   assert.deepStrictEqual(h.mm.list(), { cinder: { sector: { ashen: 1 } } });

@@ -26,6 +26,7 @@ const Walkers := preload("res://walkers.gd")
 const BATTLE_VIEW := "res://battle/battle_view.gd"
 const DEFENSE_VIEW := "res://defense/defense_view.gd"
 const FACILITY_VIEW := "res://facility/facility_view.gd"
+const SPACE_VIEW := "res://space/space_view.gd"
 
 signal seated_down # walked up your own ship's ramp and sat down
 signal service(kind: String) # "repair", "war" (a War terminal), "contracts", "dock_market"
@@ -530,7 +531,7 @@ func walker_pose() -> Dictionary:
 ## True while a sector battle's RTS view is up (game/battle/battle_view.gd sets BattleView.active).
 ## The view may not be built yet, so it's looked up rather than named.
 static func battle_active() -> bool:
-	for path in [BATTLE_VIEW, DEFENSE_VIEW, FACILITY_VIEW]: # a sector battle's RTS view, or an FPS match (Supremacy's view is a Facility one)
+	for path in [BATTLE_VIEW, DEFENSE_VIEW, FACILITY_VIEW, SPACE_VIEW]: # a sector battle's RTS view, or an FPS match (Supremacy's view is a Facility one)
 		if ResourceLoader.exists(path):
 			var view = load(path)
 			if view != null and view.get("active") == true:

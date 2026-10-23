@@ -251,8 +251,8 @@ holo table, or the War terminal), aboard a carrier over the planet. Every match 
 when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
 points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
 commanders start Sector Battles with 15% more mass, a fortress world's holder gets an extra wave of lives
-in Sector Defense and of reinforcements in Facility Battles (a shipyard world's bonus comes with Space
-Battles).
+in Sector Defense and of reinforcements in Facility Battles, and a shipyard world's holder flies with 10%
+more hull in Space Battles.
 
 Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
 matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
@@ -260,7 +260,7 @@ in the demo war) and then fights the holder's AI (or another faction's in the ca
 whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
 match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
 RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
-way, and Supremacy too. Space Battles shows on the screen as coming.
+way, and Supremacy and Space Battles too.
 
 ### Sector Defense
 
@@ -383,6 +383,29 @@ After each round the fight goes back to the ground with the bars reset, and the 
 - **Planet bonus** for the holder, one per planet: 60 more seconds to attack aboard, battle credits 50%
   faster, or kill streaks (Sensor Array, Supply Drop, Orbital Barrage).
 - Losing your navy ship in Supremacy is only for the match: its Builder keeps the real ship.
+
+### Space Battles
+
+The fifth campaign mode: starfighters over the planet, 15 minutes at most (`server/space.js`, the cockpit
+in `game/space/`). 12 pilots a side (AI pilots in the empty slots) and more AI fighters filling the sky.
+Each side has a capital ship and two escort frigates, with turrets that track the nearest fighter; a
+capital ship lost here is lost for the battle only. Destroy the enemy capital ship: its two **shield
+generators** first (its subsystems can't be hurt while one stands), then its **engines, bridge and
+reactor**. If neither falls in 15 minutes, the side that did more damage to the other's capital ship and
+frigates wins. A win scores 6 campaign points (half against an all-AI side) and adds **1% to the winner's
+orbital control** of the system until the campaign week ends, on top of what its navies hold.
+
+- **Ship classes**, picked every launch (when you're shot down, pick the next): **Fighter** (fast, good
+  against fighters: lasers and 6 lock-on missiles), **Interceptor** (fastest, light guns, 4 missiles),
+  **Bomber** (slow and tough: 6 torpedoes against capital ships and frigates). You launch from your own
+  fleet carrier, in a row behind your capital ship; you're back 5 seconds after being shot down.
+- **Flying** is the game's flight model: throttle, boost, drift and pips (1-4) as usual.
+- **Weapons**: left mouse fires lasers; T targets what's ahead (a bomber targets the enemy capital ship's
+  weak points that can be hurt now, then its frigates); hold a fighter ahead to lock on and right mouse
+  fires a missile, or a torpedo from a bomber. Front-supply drops (fly through them) give a shield boost
+  or more ordnance.
+- The server checks the speed, the rate of fire, what each bolt hits (capital hulls and frigates block
+  shots), and flies the missiles, torpedoes and AI.
 
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
