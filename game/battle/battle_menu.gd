@@ -223,9 +223,9 @@ func _on_message(msg: Dictionary) -> void:
 		"campaign_queued":
 			_modes_key = ""
 			refresh()
-		"defense_joined":
+		"defense_joined", "facility_joined":
 			_waiting = false
-			_close() # the explorer opens the Sector Defense view
+			_close() # the explorer opens the Sector Defense or Facility Battles view
 		"error":
 			if _waiting or is_visible_in_tree():
 				_waiting = false
@@ -337,7 +337,7 @@ func _refresh_campaign_clock() -> void:
 		var who := []
 		for f in waiting:
 			who.append("%d %s" % [int(waiting[f]), WarInfo.faction_name(f)])
-		lines.append(("In the queue for %s: %s  ·  waiting: %s. " + ("Squads of up to 4 go in together, or on their own after a short wait." if str(queued.mode) == "defense" else "With no opponents queued, you fight the AI after a short wait.")) % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(queued.mode), {}).get("name", queued.mode), time_text(t - float(queued.since)), ", ".join(who)])
+		lines.append(("In the queue for %s: %s  ·  waiting: %s. " + ("Squads of up to 4 go in together, or on their own after a short wait." if str(queued.mode) == "defense" else "With no opponents queued, you fight the AI after a short wait." + (" AI troopers fill empty slots." if str(queued.mode) == "facility" else ""))) % [Net.catalog.get("campaign", {}).get("modes", {}).get(str(queued.mode), {}).get("name", queued.mode), time_text(t - float(queued.since)), ", ".join(who)])
 	_camp_status.text = "\n".join(lines)
 
 

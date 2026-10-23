@@ -24,14 +24,14 @@ const FINAL_MS = DAY; // the final push: wins count double
 const ZONE = 'America/New_York';
 const AI_SHARE = 0.5; // a win against AI only scores this much
 
-// Game modes. `points`: about 1 per 2.5 minutes of a typical match. Only Sector Battles is built
-// and Sector Defense so far; the others show on the Campaign screen as coming. `alwaysAi`: fought
+// Game modes. `points`: about 1 per 2.5 minutes of a typical match. Sector Battles, Sector Defense
+// and Facility Battles are built so far; the others show on the Campaign screen as coming. `alwaysAi`: fought
 // against AI troops only, so a win always scores half.
 const MODES = {
   sector: { name: 'Sector Battles', kind: 'RTS conquest', points: 10, minutes: 25, sides: 8, open: true },
   supremacy: { name: 'Supremacy', kind: 'FPS control points, then a ship assault', points: 8, minutes: 20, sides: 16, open: false },
   space: { name: 'Space Battles', kind: 'Starfighter assault', points: 6, minutes: 15, sides: 12, open: false },
-  facility: { name: 'Facility Battles', kind: 'FPS arena', points: 4, minutes: 10, sides: 8, open: false },
+  facility: { name: 'Facility Battles', kind: 'FPS team against team', points: 4, minutes: 10, sides: 8, open: true },
   defense: { name: 'Sector Defense', kind: 'FPS co-op waves against AI', points: 6, minutes: 15, sides: 4, open: true, alwaysAi: true },
 };
 
@@ -176,9 +176,10 @@ const FILL_MS = 1000;
 // factions queued, or one that has waited long enough to fight AI) they go in together; a pilot
 // whose side of a running match has room joins it at once. Sector Defense squads are one faction:
 // they go in when four are queued, or after the wait with however many there are.
-// `battles` is battle.js createBattles(), `defenses` defense.js createDefenses();
+// `battles` is battle.js createBattles(), `defenses` defense.js createDefenses(), `facilities`
+// facility.js createFacilities();
 // `where(me)` says where a pilot is (the planet their carrier is over); `factionOf(me)` their side.
-function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, where, factionOf, send, changed, wait = null }) {
+function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, where, factionOf, send, changed, wait = null }) {
   const queues = new Map(); // planet id -> [{ me, faction, mode, since }]
 
   function waitMs() {
@@ -211,8 +212,9 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, w
     if (!MODES[mode].open) return fail(`${MODES[mode].name} isn't in the game yet`);
     if (!c.entrants.includes(faction)) return fail(`${F.the(faction)} isn't in the campaign for ${wp.name}: it needs ${Math.round(W.CARRIER_SHARE * 100)}% of the orbit when the week starts`);
     if (where(me).over !== wp.id) return fail(`bring your carrier into ${F.the(faction)}'s naval zone over ${wp.name} to queue`);
-    if (me.battle || me.defense) return fail("you're in a match already");
+    if (me.battle || me.defense || me.facility) return fail("you're in a match already");
     if (mode === 'defense' && !defenses) return fail('Sector Defense is off on this server');
+    if (mode === 'facility' && !facilities) return fail('Facility Battles is off on this server');
     leave(me, true);
     if (!queues.has(wp.id)) queues.set(wp.id, []);
     queues.get(wp.id).push({ me, faction, mode, since: now() });
@@ -241,10 +243,29 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, w
   // Into a match: out of the queue, into the battle on their side (or the defense squad).
   function place(e, b, side) {
     leave(e.me, true);
-    const r = side === 'squad' ? defenses.enlist(e.me, b) : battles.enlistCampaign(e.me, b, side, e.faction);
+    const r = side === 'squad' ? defenses.enlist(e.me, b) : e.mode === 'facility' ? facilities.enlist(e.me, b, side) : battles.enlistCampaign(e.me, b, side, e.faction);
     tell(e.me);
     return r;
   }
+
+  // The team-against-team modes: what's running on a planet, who's on which side, whether a side
+  // has room, and starting a match.
+  const versus = {
+    sector: {
+      running: (planet) => battles.campaignMatches(planet),
+      sides: (m) => ({ a: m.attacker, d: m.defender }),
+      room: (m, side) => battles.room(m, side),
+      start: (wp, attacker, defender) => battles.startCampaign(wp, attacker, defender),
+      log: 'A Sector Battle',
+    },
+    facility: {
+      running: (planet) => (facilities ? facilities.running(planet) : []),
+      sides: (m) => m.factions,
+      room: (m, side) => facilities.room(m, side),
+      start: (wp, attacker, defender, c) => facilities.start(wp.id, wp.name, attacker, defender, { fortress: c.bonus === 'fortress' && defender === wp.owner }),
+      log: 'A Facility Battle',
+    },
+  };
 
   // Sector Defense on a planet: backfill a squad of the same faction with room, else start a squad
   // of up to four once four are queued or the first has waited long enough.
@@ -263,7 +284,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, w
       if (list.length < MODES.defense.sides && t - list[0].since < waitMs()) continue;
       // The enemy: the holder's troops, or (for the holder's own squads) another faction's in the campaign.
       const enemy = wp.owner && wp.owner !== faction ? wp.owner : c.entrants.find((f) => f !== faction) ?? null;
-      const d = defenses.start(wp.id, wp.name, faction, enemy);
+      const d = defenses.start(wp.id, wp.name, faction, enemy, { fortress: c.bonus === 'fortress' && faction === wp.owner });
       for (const e of list.slice(0, MODES.defense.sides)) place(e, d, 'squad');
       W.warLog(g, `A ${F.FACTIONS[faction].name} squad is holding a sector of ${wp.name} against ${enemy ? F.the(enemy) : 'the militia'}`, t);
       changed();
@@ -278,41 +299,51 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, w
       const c = g.war.campaigns?.[planetId];
       const wp = W.planet(g, planetId);
       // Pilots who are no longer where they queued, or whose faction left, drop out.
-      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle || e.me.defense) leave(e.me);
+      for (const e of q.slice()) if (!c || where(e.me).over !== planetId || factionOf(e.me) !== e.faction || e.me.battle || e.me.defense || e.me.facility) leave(e.me);
       if (c && wp && defenses) fillDefense(g, wp, c, t);
-      const queued = (queues.get(planetId) || []).filter((e) => e.mode === 'sector');
-      if (!c || !wp || !queued.length) continue;
-      // Backfill: a running match here with room on this pilot's side.
-      for (const e of queued) {
-        const b = battles.campaignMatches(planetId).find((m) => (m.attacker === e.faction || m.defender === e.faction) && battles.room(m, m.attacker === e.faction ? 'a' : 'd'));
-        if (b) place(e, b, b.attacker === e.faction ? 'a' : 'd');
-      }
-      const left = (queues.get(planetId) || []).filter((e) => e.mode === 'sector');
-      if (!left.length) continue;
-      // By faction, longest waiting first.
-      const by = new Map();
-      for (const e of left.sort((x, y) => x.since - y.since)) {
-        if (!by.has(e.faction)) by.set(e.faction, []);
-        by.get(e.faction).push(e);
-      }
-      const factions = [...by.keys()];
-      let attacker;
-      let defender;
-      if (factions.length >= 2) {
-        // Two factions queued: the holder defends if it's one of them.
-        defender = factions.includes(wp.owner) ? wp.owner : factions[1];
-        attacker = factions.find((f) => f !== defender);
-      } else if (t - by.get(factions[0])[0].since >= waitMs()) {
-        // Nobody to fight: the AI of the holder (or of another faction in the campaign) defends.
-        attacker = factions[0];
-        defender = wp.owner && wp.owner !== attacker ? wp.owner : c.entrants.find((f) => f !== attacker) ?? null;
-      } else continue;
-      const b = battles.startCampaign(wp, attacker, defender);
-      for (const e of (by.get(attacker) || []).slice(0, MODES.sector.sides)) place(e, b, 'a');
-      for (const e of (by.get(defender) || []).slice(0, MODES.sector.sides)) place(e, b, 'd');
-      W.warLog(g, `A Sector Battle on ${wp.name}: ${F.FACTIONS[attacker].name} against ${defender ? F.the(defender) : 'the militia'}`, t);
-      changed();
+      if (c && wp) for (const mode of Object.keys(versus)) fillVersus(g, wp, c, t, mode);
     }
+  }
+
+  // Sector Battles and Facility Battles on a planet: backfill a running match with room on a queued
+  // pilot's side, else start one when two factions are queued (the holder defending if it's one of
+  // them), or when one has waited long enough to fight the AI.
+  function fillVersus(g, wp, c, t, mode) {
+    const v = versus[mode];
+    const queued = (queues.get(wp.id) || []).filter((e) => e.mode === mode);
+    if (!queued.length) return;
+    for (const e of queued) {
+      const b = v.running(wp.id).find((m) => {
+        const s = v.sides(m);
+        return (s.a === e.faction || s.d === e.faction) && v.room(m, s.a === e.faction ? 'a' : 'd');
+      });
+      if (b) place(e, b, v.sides(b).a === e.faction ? 'a' : 'd');
+    }
+    const left = (queues.get(wp.id) || []).filter((e) => e.mode === mode);
+    if (!left.length) return;
+    // By faction, longest waiting first.
+    const by = new Map();
+    for (const e of left.sort((x, y) => x.since - y.since)) {
+      if (!by.has(e.faction)) by.set(e.faction, []);
+      by.get(e.faction).push(e);
+    }
+    const factions = [...by.keys()];
+    let attacker;
+    let defender;
+    if (factions.length >= 2) {
+      // Two factions queued: the holder defends if it's one of them.
+      defender = factions.includes(wp.owner) ? wp.owner : factions[1];
+      attacker = factions.find((f) => f !== defender);
+    } else if (t - by.get(factions[0])[0].since >= waitMs()) {
+      // Nobody to fight: the AI of the holder (or of another faction in the campaign) defends.
+      attacker = factions[0];
+      defender = wp.owner && wp.owner !== attacker ? wp.owner : c.entrants.find((f) => f !== attacker) ?? null;
+    } else return;
+    const b = v.start(wp, attacker, defender, c);
+    for (const e of (by.get(attacker) || []).slice(0, MODES[mode].sides)) place(e, b, 'a');
+    for (const e of (by.get(defender) || []).slice(0, MODES[mode].sides)) place(e, b, 'd');
+    W.warLog(g, `${v.log} on ${wp.name}: ${F.FACTIONS[attacker].name} against ${defender ? F.the(defender) : 'the militia'}`, t);
+    changed();
   }
   const filler = setInterval(fill, FILL_MS);
 

@@ -2368,6 +2368,15 @@ func _on_net_message(msg: Dictionary) -> void:
 			var dv = load(path) if ResourceLoader.exists(path) else null
 			if dv and dv.can_instantiate() and not dv.active:
 				dv.open(self, msg)
+		"facility_joined":
+			# Matchmaking put us in a Facility Battle: the first-person view takes over.
+			var menu = _battle_script("battle_menu")
+			if menu:
+				menu.queued = {}
+			var path := "res://facility/facility_view.gd"
+			var fv = load(path) if ResourceLoader.exists(path) else null
+			if fv and fv.can_instantiate() and not fv.active:
+				fv.open(self, msg)
 		"dock_granted":
 			var st := str(msg.get("station", ""))
 			if not _stations.has(st):

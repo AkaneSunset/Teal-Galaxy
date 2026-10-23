@@ -102,8 +102,8 @@ func _steps() -> void:
 			if not _menu._camp_status.text.contains("left in this campaign"):
 				_finish(false, "the screen should show the time left: " + _menu._camp_status.text)
 				return
-			if _buttons(_menu, "coming soon").size() != 3 or _buttons(_menu, "Queue: Sector Defense").is_empty():
-				_finish(false, "Sector Defense should be open to queue for, and the three modes still to come greyed out")
+			if _buttons(_menu, "coming soon").size() != 2 or _buttons(_menu, "Queue: Sector Defense").is_empty() or _buttons(_menu, "Queue: Facility Battles").is_empty():
+				_finish(false, "Sector Defense and Facility Battles should be open to queue for, and the two modes still to come greyed out")
 				return
 			var q := _buttons(_menu, "Queue: Sector Battles")
 			if q.is_empty() or q[0].disabled:

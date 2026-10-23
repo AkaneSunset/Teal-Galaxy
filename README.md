@@ -250,16 +250,17 @@ holo table, or the War terminal), aboard a carrier over the planet. Every match 
 **campaign points** by how long the mode takes (Sector Battles 10; a win against AI only scores half), and
 when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
 points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
-commanders start Sector Battles with 15% more mass (shipyard and fortress worlds' bonuses come with Space
-Battles and Sector Defense).
+commanders start Sector Battles with 15% more mass, a fortress world's holder gets an extra wave of lives
+in Sector Defense and of reinforcements in Facility Battles (a shipyard world's bonus comes with Space
+Battles).
 
 Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
 matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
 in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
 whose side of a running match on the planet has room (8 commanders a side) joins it at once. A campaign
 match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
-RTS view opens by itself when a match starts, wherever you are. Supremacy, Space Battles and Facility
-Battles show on the screen as coming.
+RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
+way. Supremacy and Space Battles show on the screen as coming.
 
 ### Sector Defense
 
@@ -296,6 +297,58 @@ Holding all 15 waves wins the match for the squad's faction (6 points, halved to
 AI, plus the bonus round's points, all doubled in the final push); a squad that falls, or loses its
 objective, scores for the enemy's. The enemies, the waves and every hit are decided on the server: each
 screen reports where its pilot stands and every shot it fires.
+
+### Facility Battles
+
+The third campaign mode: team against team on foot inside an outpost facility, about 10 minutes
+(`server/facility.js`, the view in `game/facility/`). The planet's holder defends. Sides are 4 to 8
+strong: AI troopers fill the empty slots on both sides, and step aside as pilots join. A win scores 4
+campaign points (half against an all-AI side). Each match plays one of four rule sets, picked at random:
+
+- **King of the Hill**: score while your side alone stands on the hill, which moves every 60 seconds.
+  First to 150.
+- **Domination**: take the 3 control points (stand on one alone for 5 seconds); each held point scores
+  1 every 2 seconds. First to 250.
+- **Team Deathmatch**: first to 50 kills.
+- **Capture the Flag**: carry the enemy's flag to your base while your own is home. First to 3. A dropped
+  flag goes back after 20 seconds, or at once when its side touches it.
+
+Otherwise the most points when time runs out wins (a tie is a draw: no points). Each side shares
+**reinforcements**: 12 for every slot on it (48 at 4v4). Every respawn costs one, and a side with none
+left and everyone down loses.
+
+- **Maps**: hand-made, not Builders' real outposts. Each planet plays its defender's rotation: that
+  faction's Compound, Foundry and Reactor (the same take on them every match there), plus the generic
+  Proving Grounds.
+- **The facility**: doors slide open for anyone close and stop shots while shut. The defenders have
+  turrets, which attackers can shoot down and defenders repair (hold F beside one for 4 seconds).
+  Attackers can hack the power plant (hold F for 6 seconds) to open the locked shortcut doors for good.
+- **Pick 10 classes**: before the match (and whenever you're down; L at any time) pick a class. Four come
+  ready-made (Assault, Close Quarters, Marksman, Heavy), and you can build up to three of your own from
+  10 points: primary and secondary weapons, up to 3 attachments on the primary (Scope, Extended mag,
+  Fast mag, Suppressor), up to 3 perks (Lightweight, Armor, Ghost, Scavenger, Hardline) and equipment
+  (frag grenades, stims). The server keeps your classes on your pilot, for every mode that uses them.
+- **Kill streaks**, by kills without dying (Hardline: one fewer), kept until used:
+  - 3: Sensor Array (every enemy on your map, 20 s)
+  - 4: Supply Drop (a power weapon where you mark)
+  - 5: Orbital Barrage (on the mark)
+  - 7: Gunship (30 s)
+  - 10: Localized EMP (scrambles their map, ends their active streaks)
+  - 25: Tactical Nuke (10 s, then your side wins)
+
+  Keys 5 to 0 call them; a marked one lands where your crosshair is.
+- **Power weapons** (Railgun, Rocket launcher) come only from front-supply drops every 90 seconds and from
+  Supply Drops. Take one by walking over it; 3 switches to it.
+- **The minimap** shows your side, and enemies who fire unsuppressed, are seen by your AI troopers (unless
+  they're Ghosts), or are caught by a Sensor Array.
+- AI troopers push the objective when attacking and hold the choke points when defending, finding their
+  way round the facility.
+- W A S D walk, Shift run, Space jump, mouse look and fire, right mouse aim, R reload, 1/2/3 weapons,
+  G grenade, H stim, F repair or hack, 5-0 kill streaks, L class, Tab scoreboard, Esc pause (*Leave
+  match*).
+
+The server decides everything a pilot could cheat with: each weapon's rate of fire and magazine, what
+each shot hits, through walls and shut doors, and every kill.
 
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has

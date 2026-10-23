@@ -21,6 +21,7 @@ const { WebSocketServer } = require('ws');
 const B = require('./battle');
 const C = require('./campaign');
 const DF = require('./defense');
+const FC = require('./facility');
 const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
@@ -63,6 +64,9 @@ const PILOT_ONLY = {
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
   campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches',
   defense_move: 'only pilots fight', defense_fire: 'only pilots fight', defense_leave: 'only pilots fight',
+  facility_move: 'only pilots fight', facility_fire: 'only pilots fight', facility_reload: 'only pilots fight', facility_switch: 'only pilots fight',
+  facility_throw: 'only pilots fight', facility_stim: 'only pilots fight', facility_use: 'only pilots fight', facility_streak: 'only pilots fight',
+  facility_class: 'only pilots fight', facility_leave: 'only pilots fight', loadout_save: 'only pilots build classes',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
 const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture'];
@@ -130,11 +134,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   function playerView() {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -187,10 +191,17 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now(), d.result === 'won' ? DF.bonusPoints(d) : 0),
   });
+  // Facility Battles (FPS team against team, AI filling empty slots), scored the same way. Pilots'
+  // Pick 10 classes are kept on their records.
+  const facilities = FC.createFacilities({
+    now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
+    onEnd: (f, winner, vsAi) => C.score(galaxy, f.planet, 'facility', winner, vsAi, now()),
+  });
   // Planet campaigns: the week's matches, and the queues for them.
   C.tick(galaxy, now());
   const matchmaking = C.createMatchmaking({
-    galaxy: () => galaxy, now, battles, defenses, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
+    galaxy: () => galaxy, now, battles, defenses, facilities, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
     send: (c, msg) => send(c.ws, msg), changed, wait: queueWait,
   });
 
@@ -668,6 +679,24 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = defenses.handle(me, msg);
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
+      case 'facility_move':
+      case 'facility_fire':
+      case 'facility_reload':
+      case 'facility_switch':
+      case 'facility_throw':
+      case 'facility_stim':
+      case 'facility_use':
+      case 'facility_streak':
+      case 'facility_class':
+      case 'facility_leave':
+        result = facilities.handle(me, msg);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        return;
+      case 'loadout_save':
+        result = FC.saveClass(G.pilot(galaxy, me.name), msg.slot, msg.name, msg.items);
+        if (!result.ok) return send(ws, { type: 'error', reason: result.reason });
+        changed();
+        return;
       case 'battle_leave':
       case 'battle_drop':
       case 'battle_order':
@@ -720,6 +749,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       spaces.drop(me);
       matchmaking.leave(me, true);
       defenses.leave(me);
+      facilities.leave(me);
       battles.leave(me);
       clients.delete(ws);
       if (me.role === 'explorer') broadcast({ type: 'left', id: me.id });
@@ -746,12 +776,14 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     spaces,
     battles,
     defenses,
+    facilities,
     matchmaking,
     close() {
       clearInterval(ticker);
       clearInterval(raidTicker);
       battles.close();
       defenses.close();
+      facilities.close();
       matchmaking.close();
       clearTimeout(saveTimer);
       for (const ws of clients.keys()) ws.terminate();

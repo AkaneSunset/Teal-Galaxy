@@ -150,8 +150,8 @@ function waveOf(set, wave, squad = 1) {
 
 // A new match on planet `planetName` for the squad's `faction` against `enemy` (a faction's AI
 // troops, or null for the militia). `seed` fixes its waves and drops, and the map unless `map`
-// names one. Times are in simulated seconds.
-function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed = 1, now = Date.now(), speed = 1, map = null }) {
+// names one. `fortress`: the squad's faction holds a fortress world. Times are in simulated seconds.
+function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed = 1, now = Date.now(), speed = 1, map = null, fortress = false }) {
   const mapId = MAPS[map] ? map : MAP_IDS[(seed >>> 0) % MAP_IDS.length];
   const o = MAPS[mapId].objective;
   return {
@@ -172,7 +172,7 @@ function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed
     wave: 0, // 0 before the first wave
     phase: 'break', // 'break' between waves, 'wave' while one is on
     breakUntil: FIRST_BREAK_S,
-    lives: LIVES,
+    lives: LIVES + (fortress ? LIVES_PER_SET : 0), // a fortress world's holder: an extra wave of lives
     nextId: 1,
     enemies: new Map(),
     pilots: new Map(), // name -> { name, x, z, yaw, hp, shield, hitAt, alive, respawnAt, present, rockets, kills, moveT }
@@ -685,9 +685,9 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
   const timers = new Set();
 
   // A new match for a squad (matchmaking puts the pilots in with enlist).
-  function start(planet, planetName, faction, enemy) {
+  function start(planet, planetName, faction, enemy, opts = {}) {
     const n = nextId++;
-    const d = newDefense({ id: `d${n}`, planet, planetName, faction, enemy, seed: (Date.now() ^ (n * 2654435761)) >>> 0, now: now(), speed });
+    const d = newDefense({ id: `d${n}`, planet, planetName, faction, enemy, seed: (Date.now() ^ (n * 2654435761)) >>> 0, now: now(), speed, ...opts });
     matches.set(d.id, d);
     conns.set(d.id, new Map());
     return d;
