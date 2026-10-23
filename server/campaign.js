@@ -155,10 +155,11 @@ function worth(c, mode, vsAi, now) {
 }
 
 // A match on a planet ended: its winner scores for the campaign (if it's in it). Returns the points.
-function score(g, planetId, mode, winner, vsAi, now = Date.now()) {
+// `extra`: points on top of the mode's (Sector Defense's bonus round), doubled in the final push too.
+function score(g, planetId, mode, winner, vsAi, now = Date.now(), extra = 0) {
   const c = g.war.campaigns?.[planetId];
   if (!c || !winner || !c.entrants.includes(winner) || now >= c.endsAt) return 0;
-  const pts = worth(c, mode, vsAi, now);
+  const pts = worth(c, mode, vsAi, now) + extra * (now >= c.finalAt ? 2 : 1);
   c.points[winner] += pts;
   c.wins[winner] += 1;
   c.matches += 1;

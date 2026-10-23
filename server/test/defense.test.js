@@ -1,4 +1,5 @@
-// Sector Defense: waves, the squad's shots and lives, supply drops, and matchmaking into it.
+// Sector Defense: waves, the squad's shots and lives, supply drops, cover, the bonus round,
+// objective maps, and matchmaking into it.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -7,8 +8,8 @@ const DF = require('../defense');
 const G = require('../galaxy');
 const W = require('../war');
 
-function match(squad = ['A']) {
-  const d = DF.newDefense({ planet: 'cinder', planetName: 'Cinder', faction: 'ashen', enemy: 'compact', seed: 7 });
+function match(squad = ['A'], map = 'outpost') {
+  const d = DF.newDefense({ planet: 'cinder', planetName: 'Cinder', faction: 'ashen', enemy: 'compact', seed: 7, map });
   for (const n of squad) DF.addPilot(d, n);
   return d;
 }
@@ -80,17 +81,116 @@ test('shields soak damage and recharge; a fallen pilot costs a life and comes ba
   assert.strictEqual(d.result, 'lost');
 });
 
-test('clearing every wave of all three sets wins; sets add lives and drops', () => {
+// Steps until no wave is on, the squad clearing every enemy (and never getting hurt).
+function clearWaves(d, until) {
+  for (let guard = 0; guard < 400 && !d.result && !until(d); guard++) {
+    run(d, 2);
+    for (const e of alive(d)) {
+      e.hp = 0;
+      if (d.bonus) d.bonusKills += 1; // (as hurtEnemy counts them)
+    }
+    for (const p of d.pilots.values()) p.hp = DF.HP;
+  }
+}
+
+test('clearing every wave of all three sets wins; then the bonus round runs until the squad falls, and can only add', () => {
   const d = match();
   const lives = d.lives;
-  for (let guard = 0; guard < 200 && !d.result; guard++) {
-    run(d, 2);
-    for (const e of alive(d)) e.hp = 0; // the squad is very good
-    d.pilots.get('A').hp = DF.HP; // and never hurt
+  clearWaves(d, (m) => m.bonus);
+  assert.ok(d.bonus, 'the bonus round started');
+  assert.strictEqual(d.result, null, 'the match goes on');
+  assert.strictEqual(d.set, DF.SETS + 1);
+  assert.strictEqual(d.lives, lives + DF.LIVES_PER_SET * (DF.SETS - 1), 'no lives come with the bonus round');
+  assert.deepStrictEqual(DF.modifiersFor(d.set), ['tough', 'fury', 'famine']);
+  // Endless waves, a boss every fifth.
+  assert.ok(DF.waveOf(DF.SETS + 1, 5, 1).some(([t]) => t === 'boss'));
+  clearWaves(d, (m) => m.bonusKills >= 25);
+  assert.ok(d.wave >= 1 && d.phase);
+  // Kills in the bonus round count, with hurtEnemy too.
+  run(d, 30);
+  const e = alive(d)[0];
+  const before = d.bonusKills;
+  assert.ok(e, 'a bonus wave is on');
+  const p = d.pilots.get('A');
+  Object.assign(p, { x: 10, z: 10, alive: true, hp: DF.HP });
+  Object.assign(e, { x: 15, z: 10, hp: 1 });
+  DF.fire(d, 'A', { weapon: 'rifle', dx: 1, dy: -0.2, dz: 0 });
+  assert.strictEqual(d.bonusKills, before + 1);
+  assert.strictEqual(DF.bonusPoints(d), Math.floor(d.bonusKills / DF.BONUS_KILLS_PER_POINT));
+  // The squad falls: the bonus round is over and the match is still won.
+  d.lives = 0;
+  DF.hurtPilot(d, d.pilots.get('A'), 500);
+  run(d, 0.2);
+  assert.deepStrictEqual([d.result, d.how], ['won', 'bonus']);
+});
+
+test('cover stops fire both ways: shots end at the wall, rockets burst on it, enemies close in instead of shooting through', () => {
+  const d = match();
+  d.breakUntil = 1e9; // no waves
+  const p = d.pilots.get('A');
+  // The wall [60, 30, 3, 8, 2.6] stands between the pilot at z 20 and the trooper at z 40.
+  Object.assign(p, { x: 60, z: 20 });
+  d.enemies.set(1, { id: 1, type: 'grunt', x: 60, z: 40, hp: 70, maxHp: 70, cd: 0, heading: 0, state: 'move', side: 1, detourUntil: 0, goal: 'pilots' });
+  const e = d.enemies.get(1);
+  const r = DF.fire(d, 'A', { weapon: 'rifle', dx: 0, dy: -0.01, dz: 1 });
+  assert.strictEqual(r.hit, null, 'the wall took the shot');
+  assert.ok(Math.abs(r.wall - 6) < 0.1, `the shot stopped ${r.wall} m out, at the wall`);
+  assert.strictEqual(e.hp, 70);
+  p.rockets = 1;
+  run(d, 1.1);
+  Object.assign(e, { x: 60, z: 36 }); // just behind it, within the splash if the wall weren't there
+  DF.fire(d, 'A', { weapon: 'rocket', dx: 0, dy: -0.01, dz: 1 });
+  assert.strictEqual(e.hp, 70, "the blast didn't come through the wall");
+  // Over low cover a pilot can shoot (the eye is above it).
+  assert.strictEqual(DF.blocked(d, { x: 40, y: 1.6, z: 36 }, { x: 40, y: 1.6, z: 44 }), 1, 'low cover: a pilot sees over it');
+  assert.ok(DF.blocked(d, { x: 40, y: 1.0, z: 36 }, { x: 40, y: 1.0, z: 44 }) < 1, 'low cover hides a body');
+  // The trooper can't see the pilot: it holds its fire and works its way round the wall.
+  Object.assign(e, { x: 60, z: 40, cd: 0 });
+  d.shots = [];
+  const shield = p.shield;
+  DF.enemyStep(d, e, 0.1);
+  assert.strictEqual(d.shots.length, 0, 'no shot through the wall');
+  assert.strictEqual(p.shield, shield);
+  let fired = false;
+  for (let i = 0; i < 200 && !fired; i++) {
+    DF.enemyStep(d, e, 0.1);
+    const inWall = Math.abs(e.x - 60) < 1.5 && Math.abs(e.z - 30) < 4;
+    assert.ok(!inWall, `the trooper walked into the wall at ${e.x}, ${e.z}`);
+    fired = d.shots.length > 0;
   }
-  assert.strictEqual(d.result, 'won');
-  assert.deepStrictEqual([d.set, d.wave], [DF.SETS, DF.WAVES]);
-  assert.strictEqual(d.lives, lives + DF.LIVES_PER_SET * (DF.SETS - 1));
+  assert.ok(fired, 'round the wall, it opens fire');
+});
+
+test('objective maps: part of each wave goes for the generator; it is patched up between waves; destroyed, the match is lost', () => {
+  const d = match(['A'], 'relay');
+  assert.strictEqual(d.objective.kind, 'generator');
+  assert.strictEqual(DF.joined(d, 'A').objective.name, 'Shield generator');
+  assert.strictEqual(DF.frame(d).objective[0], d.objective.maxHp);
+  assert.strictEqual(match(['A'], 'outpost').objective, null, 'survival maps have none');
+  // A wave: some go for the generator, and hit it.
+  run(d, DF.FIRST_BREAK_S + 0.5);
+  const goals = alive(d).map((e) => e.goal);
+  assert.ok(goals.includes('objective') && goals.includes('pilots'), goals.join());
+  d.pilots.get('A').hp = 1e9; // the squad holds on
+  run(d, 40);
+  assert.ok(d.objective.hp < d.objective.maxHp, 'the generator was hit');
+  // Patched up between waves.
+  for (const e of alive(d)) e.hp = 0;
+  const hp = d.objective.hp;
+  run(d, 0.2);
+  assert.strictEqual(d.phase, 'break');
+  assert.ok(d.objective.hp > hp || d.objective.hp === d.objective.maxHp);
+  // Destroyed: lost.
+  DF.hurtObjective(d, 1e9);
+  assert.deepStrictEqual([d.result, d.how], ['lost', 'objective']);
+  // In the bonus round it only ends the round: still a win.
+  const b = match(['A'], 'relay');
+  b.bonus = true;
+  DF.hurtObjective(b, 1e9);
+  assert.deepStrictEqual([b.result, b.how], ['won', 'bonus']);
+  // Without a map named, the seed picks one.
+  const maps = new Set([1, 2, 3, 4, 5, 6].map((seed) => DF.newDefense({ planet: 'x', planetName: 'X', faction: 'ashen', seed }).map));
+  assert.deepStrictEqual([...maps].sort(), Object.keys(DF.MAPS).sort());
 });
 
 test('matchmaking: a lone squad goes in after the wait, four go in at once; the result scores for the campaign', () => {

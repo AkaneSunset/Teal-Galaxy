@@ -7,6 +7,9 @@ extends Node3D
 ## You move and look on your own screen and tell the server where you stand (defense_move, 10 a
 ## second) and every shot you fire (defense_fire: the ray from your eye); the server says what was
 ## hit, moves the enemies, and sends everyone the state ten times a second (defense_state).
+## Cover stops shots both ways (the server checks every one). Some maps have a shield generator to
+## defend: if it falls, the match is lost. After the last wave the bonus round runs until the squad
+## falls, every kill scoring extra; the match is already won by then.
 ## W A S D walk, Shift run, Space jump, mouse look, left mouse fire, R reload, 1 rifle, 2 rocket
 ## launcher (from supply drops), Esc pause (with Leave match). Walk over a supply drop to take it.
 
@@ -71,6 +74,9 @@ var _banner_text: Label
 var _pause: PanelContainer
 var _hit_flash: ColorRect
 var _last_hp := 100.0
+var _objective_bar: ProgressBar
+var _objective_label: Label
+var _objective_tag: Label3D
 
 
 ## Opens the view for the match the server just put the pilot in (`joined`: defense_joined).
@@ -89,8 +95,9 @@ func _ready() -> void:
 	_build_hud()
 	Net.message.connect(_on_message)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	_say("Sector Defense on %s: hold off %s for 3 sets of 5 waves" % [str(info.get("planetName", "")), _enemy_name()], Color(1.0, 0.85, 0.5))
-	_say("Your squad shares its lives. Supply drops land between waves.", Color(0.75, 0.85, 0.9))
+	_say("Sector Defense on %s, %s: hold off %s for 3 sets of 5 waves" % [str(info.get("planetName", "")), str(info.get("mapName", "")), _enemy_name()], Color(1.0, 0.85, 0.5))
+	_say(str(info.get("mapText", "Survive every wave")), Color(1.0, 0.75, 0.4))
+	_say("Your squad shares its lives. Supply drops land between waves. Cover stops fire, theirs and yours.", Color(0.75, 0.85, 0.9))
 
 
 func _exit_tree() -> void:
@@ -187,9 +194,27 @@ func _build_world() -> void:
 	# Where the waves come in: glowing gates in the enemy's colour.
 	for s in info.get("spawns", []):
 		_box(_world, Vector3(4, 0.1, 4), Vector3(float(s[0]), 0.06, float(s[1])), _enemy_colour(), false, 2.0)
-	# The beacon in the middle that the squad holds.
-	_box(_world, Vector3(0.6, 9, 0.6), Vector3(size / 2, 4.5, size / 2), Color(0.25, 0.27, 0.3), false)
-	_box(_world, Vector3(1.2, 1.2, 1.2), Vector3(size / 2, 9.5, size / 2), Color(0.3, 0.95, 0.9), false, 3.0)
+	var obj = info.get("objective")
+	if obj is Dictionary:
+		# The shield generator the squad must keep standing: solid, glowing, its health over it.
+		var b: Array = obj.get("box", [size / 2, size / 2, 6, 6, 3.2])
+		var h := float(b[4])
+		var at := Vector3(float(b[0]), 0, float(b[1]))
+		_box(_world, Vector3(float(b[2]), h, float(b[3])), at + Vector3(0, h / 2.0, 0), Color(0.3, 0.33, 0.4))
+		_box(_world, Vector3(float(b[2]) * 0.6, 0.5, float(b[3]) * 0.6), at + Vector3(0, h + 0.25, 0), Color(0.35, 0.75, 1.0), false, 3.0)
+		_box(_world, Vector3(0.5, 8, 0.5), at + Vector3(0, h + 4.0, 0), Color(0.35, 0.75, 1.0), false, 2.0)
+		_objective_tag = Label3D.new()
+		_objective_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_objective_tag.pixel_size = 0.006
+		_objective_tag.font_size = 48
+		_objective_tag.outline_size = 10
+		_objective_tag.modulate = Color(0.55, 0.85, 1.0)
+		_objective_tag.position = at + Vector3(0, h + 1.6, 0)
+		_world.add_child(_objective_tag)
+	else:
+		# The beacon in the middle that the squad holds.
+		_box(_world, Vector3(0.6, 9, 0.6), Vector3(size / 2, 4.5, size / 2), Color(0.25, 0.27, 0.3), false)
+		_box(_world, Vector3(1.2, 1.2, 1.2), Vector3(size / 2, 9.5, size / 2), Color(0.3, 0.95, 0.9), false, 3.0)
 
 
 func _build_player() -> void:
@@ -319,7 +344,13 @@ func _fire() -> void:
 	var from := _camera.global_position
 	var dir := -_camera.global_basis.z
 	Net.send({"type": "defense_fire", "match": match_id, "weapon": _weapon, "y": from.y, "dx": dir.x, "dy": dir.y, "dz": dir.z})
-	_tracer(from + dir * 0.6 + _camera.global_basis.x * 0.2 - _camera.global_basis.y * 0.15, from + dir * 60.0, Color(0.5, 1.0, 0.95) if _weapon == "rifle" else Color(1.0, 0.6, 0.2))
+	# The tracer stops where cover (or the ground) does, as the server's shot will.
+	var to := from + dir * 60.0
+	var q := PhysicsRayQueryParameters3D.create(from, to, 0xFFFFFFFF, [_player.get_rid()])
+	var hit := _world.get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		to = hit.position
+	_tracer(from + dir * 0.6 + _camera.global_basis.x * 0.2 - _camera.global_basis.y * 0.15, to, Color(0.5, 1.0, 0.95) if _weapon == "rifle" else Color(1.0, 0.6, 0.2))
 
 
 func _tracer(a: Vector3, b: Vector3, colour: Color) -> void:
@@ -663,6 +694,11 @@ func _build_hud() -> void:
 	vitals.offset_top = -90
 	vitals.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(vitals)
+	if info.get("objective") is Dictionary:
+		_objective_label = _label(vitals, 14, Color(0.55, 0.85, 1.0))
+		_objective_bar = _bar(vitals, Color(0.35, 0.75, 1.0))
+		_objective_bar.max_value = float(info.objective.get("maxHp", 1))
+		vitals.offset_top = -130
 	_label(vitals, 14, Color(0.6, 0.85, 1.0)).text = "Shield"
 	_shield_bar = _bar(vitals, Color(0.4, 0.8, 1.0))
 	_shield_bar.max_value = float(info.get("shield", 60))
@@ -740,10 +776,24 @@ func _update_hud() -> void:
 	var mods := []
 	for m in s.get("modifiers", []):
 		mods.append(str(info.get("modifiers", {}).get(m, {}).get("name", m)))
-	_top.text = "SECTOR DEFENSE · %s   ·   Set %d of %d   Wave %d of %d   ·   Lives %d   ·   Enemies %d%s" % [
-		str(info.get("planetName", "")), int(s.get("set", 1)), int(info.get("sets", 3)), int(s.get("wave", 0)), int(info.get("waves", 5)),
+	var bonus := bool(s.get("bonus", false))
+	var where := "BONUS ROUND   Wave %d   ·   Bonus kills %d (a point every %d)" % [int(s.get("wave", 0)), int(s.get("bonusKills", 0)), int(info.get("bonusKillsPerPoint", 10))] if bonus \
+		else "Set %d of %d   Wave %d of %d" % [int(s.get("set", 1)), int(info.get("sets", 3)), int(s.get("wave", 0)), int(info.get("waves", 5))]
+	_top.text = "SECTOR DEFENSE · %s · %s   ·   %s   ·   Lives %d   ·   Enemies %d%s" % [
+		str(info.get("planetName", "")), str(info.get("mapName", "")), where,
 		int(s.get("lives", 0)), s.get("enemies", []).size(), ("   ·   " + ", ".join(mods)) if not mods.is_empty() else ""]
-	_wave_note.text = "Next wave in %d" % ceili(float(s.get("breakLeft", 0))) if str(s.get("phase", "")) == "break" and not ended else ""
+	if str(s.get("phase", "")) == "break" and not ended:
+		_wave_note.text = ("Sector held! Bonus round in %d" if bonus and int(s.get("wave", 0)) == 0 else "Next wave in %d") % ceili(float(s.get("breakLeft", 0)))
+	else:
+		_wave_note.text = ""
+	var obj = s.get("objective")
+	if _objective_bar and obj is Array:
+		_objective_bar.value = float(obj[0])
+		var pct := roundi(100.0 * float(obj[0]) / maxf(1.0, float(obj[1])))
+		_objective_label.text = "%s  %d%%" % [str(info.objective.get("name", "Objective")), pct]
+		if _objective_tag:
+			_objective_tag.text = "%s\n%d%%" % [str(info.objective.get("name", "")).to_upper(), pct]
+			_objective_tag.modulate = Color(0.55, 0.85, 1.0) if pct > 50 else Color(1.0, 0.75, 0.3) if pct > 25 else Color(1.0, 0.4, 0.35)
 	_hp_bar.value = float(_me.get("hp", 100))
 	_shield_bar.value = float(_me.get("shield", 0))
 	if _weapon == "rifle":

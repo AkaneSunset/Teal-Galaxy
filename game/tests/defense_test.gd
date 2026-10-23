@@ -6,8 +6,9 @@ extends Node
 ## "Defense Tester" (Luminar Accord) flies its carrier into Cinder's orbit, opens the Sector Battles
 ## screen and queues for Sector Defense. Alone, its squad goes in after the wait: the first-person
 ## view opens by itself. When the first wave comes it turns to the nearest enemy and fires until it
-## falls (the server counts the kill), checks the HUD shows the set, wave and lives, then leaves the
-## match and is back with the explorer.
+## falls (the server counts the kill: it picks one it can see, since cover stops shots), checks the
+## HUD shows the map, set, wave and lives (and the generator's health on an objective map), then
+## leaves the match and is back with the explorer.
 ## `-- --server=ws://127.0.0.1:9000` for a server on another port, and `-- --shots=/some/dir` with a
 ## display to save a screenshot of the fight. Prints PASS or FAIL and quits.
 
@@ -137,8 +138,11 @@ func _steps() -> void:
 			await _shot("defense-01-first-wave")
 		"fight":
 			if _kills > 0:
-				if not _view._top.text.contains("Set 1 of 3") or not _view._top.text.contains("Lives"):
-					_finish(false, "the HUD should show the set, wave and lives: " + _view._top.text)
+				if not _view._top.text.contains("Set 1 of 3") or not _view._top.text.contains("Lives") or not _view._top.text.contains(str(_joined.get("mapName", "?"))):
+					_finish(false, "the HUD should show the map, set, wave and lives: " + _view._top.text)
+					return
+				if _joined.get("objective") is Dictionary and (_view._objective_bar == null or not _view._objective_label.text.contains("Shield generator")):
+					_finish(false, "on an objective map the HUD should show the generator's health")
 					return
 				_view.leave()
 				_go("left", 1.0)
@@ -151,21 +155,28 @@ func _steps() -> void:
 			if load("res://defense/defense_view.gd").active or is_instance_valid(_view) and _view.is_inside_tree():
 				_finish(false, "leaving should close the view")
 				return
-			_finish(true, "queued for Sector Defense over Cinder, went in alone after the wait against the Compact's troops, the first wave came, aimed and fired until one fell (%d kill%s), left the match" % [_kills, "" if _kills == 1 else "s"])
+			_finish(true, "queued for Sector Defense over Cinder, went in alone after the wait against the Compact's troops on %s (%s), the first wave came, aimed and fired until one fell (%d kill%s), left the match" % [str(_joined.get("mapName", "")), "objective" if _joined.get("objective") is Dictionary else "survival", _kills, "" if _kills == 1 else "s"])
 
 
-## Turns to the nearest enemy (its chest) and pulls the trigger once, as a player would.
+## Turns to the nearest enemy it can see (its chest) and pulls the trigger once, as a player would.
+## None in sight: it waits for them to come round the cover.
 func _aim_and_fire() -> void:
 	var cam: Camera3D = _view._camera
+	var space := cam.get_world_3d().direct_space_state
 	var best := {}
+	var target := Vector3.ZERO
 	for id in _view._enemies:
 		var e: Dictionary = _view._enemies[id]
-		if best.is_empty() or e.node.global_position.distance_to(cam.global_position) < best.node.global_position.distance_to(cam.global_position):
+		# Its chest, or a drone's body up in the air.
+		var at: Vector3 = e.node.global_position + Vector3(0, 3.9 if e.type == "drone" else 1.1, 0)
+		var q := PhysicsRayQueryParameters3D.create(cam.global_position, at, 0xFFFFFFFF, [_view._player.get_rid()])
+		if not space.intersect_ray(q).is_empty():
+			continue
+		if best.is_empty() or at.distance_to(cam.global_position) < target.distance_to(cam.global_position):
 			best = e
+			target = at
 	if best.is_empty():
 		return
-	# Its chest, or a drone's body up in the air.
-	var target: Vector3 = best.node.global_position + Vector3(0, 3.9 if best.type == "drone" else 1.1, 0)
 	var to := target - cam.global_position
 	_view._player.rotation.y = atan2(-to.x, -to.z)
 	_view._pitch = atan2(to.y, Vector2(to.x, to.z).length())

@@ -185,7 +185,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
   const defenses = DF.createDefenses({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
-    onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now()),
+    onEnd: (d, winner) => C.score(galaxy, d.planet, 'defense', winner, true, now(), d.result === 'won' ? DF.bonusPoints(d) : 0),
   });
   // Planet campaigns: the week's matches, and the queues for them.
   C.tick(galaxy, now());

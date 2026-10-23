@@ -3,12 +3,15 @@
 // each wave harder than the last, a boss ending each set. The squad shares a pool of lives (a few
 // more after each set), modifiers switch on as the sets go on, and supply drops land between waves.
 // Surviving every wave wins the match for the squad's faction; losing every life wins it for the
-// enemy's.
+// enemy's. After the last wave the bonus round starts: endless waves, every kill scoring extra
+// campaign points, until the squad falls (that can't undo the win). Some maps have something to
+// defend (a shield generator): if the enemy destroys it the match is lost; the others are survival.
 //
 // Simulated here on the server in 2D (x and z in metres over a square arena SIZE across, (0, 0)
 // at a corner), like the sector battles: the enemies move and shoot here. Pilots move on their own
 // screens and report where they are (defense_move) and every shot they fire (defense_fire, a ray
-// from the eye); the server decides what each shot hits, so the squad shares one fight.
+// from the eye); the server decides what each shot hits, so the squad shares one fight. Cover
+// blocks fire both ways: the server checks every shot, the pilots' and the enemies', against it.
 // In memory only: a server restart ends every match with no result.
 
 const F = require('./factions');
@@ -36,6 +39,17 @@ const EYE = 1.6;
 const MOVES_PER_S = 30;
 const SHOTS_PER_S = 15;
 const MAX_SPEED = 9; // metres a second a pilot may move between reports (sprint, plus slack)
+const BONUS_KILLS_PER_POINT = 10; // in the bonus round, a campaign point for every this many kills
+const CHEST = 1.1; // where enemies aim at a pilot...
+const HEAD = 1.6; // ...or, when only that shows over cover, here (and they hit half as often)
+const OBJECTIVE_REPAIR = 0.25; // the objective gets back this share of its health in every break
+const OBJECTIVE_GOAL = 0.5; // on objective maps, this share of each wave goes for the objective
+const OBJECTIVE_GUARD_R = 10; // ...unless a pilot they can see is this close
+
+// Campaign points the bonus round adds to a win.
+function bonusPoints(d) {
+  return Math.floor(d.bonusKills / BONUS_KILLS_PER_POINT);
+}
 
 // The pilots' weapons. The rifle never runs out here (ammo crates top up what the screen counts);
 // the rocket launcher is a power weapon from supply drops, its rockets counted here.
@@ -61,13 +75,40 @@ const MODIFIERS = {
   famine: { name: 'Famine', text: 'Fewer supply drops', from: 3, drops: 0.5 },
 };
 
-// Cover in the arena: [x, z, width, depth, height]. The same for everyone; clients draw it and
-// collide with it, the server lets shots through it (it trusts the shooters' screens on that).
+// Cover in the arena: [x, z, width, depth, height], centred on (x, z). The same for everyone;
+// clients draw it and collide with it, and it stops shots and rockets, both ways.
 const COVER = [
   [60, 60, 10, 10, 1.4], [40, 40, 6, 2, 1.2], [80, 40, 6, 2, 1.2], [40, 80, 6, 2, 1.2], [80, 80, 6, 2, 1.2],
   [60, 30, 3, 8, 2.6], [60, 90, 3, 8, 2.6], [30, 60, 8, 3, 2.6], [90, 60, 8, 3, 2.6],
   [22, 22, 4, 4, 3.0], [98, 22, 4, 4, 3.0], [22, 98, 4, 4, 3.0], [98, 98, 4, 4, 3.0],
 ];
+
+// The maps. Survival maps are only the waves; objective maps also have something the squad must
+// keep standing (`objective`: [x, z, width, depth, height] like cover, and its health).
+const MAPS = {
+  outpost: { name: 'Outpost', text: 'Survive every wave', cover: COVER, objective: null },
+  ridge: {
+    name: 'Ridge',
+    text: 'Survive every wave',
+    cover: [
+      [60, 45, 24, 2, 1.2], [60, 75, 24, 2, 1.2], [36, 60, 2, 14, 2.6], [84, 60, 2, 14, 2.6],
+      [30, 30, 6, 6, 3.0], [90, 30, 6, 6, 3.0], [30, 90, 6, 6, 3.0], [90, 90, 6, 6, 3.0],
+      [60, 18, 8, 3, 1.4], [60, 102, 8, 3, 1.4], [18, 60, 3, 8, 1.4], [102, 60, 3, 8, 1.4],
+    ],
+    objective: null,
+  },
+  relay: {
+    name: 'Relay Station',
+    text: 'Defend the shield generator: if it falls, the sector is lost',
+    cover: [
+      [60, 44, 12, 2, 1.2], [60, 76, 12, 2, 1.2], [44, 60, 2, 12, 1.2], [76, 60, 2, 12, 1.2],
+      [40, 40, 4, 4, 2.6], [80, 40, 4, 4, 2.6], [40, 80, 4, 4, 2.6], [80, 80, 4, 4, 2.6],
+      [60, 24, 3, 8, 2.6], [60, 96, 3, 8, 2.6], [24, 60, 8, 3, 2.6], [96, 60, 8, 3, 2.6],
+    ],
+    objective: { kind: 'generator', name: 'Shield generator', box: [60, 60, 6, 6, 3.2], hp: 4000 },
+  },
+};
+const MAP_IDS = Object.keys(MAPS);
 const SPAWNS = [[60, 4], [116, 60], [60, 116], [4, 60]]; // where waves come in: the arena's edges
 const PLAYER_SPAWNS = [[55, 52], [65, 52], [55, 68], [65, 68]];
 
@@ -76,6 +117,7 @@ function fail(reason) {
 }
 
 const r1 = (x) => Math.round(x * 10) / 10;
+const r2 = (x) => Math.round(x * 100) / 100;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -94,6 +136,7 @@ function modifiersFor(set) {
 }
 
 // What wave `wave` (1-5) of set `set` (1-3) sends, for a squad of `squad`: [[type, count], ...].
+// The bonus round is set SETS + 1, its waves counting up without end (a boss every fifth).
 function waveOf(set, wave, squad = 1) {
   const extra = Math.max(0, squad - 1);
   const k = (set - 1) * WAVES + wave; // 1 to 15
@@ -101,13 +144,16 @@ function waveOf(set, wave, squad = 1) {
   if (k >= 2) out.push(['drone', Math.floor(k / 3) + extra]);
   if (k >= 3) out.push(['elite', Math.floor((k - 1) / 3) + extra]);
   if (k >= 4) out.push(['brute', Math.floor((k - 2) / 4) + Math.floor(extra / 2)]);
-  if (wave === WAVES) out.push(['boss', 1]);
+  if (wave % WAVES === 0) out.push(['boss', 1]);
   return out.filter(([, n]) => n > 0);
 }
 
 // A new match on planet `planetName` for the squad's `faction` against `enemy` (a faction's AI
-// troops, or null for the militia). `seed` fixes its waves and drops. Times are in simulated seconds.
-function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed = 1, now = Date.now(), speed = 1 }) {
+// troops, or null for the militia). `seed` fixes its waves and drops, and the map unless `map`
+// names one. Times are in simulated seconds.
+function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed = 1, now = Date.now(), speed = 1, map = null }) {
+  const mapId = MAPS[map] ? map : MAP_IDS[(seed >>> 0) % MAP_IDS.length];
+  const o = MAPS[mapId].objective;
   return {
     id,
     planet,
@@ -117,6 +163,9 @@ function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed
     seed,
     rng: { s: seed >>> 0 },
     speed,
+    map: mapId,
+    cover: MAPS[mapId].cover,
+    objective: o ? { kind: o.kind, name: o.name, box: o.box, hp: o.hp, maxHp: o.hp, warned: 1 } : null,
     startedAt: now,
     t: 0,
     set: 1,
@@ -131,6 +180,8 @@ function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed
     shots: [], // what happened since the last snapshot: [from, x, z, tx, tz]
     feed: [],
     kills: 0,
+    bonus: false, // the bonus round is on: the match is won whatever happens now
+    bonusKills: 0,
     result: null, // 'won' or 'lost'
   };
 }
@@ -186,6 +237,86 @@ function take(d, p, u) {
   d.feed.push({ name: p.name, took: u.kind });
 }
 
+// --- Cover ------------------------------------------------------------------------------------
+
+// What stops shots and bodies: the map's cover, and the objective while it stands.
+function blockers(d) {
+  return d.objective && d.objective.hp > 0 ? [...d.cover, d.objective.box] : d.cover;
+}
+
+// Where the segment from a to b (points {x, y, z}) first enters a box [x, z, width, depth, height]
+// standing on the ground: the share of the way along it, or null if it misses.
+function segBox(a, b, box) {
+  const [cx, cz, w, dd, h] = box;
+  const lo = [cx - w / 2, 0, cz - dd / 2];
+  const hi = [cx + w / 2, h, cz + dd / 2];
+  const o = [a.x, a.y, a.z];
+  const v = [b.x - a.x, b.y - a.y, b.z - a.z];
+  let t0 = 0;
+  let t1 = 1;
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(v[i]) < 1e-9) {
+      if (o[i] < lo[i] || o[i] > hi[i]) return null;
+      continue;
+    }
+    let ta = (lo[i] - o[i]) / v[i];
+    let tb = (hi[i] - o[i]) / v[i];
+    if (ta > tb) [ta, tb] = [tb, ta];
+    t0 = Math.max(t0, ta);
+    t1 = Math.min(t1, tb);
+    if (t0 > t1) return null;
+  }
+  return t0;
+}
+
+// The share of the way from a to b where cover first stops a shot (1 if nothing does).
+// `skip`: a box the shot is aimed at, so it doesn't stop itself.
+function blocked(d, a, b, skip = null) {
+  let t = 1;
+  for (const box of blockers(d)) {
+    if (box === skip) continue;
+    const h = segBox(a, b, box);
+    if (h !== null && h < t) t = h;
+  }
+  return t;
+}
+
+function clear(d, a, b, skip = null) {
+  return blocked(d, a, b, skip) >= 1;
+}
+
+// How far (x, z) is from a box's footprint (0 inside it), and the nearest point of it.
+function boxNear(box, x, z) {
+  const [cx, cz, w, dd] = box;
+  const qx = clamp(x, cx - w / 2, cx + w / 2);
+  const qz = clamp(z, cz - dd / 2, cz + dd / 2);
+  return { r: Math.hypot(x - qx, z - qz), x: qx, z: qz };
+}
+
+// A body of radius `r` at (x, z), pushed out of any cover it overlaps.
+function pushOut(d, x, z, r) {
+  for (const box of blockers(d)) {
+    const q = boxNear(box, x, z);
+    if (q.r >= r) continue;
+    if (q.r > 1e-6) {
+      x = q.x + ((x - q.x) / q.r) * r;
+      z = q.z + ((z - q.z) / q.r) * r;
+      continue;
+    }
+    // Inside it: out by the nearest side.
+    const [cx, cz, w, dd] = box;
+    const out = [
+      [cx - w / 2 - r - x, 0],
+      [cx + w / 2 + r - x, 0],
+      [0, cz - dd / 2 - r - z],
+      [0, cz + dd / 2 + r - z],
+    ].sort((m, n) => Math.abs(m[0] + m[1]) - Math.abs(n[0] + n[1]))[0];
+    x += out[0];
+    z += out[1];
+  }
+  return [x, z];
+}
+
 // Distance from the ray (o, dir) to a standing enemy (a vertical segment), and how far along the
 // ray that is; null if the ray misses it or it's out of range.
 function rayHit(o, dir, e, range) {
@@ -222,8 +353,11 @@ function fire(d, name, msg) {
   const n = Math.hypot(msg.dx, msg.dy, msg.dz) || 1;
   const dir = { x: msg.dx / n, y: msg.dy / n, z: msg.dz / n };
   const o = { x: p.x, y: num(msg.y) ? clamp(msg.y, 0, 4) : EYE, z: p.z }; // shots start where the server has the pilot
+  const end = { x: o.x + dir.x * def.range, y: o.y + dir.y * def.range, z: o.z + dir.z * def.range };
+  // Cover stops the shot: nothing behind it can be hit.
+  const wall = blocked(d, o, end) * def.range;
   let best = null;
-  let at = def.range;
+  let at = wall;
   for (const e of d.enemies.values()) {
     if (e.hp <= 0) continue;
     const h = rayHit(o, dir, e, def.range);
@@ -233,12 +367,18 @@ function fire(d, name, msg) {
   const hz = o.z + dir.z * at;
   d.shots.push([name, r1(o.x), r1(o.z), r1(hx), r1(hz), w]);
   if (w === 'rocket') {
+    // The blast hurts what's near where it burst, but not through cover.
+    const back = Math.max(0, at - 0.3);
+    const burst = { x: o.x + dir.x * back, y: o.y + dir.y * back, z: o.z + dir.z * back };
     for (const e of d.enemies.values()) {
+      const c = ENEMIES[e.type];
       const r = Math.hypot(e.x - hx, e.z - hz);
-      if (e.hp > 0 && r <= def.splash + ENEMIES[e.type].radius) hurtEnemy(d, e, def.damage * (r < 1 ? 1 : 1 - (0.6 * r) / def.splash), p);
+      if (e.hp <= 0 || r > def.splash + c.radius) continue;
+      if (e !== best && !clear(d, burst, { x: e.x, y: (c.fly || 0) + c.height / 2, z: e.z })) continue;
+      hurtEnemy(d, e, def.damage * (r < 1 ? 1 : 1 - (0.6 * r) / def.splash), p);
     }
   } else if (best) hurtEnemy(d, best, def.damage, p);
-  return { ok: true, hit: best ? best.id : null };
+  return { ok: true, hit: best ? best.id : null, wall: best ? null : at < def.range ? r2(at) : null };
 }
 
 function hurtEnemy(d, e, damage, p) {
@@ -246,6 +386,7 @@ function hurtEnemy(d, e, damage, p) {
   e.hp -= damage;
   if (e.hp > 0) return;
   d.kills += 1;
+  if (d.bonus) d.bonusKills += 1;
   if (p) p.kills += 1;
   if (e.type === 'boss') d.feed.push({ text: `${p ? p.name : 'The squad'} brought the ${ENEMIES.boss.name} down` });
 }
@@ -271,6 +412,22 @@ function hurtPilot(d, p, damage) {
   }
 }
 
+// The enemy hits the objective. Destroyed, it loses the match (in the bonus round it only ends it).
+function hurtObjective(d, damage) {
+  const o = d.objective;
+  if (!o || o.hp <= 0 || d.result) return;
+  o.hp = Math.max(0, o.hp - damage);
+  for (const at of [0.5, 0.25]) {
+    if (o.hp > 0 && o.hp / o.maxHp <= at && o.warned > at) {
+      o.warned = at;
+      d.feed.push({ text: `The ${o.name.toLowerCase()} is down to ${Math.round(at * 100)}%` });
+    }
+  }
+  if (o.hp > 0) return;
+  d.feed.push({ text: `The ${o.name.toLowerCase()} has been destroyed` });
+  [d.result, d.how] = d.bonus ? ['won', 'bonus'] : ['lost', 'objective'];
+}
+
 // --- Waves -----------------------------------------------------------------------------------
 
 function spawnEnemy(d, type, i) {
@@ -279,13 +436,15 @@ function spawnEnemy(d, type, i) {
   const spread = (i % 5) * 2.5 - 5;
   const c = ENEMIES[type];
   const hp = c.hp * (modifiersFor(d.set).includes('tough') ? MODIFIERS.tough.hp : 1);
-  const e = { id: d.nextId++, type, x: clamp(sx + (sx === 60 ? spread : 0), 1, SIZE - 1), z: clamp(sz + (sz === 60 ? spread : 0), 1, SIZE - 1), hp, maxHp: hp, cd: random(d.rng) * c.reload, heading: 0, state: 'move', target: null };
+  const e = { id: d.nextId++, type, x: clamp(sx + (sx === 60 ? spread : 0), 1, SIZE - 1), z: clamp(sz + (sz === 60 ? spread : 0), 1, SIZE - 1), hp, maxHp: hp, cd: random(d.rng) * c.reload, heading: 0, state: 'move', target: null, side: random(d.rng) < 0.5 ? 1 : -1, detourUntil: 0 };
+  // On objective maps some of each wave go for the objective instead of the squad.
+  e.goal = d.objective && type !== 'boss' && random(d.rng) < OBJECTIVE_GOAL ? 'objective' : 'pilots';
   d.enemies.set(e.id, e);
   return e;
 }
 
 function startWave(d) {
-  if (d.wave >= WAVES) {
+  if (!d.bonus && d.wave >= WAVES) {
     d.set += 1;
     d.wave = 0;
   }
@@ -293,25 +452,37 @@ function startWave(d) {
   d.phase = 'wave';
   let i = 0;
   for (const [type, n] of waveOf(d.set, d.wave, Math.max(1, present(d).length))) for (let k = 0; k < n; k++) spawnEnemy(d, type, i++);
-  d.feed.push({ text: d.wave === WAVES ? `Set ${d.set}, wave ${d.wave}: a ${ENEMIES.boss.name} leads them` : `Set ${d.set}, wave ${d.wave}` });
+  const lead = d.wave % WAVES === 0 ? `: a ${ENEMIES.boss.name} leads them` : '';
+  d.feed.push({ text: d.bonus ? `Bonus wave ${d.wave}${lead}` : `Set ${d.set}, wave ${d.wave}${lead}` });
 }
 
 // A wave is cleared: a break, supply drops, and after a set more lives and the next modifiers.
+// After the last wave of the last set the match is won, and the bonus round begins.
 function endWave(d) {
   d.phase = 'break';
-  const lastOfSet = d.wave === WAVES;
-  if (lastOfSet && d.set === SETS) {
-    d.result = 'won';
-    d.feed.push({ text: 'Every wave held: the sector is secure' });
-    return;
-  }
-  d.breakUntil = d.t + (lastOfSet ? SET_BREAK_S : WAVE_BREAK_S);
-  if (lastOfSet) {
-    d.lives += LIVES_PER_SET;
-    const next = modifiersFor(d.set + 1).filter((m) => !modifiersFor(d.set).includes(m));
-    d.feed.push({ text: `Set ${d.set} cleared: +${LIVES_PER_SET} lives${next.length ? `. Next set: ${next.map((m) => MODIFIERS[m].name).join(', ')}` : ''}` });
+  const lastOfSet = d.wave % WAVES === 0;
+  if (!d.bonus && lastOfSet && d.set === SETS) {
+    d.bonus = true;
+    d.set = SETS + 1;
+    d.wave = 0;
+    d.breakUntil = d.t + SET_BREAK_S;
+    d.feed.push({ text: 'Every wave held: the sector is secure, and the match is won' });
+    d.feed.push({ text: `Bonus round: endless waves, a campaign point for every ${BONUS_KILLS_PER_POINT} kills, until the squad falls` });
+  } else {
+    d.breakUntil = d.t + (lastOfSet && !d.bonus ? SET_BREAK_S : WAVE_BREAK_S);
+    if (lastOfSet && !d.bonus) {
+      d.lives += LIVES_PER_SET;
+      const next = modifiersFor(d.set + 1).filter((m) => !modifiersFor(d.set).includes(m));
+      d.feed.push({ text: `Set ${d.set} cleared: +${LIVES_PER_SET} lives${next.length ? `. Next set: ${next.map((m) => MODIFIERS[m].name).join(', ')}` : ''}` });
+    }
   }
   drops(d, lastOfSet);
+  // The objective is patched up a little between waves.
+  const o = d.objective;
+  if (o && o.hp > 0) {
+    o.hp = Math.min(o.maxHp, o.hp + o.maxHp * OBJECTIVE_REPAIR);
+    o.warned = o.hp / o.maxHp > 0.5 ? 1 : o.hp / o.maxHp > 0.25 ? 0.5 : 0.25;
+  }
   // The fallen come back for the break.
   for (const p of d.pilots.values()) if (!p.alive && p.respawnAt === Infinity && d.lives > 0) [p.respawnAt, d.lives] = [d.t + 1, d.lives - 1];
 }
@@ -346,29 +517,70 @@ function nearestPilot(d, e) {
   return best ? { p: best, r: bd } : null;
 }
 
+// What an enemy goes for: the nearest pilot, or (if it was sent for it and no pilot is close) the
+// objective. `aims`: the points it would shoot at, `skip`: the box it's shooting at.
+function targetOf(d, e) {
+  const t = nearestPilot(d, e);
+  const o = d.objective;
+  if (o && o.hp > 0 && e.goal === 'objective' && !(t && t.r <= OBJECTIVE_GUARD_R)) {
+    const q = boxNear(o.box, e.x, e.z);
+    return { obj: o, r: q.r, x: q.x, z: q.z, aims: [{ x: q.x, y: o.box[4] / 2, z: q.z }], skip: o.box };
+  }
+  if (!t) return null;
+  return { p: t.p, r: t.r, x: t.p.x, z: t.p.z, aims: [{ x: t.p.x, y: CHEST, z: t.p.z }, { x: t.p.x, y: HEAD, z: t.p.z }], skip: null };
+}
+
+// An enemy walks `step` metres along `heading`, round cover: when it's walking into a wall it turns
+// aside for a moment (to its own side, swapping if that's blocked too).
+function walk(d, e, heading, step) {
+  const c = ENEMIES[e.type];
+  const go = (h) => {
+    const x = e.x + Math.sin(h) * step;
+    const z = e.z + Math.cos(h) * step;
+    return c.fly ? [x, z] : pushOut(d, x, z, c.radius);
+  };
+  const ways = e.detourUntil > d.t ? [heading + e.side * 1.2, heading] : [heading, heading + e.side * 1.2, heading - e.side * 1.2];
+  for (let i = 0; i < ways.length; i++) {
+    const [x, z] = go(ways[i]);
+    if (Math.hypot(x - e.x, z - e.z) < step * 0.5 && i < ways.length - 1) continue;
+    if (ways[i] !== heading && !(e.detourUntil > d.t)) {
+      e.detourUntil = d.t + 1.5;
+      if (i === 2) e.side = -e.side;
+    }
+    e.x = clamp(x, 0.5, SIZE - 0.5);
+    e.z = clamp(z, 0.5, SIZE - 0.5);
+    return;
+  }
+}
+
 function enemyStep(d, e, dt) {
   const c = ENEMIES[e.type];
   e.cd = Math.max(0, e.cd - dt);
-  const t = nearestPilot(d, e);
+  const t = targetOf(d, e);
   if (!t) {
     e.state = 'idle';
     return;
   }
-  e.heading = Math.atan2(t.p.x - e.x, t.p.z - e.z);
-  const stand = c.melee ? c.range * 0.8 : c.range * 0.7;
+  e.heading = Math.atan2(t.x - e.x, t.z - e.z);
+  // Can it see what it's after? Cover between them blocks its fire, so it closes in instead.
+  const muzzle = { x: e.x, y: (c.fly || 0) + c.height * 0.8, z: e.z };
+  const sees = t.aims.map((a) => clear(d, muzzle, a, t.skip));
+  const seen = sees.some(Boolean);
+  const stand = c.melee ? c.range * 0.8 : seen ? c.range * 0.7 : 1.5;
   if (t.r > stand) {
-    const step = Math.min(c.speed * dt, t.r - stand);
-    e.x = clamp(e.x + Math.sin(e.heading) * step, 0.5, SIZE - 0.5);
-    e.z = clamp(e.z + Math.cos(e.heading) * step, 0.5, SIZE - 0.5);
+    walk(d, e, e.heading, Math.min(c.speed * dt, t.r - stand));
     e.state = 'move';
   } else e.state = 'fight';
-  if (t.r <= c.range && e.cd <= 0) {
+  if (seen && t.r <= c.range && e.cd <= 0) {
     e.cd = c.reload;
     const fury = modifiersFor(d.set).includes('fury') ? MODIFIERS.fury.damage : 1;
-    // Ranged shots miss more often from further away; strikes up close always land.
-    const hit = c.melee || random(d.rng) < 0.75 - (0.35 * t.r) / c.range;
-    if (hit) hurtPilot(d, t.p, c.damage * fury);
-    d.shots.push([`e${e.id}`, r1(e.x), r1(e.z), r1(t.p.x), r1(t.p.z), hit ? 'hit' : 'miss']);
+    // Ranged shots miss more often from further away, and half as often hit a pilot showing only
+    // their head over cover; strikes up close always land.
+    const odds = (0.75 - (0.35 * t.r) / c.range) * (sees[0] ? 1 : 0.5);
+    const hit = c.melee || random(d.rng) < odds;
+    if (hit && t.p) hurtPilot(d, t.p, c.damage * fury);
+    else if (hit) hurtObjective(d, c.damage * fury);
+    d.shots.push([`e${e.id}`, r1(e.x), r1(e.z), r1(t.x), r1(t.z), hit ? 'hit' : 'miss']);
   }
 }
 
@@ -386,11 +598,11 @@ function tick(d, dt) {
   for (const [id, e] of d.enemies) if (e.hp <= 0) d.enemies.delete(id);
   if (d.phase === 'break' && d.t >= d.breakUntil) startWave(d);
   else if (d.phase === 'wave' && d.enemies.size === 0) endWave(d);
-  // Everyone down with no lives left, or nobody left in the match: the enemy wins.
+  // Everyone down with no lives left: the enemy wins (in the bonus round, the round is over).
   const here = present(d);
   if (!d.result && here.length && here.every((p) => !p.alive) && d.lives <= 0 && here.every((p) => p.respawnAt === Infinity)) {
-    d.result = 'lost';
-    d.feed.push({ text: 'The squad has fallen' });
+    [d.result, d.how] = d.bonus ? ['won', 'bonus'] : ['lost', 'fallen'];
+    d.feed.push({ text: d.bonus ? 'The squad has fallen: the bonus round is over' : 'The squad has fallen' });
   }
 }
 
@@ -409,6 +621,9 @@ function frame(d) {
     phase: d.phase,
     breakLeft: d.phase === 'break' ? r1(Math.max(0, d.breakUntil - d.t)) : 0,
     lives: d.lives,
+    bonus: d.bonus,
+    bonusKills: d.bonusKills,
+    objective: d.objective ? [Math.round(d.objective.hp), d.objective.maxHp] : null,
     modifiers: modifiersFor(d.set),
     enemies: [...d.enemies.values()].map((e) => [e.id, e.type, r1(e.x), r1(e.z), Math.max(0, Math.round(e.hp)), Math.round(e.maxHp), r1(e.heading), e.state]),
     pilots: [...d.pilots.values()].filter((p) => p.present).map((p) => [p.name, r1(p.x), r1(p.z), r1(p.yaw), Math.round(p.hp), Math.round(p.shield), p.alive, p.kills]),
@@ -438,7 +653,12 @@ function joined(d, name) {
     enemy: d.enemy,
     size: SIZE,
     seed: d.seed,
-    cover: COVER,
+    map: d.map,
+    mapName: MAPS[d.map].name,
+    mapText: MAPS[d.map].text,
+    cover: d.cover,
+    objective: d.objective ? { kind: d.objective.kind, name: d.objective.name, box: d.objective.box, maxHp: d.objective.maxHp } : null,
+    bonusKillsPerPoint: BONUS_KILLS_PER_POINT,
     spawns: SPAWNS,
     enemies: ENEMIES,
     weapons: WEAPONS,
@@ -455,7 +675,8 @@ function joined(d, name) {
 
 // Sector Defense matches a server runs. `send(me, msg)` sends one connection a message;
 // `onEnd(d, winner)` scores the result for the campaign (winner: the squad's faction, or the
-// enemy's, or null for the militia) and returns the points; `speed` makes matches run faster (tests).
+// enemy's, or null for the militia) and returns the points (bonusPoints(d) on top for a win);
+// `speed` makes matches run faster (tests).
 function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null }) {
   const matches = new Map();
   const conns = new Map(); // match id -> Map(name -> connection)
@@ -489,7 +710,7 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
     if (conns.get(d.id)?.get(me.name) === me) {
       conns.get(d.id).delete(me.name);
       removePilot(d, me.name);
-      if (!d.result && !present(d).length) [d.result, d.how] = ['lost', 'abandoned'];
+      if (!d.result && !present(d).length) [d.result, d.how] = d.bonus ? ['won', 'bonus'] : ['lost', 'abandoned'];
       changed();
     }
     return { ok: true };
@@ -513,12 +734,17 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
   function finish(d) {
     const winner = d.result === 'won' ? d.faction : d.enemy;
     const pts = onEnd ? onEnd(d, winner) : 0;
+    const gain = (who) => (who ? `: +${pts} campaign points for ${F.the(who)}` : '');
     const text =
-      d.result === 'won'
-        ? `Sector held: every wave beaten, ${d.kills} enemies down. +${pts} campaign points for ${F.the(d.faction)}`
-        : d.how === 'abandoned'
-          ? 'The squad left the field'
-          : `The squad fell in set ${d.set}, wave ${d.wave}${winner ? `: +${pts} campaign points for ${F.the(winner)}` : ''}`;
+      d.result === 'won' && d.bonus
+        ? `Sector held: every wave beaten, then ${d.bonusKills} more enemies down in the bonus round (to bonus wave ${d.wave})${gain(winner)}`
+        : d.result === 'won'
+          ? `Sector held: every wave beaten, ${d.kills} enemies down${gain(winner)}`
+          : d.how === 'abandoned'
+            ? 'The squad left the field'
+            : d.how === 'objective'
+              ? `The ${d.objective.name.toLowerCase()} was destroyed in set ${d.set}, wave ${d.wave}${gain(winner)}`
+              : `The squad fell in set ${d.set}, wave ${d.wave}${gain(winner)}`;
     const f = frame(d);
     for (const [name, c] of conns.get(d.id)) {
       send(c, stateFor(d, f, name));
@@ -563,7 +789,7 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
   function list() {
     return [...matches.values()]
       .filter((d) => !d.result)
-      .map((d) => ({ id: d.id, planet: d.planet, faction: d.faction, enemy: d.enemy, set: d.set, wave: d.wave, pilots: present(d).map((p) => p.name) }));
+      .map((d) => ({ id: d.id, planet: d.planet, faction: d.faction, enemy: d.enemy, map: d.map, set: d.set, wave: d.wave, bonus: d.bonus, pilots: present(d).map((p) => p.name) }));
   }
 
   function close() {
@@ -591,6 +817,10 @@ module.exports = {
   ENEMIES,
   MODIFIERS,
   COVER,
+  MAPS,
+  BONUS_KILLS_PER_POINT,
+  bonusPoints,
+  blocked,
   modifiersFor,
   waveOf,
   newDefense,
@@ -600,6 +830,8 @@ module.exports = {
   fire,
   rayHit,
   hurtPilot,
+  hurtObjective,
+  enemyStep,
   step,
   frame,
   stateFor,

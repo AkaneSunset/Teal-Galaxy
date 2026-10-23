@@ -279,12 +279,23 @@ the holder's troops, or, for the holder's own squads, another faction's in the c
 - **Supply drops** land between waves: ammo, med packs, shield cells, and rocket launchers (4 rockets;
   always at the end of a set). Walk over one to take it.
 - Shields (60) soak damage first and recharge 4 seconds after the last hit; health (100) doesn't.
+- **Cover blocks fire, both ways.** Walls and cover stop rifle shots and rockets (a rocket bursts on the
+  wall, and its blast doesn't come through). Enemies that can't see you hold their fire and work their
+  way round the cover; over low cover they can only see your head and hit half as often. The server
+  checks every shot, yours and theirs, against the cover.
+- **Maps**: *Outpost* and *Ridge* are survival maps. *Relay Station* is an objective map: half of each
+  wave goes for the **shield generator** in the middle (unless a pilot is close to them). It's patched up
+  a quarter between waves; if it's destroyed, the match is lost. The match picks its map.
+- **Bonus round**: after the last wave of set 3 the match is won, and endless waves follow (all modifiers
+  on, a Warlord every fifth wave, no more lives). Every 10 kills add a campaign point to the win, until
+  the squad falls (or leaves, or the generator falls). Nothing in the bonus round can lose the match.
 - W A S D walk, Shift run, Space jump, mouse look, left mouse fire, R reload, 1 rifle, 2 rocket launcher,
   Esc pause (*Leave match*).
 
 Holding all 15 waves wins the match for the squad's faction (6 points, halved to 3: it's always against
-AI); a squad that falls scores for the enemy's. The enemies, the waves and every hit are decided on the
-server: each screen reports where its pilot stands and every shot it fires.
+AI, plus the bonus round's points, all doubled in the final push); a squad that falls, or loses its
+objective, scores for the enemy's. The enemies, the waves and every hit are decided on the server: each
+screen reports where its pilot stands and every shot it fires.
 
 Sectors change hands in [sector battles](#sector-battles). A server started with `DEMO=1` also lets
 pilots take sectors by hand: in the War terminal's sector view a sector your side may take has
