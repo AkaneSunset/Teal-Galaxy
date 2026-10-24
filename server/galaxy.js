@@ -613,7 +613,8 @@ function autoShipMs(g, planetId) {
   return AUTO_SHIP_MS / level;
 }
 
-// The Builder sends a freighter: the vault's goods go to HQ stock. Intel sells on arrival.
+// The Builder sends a freighter: the vault's goods go to HQ stock (intelligence too: the Builder
+// sells it, or supplies it to their High Command to learn the enemy's orders).
 function ship(g, planetId, slot, now, auto = false) {
   const b = facility(g, planetId, slot);
   if (!b) return fail('no such facility');
@@ -624,8 +625,7 @@ function ship(g, planetId, slot, now, auto = false) {
   const parts = [];
   for (const [item, qty] of goods) {
     const e = econ(g, planetId);
-    if (H.ITEMS[item].cat === 'intel') e.credits += H.ITEMS[item].value * qty;
-    else e.stock[item] = (e.stock[item] || 0) + qty;
+    e.stock[item] = (e.stock[item] || 0) + qty;
     parts.push(`${qty} ${H.ITEMS[item].name}`);
     b.vault[item] = 0;
   }
@@ -806,8 +806,7 @@ function returnAttacks(g) {
     for (const [id, n] of Object.entries((a.status === 'flying' ? a.ships : a.survivors) || {})) if (N.SHIPS[id]) e.navy[id] += n;
     for (const [item, qty] of Object.entries((a.status === 'returning' && a.loot) || {})) {
       if (!H.ITEMS[item]) continue;
-      if (H.ITEMS[item].cat === 'intel') e.credits += H.ITEMS[item].value * qty;
-      else e.stock[item] = (e.stock[item] || 0) + qty;
+      e.stock[item] = (e.stock[item] || 0) + qty;
     }
     log(g, `${a.attacker}'s fleet is back from ${a.siteName}`);
   }

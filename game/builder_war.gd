@@ -117,6 +117,7 @@ func _ready() -> void:
 	_director.add_theme_constant_override("separation", 6)
 	right.add_child(_director)
 	_orders = preload("res://orders_view.gd").new()
+	_orders.builder = true # with the controls to supply intelligence
 	right.add_child(_orders)
 	show_tab("map")
 

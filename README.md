@@ -290,6 +290,14 @@ twenty minutes an order). Win two of the three and the operation is won.
   order and outcome goes in the war log.
 - **The Coma director** (an admin) can issue a faction's order by hand, or a Coma offensive for all, from
   the Director tab (`admin_order`).
+- **Orders are secret.** Each faction sees only its own orders, its own archive and its own order news in
+  the war log; a Coma offensive is everyone's. The server sends each faction its own view.
+- **Intelligence.** Builders can learn the enemy's orders: Data shards (300) and Security dossiers (650)
+  from outpost vaults and raids now go into the Builder's stock instead of selling as they land. In the
+  War screen's **Orders** tab a Builder supplies one against an enemy faction ("Spy on the Compact"):
+  every 300 intelligence reveals that faction's running order, briefing, tasks and progress, to the
+  whole faction until its deadline, under **Intelligence**. Each supply earns War Merit. Or the Builder
+  sells the item there for its value, as before.
 
 ### Sector Defense
 

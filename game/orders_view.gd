@@ -4,11 +4,16 @@ extends VBoxContainer
 ## (won, failed, running, to come), the running order's briefing and tasks with their progress, the
 ## deadline and reward, your own part in it, and the archive of past operations.
 ## Call show_for(state, faction, me) whenever the state changes (and every second or so, for the clock).
+## Orders are secret: you see your own faction's, and an enemy's running order only once your
+## Builders' intelligence has revealed it (Intelligence, below). A Builder (`builder` true) can supply
+## intelligence there, or sell it.
 
 const WarInfo := preload("res://war_info.gd")
 
 var _archive := false
 var _key := ""
+## A Builder's view: with the controls to supply intelligence (or sell it).
+var builder := false
 
 
 func _init() -> void:
@@ -40,7 +45,8 @@ func _time(ms: float) -> String:
 ## The orders of the operation running, for `faction` (a faction id; "" before choosing one).
 func show_for(state: Dictionary, faction: String, me: String) -> void:
 	var orders: Dictionary = state.get("war", {}).get("orders", {}) if state.get("war") is Dictionary else {}
-	var key := JSON.stringify([orders, faction, _archive, int(Net.now_ms() / 1000.0)])
+	var stock: Dictionary = state.get("bases", {}).get(me, {}).get("stock", {}) if builder else {}
+	var key := JSON.stringify([orders, faction, _archive, int(Net.now_ms() / 1000.0), stock.get("shard", 0), stock.get("dossier", 0)])
 	if key == _key:
 		return
 	_key = key
@@ -111,6 +117,50 @@ func show_for(state: Dictionary, faction: String, me: String) -> void:
 	for o in list:
 		if str(o.status) != "active":
 			_label("%s: \"%s\" %s. %s" % [str(o.issuer), str(o.title), "accomplished" if str(o.status) == "won" else "failed", str(o.get("outcome", ""))], 14, Color(0.75, 0.8, 0.85))
+	_show_intel(orders, op, faction, stock, now)
+
+
+## What intelligence has revealed of the enemy's orders, and (for a Builder) supplying more.
+func _show_intel(orders: Dictionary, op: Dictionary, faction: String, stock: Dictionary, now: float) -> void:
+	_label("INTELLIGENCE", 20, Color(0.75, 0.85, 1.0))
+	_label("Enemy orders are secret. Builders' intelligence (Data shards, Security dossiers) reveals an enemy's running order until its deadline: %d intelligence a reveal." % 300, 14, Color(0.7, 0.76, 0.82))
+	var intel: Dictionary = orders.get("intel", {})
+	for f in ["compact", "ashen", "luminar"]:
+		if f == faction:
+			continue
+		var rec: Dictionary = op.get("factions", {}).get(f, {})
+		if rec.get("intel", false):
+			for o in rec.get("orders", []):
+				_label("%s's running order (deadline in %s):" % [WarInfo.faction_name(f), _time(float(o.endsAt) - now)], 16, WarInfo.faction_color(f).lightened(0.2))
+				_label("\"%s\": %s" % [str(o.title), str(o.briefing)], 14, Color(0.85, 0.88, 0.92))
+				for t in o.get("tasks", []):
+					var have := "   %d / %d" % [int(t.get("have", 0)), int(t.get("need", 1))] if str(t.type) in ["wins", "donate", "coma_wins"] else ""
+					_label(("✓ " if bool(t.get("done", false)) else "• ") + str(t.get("label", t.type)) + have, 14, Color(0.8, 0.84, 0.9))
+		else:
+			var p: Dictionary = intel.get(f, {})
+			_label("%s: unknown%s" % [WarInfo.faction_name(f), ("   (%d of %d intelligence gathered)" % [int(p.points), int(p.of)]) if not p.is_empty() else ""], 15, Color(0.7, 0.74, 0.8))
+		if builder:
+			var row := HBoxContainer.new()
+			add_child(row)
+			for item in [["shard", "Data shard", 300], ["dossier", "Security dossier", 650]]:
+				var b := Button.new()
+				var have := int(stock.get(item[0], 0))
+				b.text = "Spy on the %s: a %s (%d) · you have %d" % [WarInfo.faction_name(f).get_slice(" ", 1 if f == "compact" else 0), item[1], item[2], have]
+				b.disabled = have <= 0 or rec.get("intel", false)
+				var target: String = f
+				var it: String = item[0]
+				b.pressed.connect(func(): Net.send({"type": "intel_supply", "target": target, "item": it}))
+				row.add_child(b)
+	if builder:
+		var sell := HBoxContainer.new()
+		add_child(sell)
+		for item in [["shard", "Data shard", 300], ["dossier", "Security dossier", 650]]:
+			var b := Button.new()
+			b.text = "Sell a %s (%d credits)" % [item[1], item[2]]
+			b.disabled = int(stock.get(item[0], 0)) <= 0
+			var it: String = item[0]
+			b.pressed.connect(func(): Net.send({"type": "intel_sell", "item": it}))
+			sell.add_child(b)
 
 
 func _show_order(o: Dictionary, faction: String, me: String, now: float) -> void:

@@ -6,8 +6,13 @@
 //
 // Normal play is the contribution: winning campaign matches, leading or holding planets' campaigns,
 // Builders' donations to war supply. Targets scale with how many players a faction has, and the
-// briefing says how (no hidden maths). Progress is public, and each player's share is kept, for a
-// receipt and for the rewards. The Coma director (an admin) can issue an order by hand.
+// briefing says how (no hidden maths). Each player's share is kept, for a receipt and for the
+// rewards. The Coma director (an admin) can issue an order by hand.
+//
+// Orders are secret: a faction sees only its own (and a Coma offensive, which is everyone's), in
+// the war log too. Builders can supply intelligence (Data shards, Security dossiers) to their High
+// Command: every INTEL_COST of it against an enemy faction reveals that faction's running order
+// until its deadline (viewFor shows each faction what it may see).
 //
 // State in g.war.orders: { op: the operation running, archive: past ones }. Pure functions of the
 // galaxy and `now`, like campaign.js.
@@ -35,6 +40,19 @@ const ADJ = ['Iron', 'Silent', 'Burning', 'Pale', 'Distant', 'Steadfast', 'Hollo
 const NOUN = ['Anvil', 'Tide', 'Lantern', 'Harvest', 'Meridian', 'Vigil', 'Spear', 'Covenant', 'Ember', 'Bastion', 'Horizon', 'Requiem'];
 
 const TASK_TYPES = ['lead', 'hold', 'wins', 'donate', 'coma_wins'];
+const INTEL_COST = 300; // intelligence (an item's value) to reveal an enemy faction's running order
+const INTEL_ITEMS = { shard: 300, dossier: 650 }; // what each intelligence item is worth
+
+// An entry in the war log for orders: `faction`'s own (null: everyone's). Secret ones stay out of
+// the galaxy's public feed.
+function log(g, text, now, faction = null) {
+  g.war.log.push({ at: now, text, faction: faction || undefined });
+  if (g.war.log.length > 200) g.war.log.splice(0, g.war.log.length - 200);
+  if (!faction && g.feed) {
+    g.feed.push({ at: Date.now(), text });
+    if (g.feed.length > 50) g.feed.shift();
+  }
+}
 
 function fail(reason) {
   return { ok: false, reason };
@@ -285,7 +303,7 @@ function close(g, op, o, pay, now) {
     for (const f of factions) payFaction(g, f, REWARD.member, pay, `${o.title}: order won`);
   }
   const who = o.kind === 'coma' ? 'All factions' : F.FACTIONS[o.faction].name;
-  W.warLog(g, `${o.issuer}: "${o.title}" ${won ? 'accomplished' : 'failed'}. ${o.outcome}${won ? ` ${who}: +${REWARD.member} credits to every member, +${REWARD.order} more to the ${Object.keys(o.contrib).length} who fought for it.` : ''}`, now);
+  log(g, `${o.issuer}: "${o.title}" ${won ? 'accomplished' : 'failed'}. ${o.outcome}${won ? ` ${who}: +${REWARD.member} credits to every member, +${REWARD.order} more to the ${Object.keys(o.contrib).length} who fought for it.` : ''}`, now, o.faction);
 }
 
 function payFaction(g, faction, credits, pay, why) {
@@ -307,7 +325,7 @@ function finishOperation(g, op, pay, now) {
         p.commendations.push(op.name);
       }
     }
-    W.warLog(g, `${VOICES[f].issuer}: ${op.name} ${rec.status === 'won' ? `won, ${rec.won} of 3 orders. +${REWARD.operation} credits and a commendation to every member.` : `ended with ${rec.won} of 3 orders won. No reward this time.`}`, now);
+    log(g, `${VOICES[f].issuer}: ${op.name} ${rec.status === 'won' ? `won, ${rec.won} of 3 orders. +${REWARD.operation} credits and a commendation to every member.` : `ended with ${rec.won} of 3 orders won. No reward this time.`}`, now, f);
     archive.factions[f] = { won: rec.won, status: rec.status, orders: ordersOf(op, f).map((o) => ({ title: o.title, kind: o.kind, status: o.status, outcome: o.outcome, contributors: Object.keys(o.contrib).length })) };
   }
   g.war.orders.archive.unshift(archive);
@@ -329,7 +347,7 @@ function tick(g, pay = () => {}, now = Date.now()) {
   }
   if (!op) {
     op = g.war.orders.op = newOperation(g, now);
-    W.warLog(g, `${op.name} begins: three orders over ${W.isDemo() ? 'the hour' : 'two weeks'}. Win two to win the operation.`, now);
+    log(g, `${op.name} begins: three orders over ${W.isDemo() ? 'the hour' : 'two weeks'}. Win two to win the operation.`, now);
     changed = true;
   }
   // Close the orders whose time is up, then open the slot now running.
@@ -345,12 +363,12 @@ function tick(g, pay = () => {}, now = Date.now()) {
     if (slot === op.comaSlot) {
       const o = makeComaOrder(g, op, slot, now);
       op.coma.push(o);
-      W.warLog(g, `${o.issuer}: "${o.title}". ${o.briefing}`, now);
+      log(g, `${o.issuer}: "${o.title}". ${o.briefing}`, now);
     } else {
       for (const f of PLAYER_FACTIONS) {
         const o = makeOrder(g, op, f, slot, now);
         op.factions[f].orders.push(o);
-        W.warLog(g, `${o.issuer} issues "${o.title}"`, now);
+        log(g, `${o.issuer} issues "${o.title}"`, now, f);
       }
     }
     changed = true;
@@ -393,8 +411,72 @@ function issue(g, { faction, title, briefing, tasks }, now = Date.now()) {
     for (let i = list.length - 1; i >= 0; i--) if (list[i].status === 'active') list.splice(i, 1);
   }
   (all ? op.coma : op.factions[faction].orders).push(o);
-  W.warLog(g, `${o.issuer} issues new orders: "${o.title}"`, now);
+  log(g, `${o.issuer} issues new orders: "${o.title}"`, now, all ? null : faction);
   return { ok: true, order: o };
 }
 
-module.exports = { REWARD, VOICES, PLAYER_FACTIONS, DEMO_OP_MS, opWindow, ordersOf, active, matchWon, donated, tick, issue };
+// --- Secrecy and intelligence --------------------------------------------------------------------
+
+// A Builder of `faction` supplies an intelligence item against `target` (an enemy faction): every
+// INTEL_COST of it reveals the target's running order to the supplier's faction until its deadline.
+// The item comes out of the Builder's stock (`stock`), and the Builder earns War Merit for it.
+function supplyIntel(g, { faction, target, item, stock, builder }, now = Date.now()) {
+  if (!PLAYER_FACTIONS.includes(faction)) return fail('choose a faction first');
+  if (!PLAYER_FACTIONS.includes(target) || target === faction) return fail('pick an enemy faction to spy on');
+  if (!INTEL_ITEMS[item]) return fail('only intelligence (Data shards, Security dossiers) can be supplied');
+  if (!((stock?.[item] || 0) > 0)) return fail(`you have no ${item === 'shard' ? 'Data shard' : 'Security dossier'}`);
+  const op = g.war.orders?.op;
+  const o = op?.factions[target]?.orders.find((x) => x.status === 'active');
+  if (!o) return fail(`${F.the(target)} has no order running to learn about`);
+  stock[item] -= 1;
+  g.war.orders.intel ||= {};
+  const k = `${faction}>${target}`;
+  const rec = g.war.orders.intel[k]?.order === o.id ? g.war.orders.intel[k] : { order: o.id, points: 0, until: o.endsAt };
+  rec.points += INTEL_ITEMS[item];
+  g.war.orders.intel[k] = rec;
+  const revealed = rec.points >= INTEL_COST;
+  log(g, `${builder} supplied ${item === 'shard' ? 'a Data shard' : 'a Security dossier'} on ${F.the(target)}${revealed ? `: their order "${o.title}" is known to us until its deadline` : ` (${rec.points} of ${INTEL_COST} intelligence to learn their order)`}`, now, faction);
+  return { ok: true, revealed, points: rec.points, merit: Math.round(INTEL_ITEMS[item] / 10) };
+}
+
+// Whether `faction` knows `target`'s running order (intelligence, until its deadline).
+function knows(g, faction, target, now) {
+  const rec = g.war.orders?.intel?.[`${faction}>${target}`];
+  return Boolean(rec && rec.points >= INTEL_COST && rec.until > now);
+}
+
+// What `faction` may see of the orders: its own, the shared Coma offensives, and an enemy's running
+// order where its intelligence has revealed it (flagged `intel`). The archive: its own results.
+// Admins see everything (null faction with all = true).
+function viewFor(g, faction, now = Date.now(), all = false) {
+  const orders = g.war.orders;
+  if (!orders) return orders;
+  if (all) return orders;
+  const op = orders.op;
+  const out = { archive: orders.archive.map((a) => ({ ...a, factions: faction && a.factions[faction] ? { [faction]: a.factions[faction] } : {} })) };
+  if (op) {
+    const factions = {};
+    for (const f of PLAYER_FACTIONS) {
+      if (f === faction) factions[f] = op.factions[f];
+      else if (faction && knows(g, faction, f, now)) {
+        const o = op.factions[f].orders.find((x) => x.status === 'active');
+        if (o) factions[f] = { intel: true, orders: [o], won: op.factions[f].won, lost: op.factions[f].lost, status: op.factions[f].status };
+      }
+    }
+    out.op = { ...op, factions };
+  } else out.op = null;
+  // The faction's own intelligence so far: target -> { points, of, until }.
+  out.intel = {};
+  for (const [k, rec] of Object.entries(orders.intel || {})) {
+    const [from, target] = k.split('>');
+    if (from === faction && rec.until > now) out.intel[target] = { points: rec.points, of: INTEL_COST, until: rec.until };
+  }
+  return out;
+}
+
+// Whether a war log entry is for `faction` (secret entries are only their faction's).
+function logVisible(entry, faction) {
+  return !entry.faction || entry.faction === faction;
+}
+
+module.exports = { REWARD, VOICES, PLAYER_FACTIONS, DEMO_OP_MS, INTEL_COST, INTEL_ITEMS, opWindow, ordersOf, active, matchWon, donated, tick, issue, supplyIntel, knows, viewFor, logVisible };

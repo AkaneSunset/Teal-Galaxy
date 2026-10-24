@@ -66,7 +66,8 @@ test('an old save with satellite sites, attacks in flight and no war loads and p
   assert.deepStrictEqual(g.attacks, []);
   assert.deepStrictEqual(g.bases.Rin.navy, { corvette: 3, frigate: 2, destroyer: 0 });
   assert.strictEqual(g.bases.Rin.stock.alloy, 4);
-  assert.strictEqual(g.bases.Rin.credits, credits + 300, 'intel sells as it lands');
+  assert.strictEqual(g.bases.Rin.credits, credits, 'intelligence no longer sells as it lands...');
+  assert.strictEqual(g.bases.Rin.stock.shard, 1, '...it goes to stock, to sell or to spy with');
   // Every base has its new unlocks and war records; pilots their hold.
   for (const e of Object.values(g.bases)) {
     for (const type of G.OUTPOSTS.concat('dock')) assert.ok(e.unlocked.includes(type), type);

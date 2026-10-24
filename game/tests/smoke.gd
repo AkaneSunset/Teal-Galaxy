@@ -118,6 +118,12 @@ func _builder_steps() -> void:
 			if not said.has("HIGH COMMAND ORDERS") or not (" ".join(said).contains("Operation ") or " ".join(said).contains("No operation yet")):
 				_finish(false, "the Orders tab should show the faction's orders: %s" % str(said))
 				return
+			var spy: Array = war._orders.find_children("*", "Button", true, false).filter(func(b): return b.text.begins_with("Spy on the"))
+			if not " ".join(said).contains("Operation ") and said.has("HIGH COMMAND ORDERS"):
+				pass # no operation yet: no Intelligence section to check
+			elif not said.has("INTELLIGENCE") or spy.size() != 4 or not spy.all(func(b): return b.disabled):
+				_finish(false, "the Orders tab should offer spying on both enemy factions (disabled with no intelligence in stock): %s" % str(said))
+				return
 			war.show_tab("map")
 			if _admin:
 				war.show_tab("director")

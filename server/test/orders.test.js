@@ -169,3 +169,34 @@ test('the Coma director issues orders by hand, for a faction or all of them; bad
   assert.strictEqual(g.war.orders.op.coma.length, 1);
   W.setDemo(false);
 });
+
+test("orders are secret: a faction sees its own, the Coma offensives, and an enemy's running order only once its Builders' intelligence reveals it", () => {
+  const { g, t, pay } = setup();
+  O.tick(g, pay, t);
+  const view = O.viewFor(g, 'ashen', t + 1);
+  assert.deepStrictEqual(Object.keys(view.op.factions), ['ashen']);
+  assert.ok(!O.viewFor(g, null, t + 1).op.factions.ashen, 'no faction, no orders');
+  assert.ok(O.viewFor(g, null, t + 1, true).op.factions.compact, 'admins see them all');
+  // The war log keeps each faction's order entries to it.
+  const mine = g.war.log.filter((e) => O.logVisible(e, 'ashen'));
+  const theirs = g.war.log.filter((e) => !O.logVisible(e, 'ashen'));
+  assert.ok(mine.some((e) => e.faction === 'ashen'));
+  assert.ok(theirs.length > 0 && theirs.every((e) => e.faction && e.faction !== 'ashen'));
+  assert.ok(!g.feed.some((e) => theirs.some((x) => x.text === e.text)), 'secret entries never reach the public feed');
+  // Intelligence: a Data shard (300) reveals the Compact's running order to the Collective.
+  const stock = { shard: 1, dossier: 0, metal: 5 };
+  const sup = (target, item) => O.supplyIntel(g, { faction: 'ashen', target, item, stock, builder: 'Rin' }, t + 2);
+  assert.match(sup('ashen', 'shard').reason, /enemy faction/);
+  assert.match(sup('compact', 'metal').reason, /only intelligence/);
+  assert.match(sup('compact', 'dossier').reason, /no Security dossier/);
+  const r = sup('compact', 'shard');
+  assert.ok(r.ok && r.revealed);
+  assert.strictEqual(stock.shard, 0);
+  const seen = O.viewFor(g, 'ashen', t + 3).op.factions.compact;
+  assert.ok(seen.intel);
+  assert.strictEqual(seen.orders[0].id, g.war.orders.op.factions.compact.orders[0].id);
+  assert.ok(!O.viewFor(g, 'luminar', t + 3).op.factions.compact, 'only for the faction that paid for it');
+  // Until the order's deadline.
+  assert.ok(!O.viewFor(g, 'ashen', seen.orders[0].endsAt + 1).op.factions.compact);
+  assert.ok(g.war.log.some((e) => e.faction === 'ashen' && /Rin supplied a Data shard on the Terran Compact/.test(e.text)));
+});

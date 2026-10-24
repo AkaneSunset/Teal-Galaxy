@@ -105,10 +105,17 @@ func _steps() -> void:
 				_finish(false, "the HIGH COMMAND terminal should open the orders")
 				return
 			var text := _texts(panel)
-			for want in ["HIGH COMMAND ORDERS", "Operation ", str(_order.title), str(_order.issuer).to_upper(), "Deadline in", "Reward if won", "Your part: nothing yet", "Order 1: running"]:
+			for want in ["HIGH COMMAND ORDERS", "Operation ", str(_order.title), str(_order.issuer).to_upper(), "Deadline in", "Reward if won", "Your part: nothing yet", "Order %d: running" % (int(_order.slot) + 1)]:
 				if not text.contains(want):
 					_finish(false, "the orders should show '%s':\n%s" % [want, text])
 					return
+			if not text.contains("INTELLIGENCE") or not text.contains("Terran Compact: unknown") or not text.contains("Ashen Collective: unknown"):
+				_finish(false, "enemy orders should be secret, with an Intelligence section:\n" + text)
+				return
+			var seen: Dictionary = Net.state.get("war", {}).get("orders", {}).get("op", {}).get("factions", {})
+			if seen.keys() != ["luminar"]:
+				_finish(false, "the state should carry only our own faction's orders: %s" % str(seen.keys()))
+				return
 			if str(_order.kind) != "coma" and not text.contains("for each of our"):
 				_finish(false, "the briefing should say how the targets scale")
 				return
@@ -136,7 +143,7 @@ func _steps() -> void:
 			if not _explorer._orders_panel.visible or _explorer._war_panel.visible:
 				_finish(false, "the War terminal's Orders should open the orders")
 				return
-			_finish(true, "High Command issued the operation's first order (\"%s\", %s); the HIGH COMMAND terminal shows the operation, the slots, the briefing with its scaling, the tasks, deadline, reward and the pilot's part; the archive opens; the War terminal's Orders opens it too" % [_order.title, _order.issuer])
+			_finish(true, "High Command issued the operation's first order (\"%s\", %s); the HIGH COMMAND terminal shows the operation, the slots, the briefing with its scaling, the tasks, deadline, reward and the pilot's part, and the enemy's orders are secret (Intelligence); the archive opens; the War terminal's Orders opens it too" % [_order.title, _order.issuer])
 
 
 ## Every Label's text under `root`, one per line.

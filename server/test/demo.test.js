@@ -169,3 +169,39 @@ test('a fleet carrier jumps from its galaxy map to any system or planet, and onl
     W.setDemo(false);
   }
 });
+
+test("each faction's players get their own faction's orders in the state, and not the others'", async () => {
+  const server = startServer({ port: 9154, tickMs: 50, demoWar: true });
+  try {
+    const join = async (name, faction) => {
+      const ws = new WebSocket('ws://localhost:9154');
+      const inbox = [];
+      ws.on('message', (d) => inbox.push(JSON.parse(d)));
+      await new Promise((res) => ws.on('open', res));
+      ws.send(JSON.stringify({ type: 'hello', role: 'explorer', name }));
+      ws.send(JSON.stringify({ type: 'choose_faction', faction }));
+      return { ws, inbox };
+    };
+    const a = await join('Ash', 'ashen');
+    const c = await join('Cora', 'compact');
+    const latest = async (who, faction) => {
+      for (let i = 0; i < 100; i++) {
+        const st = who.inbox.filter((m) => m.type === 'state').at(-1)?.state;
+        const op = st?.war?.orders?.op;
+        if (op && op.factions[faction]) return op;
+        await new Promise((res) => setTimeout(res, 20));
+      }
+      throw new Error('no orders arrived');
+    };
+    const opA = await latest(a, 'ashen');
+    const opC = await latest(c, 'compact');
+    assert.deepStrictEqual(Object.keys(opA.factions), ['ashen']);
+    assert.deepStrictEqual(Object.keys(opC.factions), ['compact']);
+    a.ws.close();
+    c.ws.close();
+  } finally {
+    await server.close();
+    W.setDemo(false);
+  }
+});
+

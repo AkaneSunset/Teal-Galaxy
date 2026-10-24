@@ -54,7 +54,7 @@ const BASE = 'only Builders run a base';
 const BUILDER_ONLY = {
   build: BASE, post_job: BASE, ship_cargo: BASE, upgrade_security: BASE, sound_alarm: BASE, queue_ship: BASE, cancel_ship: BASE,
   place_piece: BASE, remove_piece: BASE, clear_obstacle: BASE, upgrade_building: BASE,
-  found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', set_ask: 'only Builders run a Star Port', market_sell: 'only Builders run a Star Port', set_refinery: 'only Builders run an Extractor', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war',
+  found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', set_ask: 'only Builders run a Star Port', market_sell: 'only Builders run a Star Port', set_refinery: 'only Builders run an Extractor', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war', intel_supply: 'only Builders supply intelligence', intel_sell: 'only Builders sell intelligence',
 };
 const JUMP_S = 5; // a fleet carrier's FTL jump spools up this long
 const PILOT_ONLY = {
@@ -142,9 +142,13 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // which armadas an admin sent by hand (players see every armada, as ships in space). It is only
   // ever written out as JSON, which leaves the undefined fields out. Both views carry the sector
   // battles running now (`battles`), which are never saved.
-  function playerView() {
+  // The faction orders are secret: each faction's players see their own (and what their
+  // intelligence has revealed), in the orders and in the war log.
+  function playerView(faction = null) {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    const orders = O.viewFor(galaxy, faction, now());
+    const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
+    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets, orders, log }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
@@ -152,18 +156,29 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   }
 
   function stateFor(me) {
-    return me.admin ? adminView() : playerView();
+    return me.admin ? adminView() : playerView(viewerFaction(me));
+  }
+
+  // The faction whose secrets a player shares: a pilot's, or a Builder's.
+  function viewerFaction(me) {
+    const book = me.role === 'builder' ? galaxy.bases : me.role === 'explorer' ? galaxy.pilots : null;
+    return (book && Object.hasOwn(book, me.name) && book[me.name].faction) || null;
   }
 
   // The state to every welcomed app: admins get all of it, everyone else the player view (each
   // written once).
   function broadcastState(except = null) {
     let all = null;
-    let open = null;
+    const views = new Map(); // one per faction (orders are secret)
     for (const [ws, c] of clients) {
       if (ws === except || !c.role || ws.readyState !== ws.OPEN) continue;
-      if (c.admin) ws.send((all ??= JSON.stringify({ type: 'state', state: adminView() })));
-      else ws.send((open ??= JSON.stringify({ type: 'state', state: playerView() })));
+      if (c.admin) {
+        ws.send((all ??= JSON.stringify({ type: 'state', state: adminView() })));
+        continue;
+      }
+      const f = viewerFaction(c);
+      if (!views.has(f)) views.set(f, JSON.stringify({ type: 'state', state: playerView(f) }));
+      ws.send(views.get(f));
     }
   }
 
@@ -640,6 +655,27 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = G.donate(galaxy, me.name, msg.item, msg.qty);
         if (result.ok) O.donated(galaxy, galaxy.bases?.[me.name]?.faction ?? null, me.name, msg.qty * (G.MERIT_VALUE[msg.item] || 0), now());
         break;
+      case 'intel_supply': {
+        // Intelligence to High Command: an enemy faction's running order, revealed.
+        const e = galaxy.bases?.[me.name];
+        result = O.supplyIntel(galaxy, { faction: e?.faction ?? null, target: String(msg.target || ''), item: String(msg.item || ''), stock: e?.stock, builder: me.name }, now());
+        if (result.ok) e.merit = (e.merit || 0) + result.merit;
+        break;
+      }
+      case 'intel_sell': {
+        // Or sold, as it always was, for its value.
+        const e = galaxy.bases?.[me.name];
+        const value = O.INTEL_ITEMS[msg.item];
+        const qty = Number.isInteger(msg.qty) && msg.qty > 0 ? msg.qty : 1;
+        if (!e || !value) result = { ok: false, reason: 'only intelligence (Data shards, Security dossiers) sells here' };
+        else if ((e.stock[msg.item] || 0) < qty) result = { ok: false, reason: 'not enough of it in stock' };
+        else {
+          e.stock[msg.item] -= qty;
+          e.credits += value * qty;
+          result = { ok: true, credits: value * qty };
+        }
+        break;
+      }
       case 'dock_buy':
         result = G.dockBuy(galaxy, me.name, msg.builder, msg.item, msg.qty);
         break;
