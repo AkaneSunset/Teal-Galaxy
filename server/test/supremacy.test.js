@@ -104,8 +104,10 @@ test('boarding: every pilot who reaches a shuttle in time adds 15 seconds; then 
   S.addPilot(f, 'P3', 'a');
   S.startBoarding(f, 'a');
   const [sx, sz] = f.shuttles[0];
+  const p3 = f.bodies.get('P3');
   for (let i = 0; i < 22 && f.phase === 'boarding'; i++) {
     for (const p of [p1, p2]) Object.assign(p, { alive: true, x: sx + 1, z: sz });
+    Object.assign(p3, { alive: true, x: 2, z: 60 }); // the third stays away
     S.step(f, 1);
   }
   assert.strictEqual(f.phase, 'ship');

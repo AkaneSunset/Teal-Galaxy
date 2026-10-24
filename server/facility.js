@@ -10,7 +10,21 @@
 // attachments, perks and equipment, kept on the pilot and shared with every mode that uses them)
 // and earn kill streaks by kills without dying. The facility has doors that open for whoever comes
 // near, defender turrets that defenders can repair, and a power plant attackers can hack to open
-// locked shortcut doors. Power weapons come from front-supply drops.
+// locked shortcut doors.
+//
+// The combat follows Halo's doctrine (see the Halo design report in the project library):
+//   The Dance: a recharging shield over health, which also comes back after a while; kill times of
+//   about 1 to 1.5 seconds; precision weapons' headshots only finish a target whose shield is down
+//   (a sniper's kills outright); melee to round off gun and grenade. Sprinting holds the shield's
+//   recharge off.
+//   Readable power: power weapons and an Overshield (with a delay before it takes hold) come up on
+//   fixed, exposed pads, on known timers, with a 10-second warning; equipment (Threat Sensor, Drop
+//   Wall, Thruster) from racks, with limited charges, dropped on death.
+//   Earned information: the motion tracker shows enemies close by who run or fire; crouch-walking
+//   keeps you off it.
+//   Weighted spawns: near teammates, away from enemies, out of their sight, and not where someone
+//   just died.
+//   Postgame Carnage Report: the match's scoreboard with medals, and Queue again.
 //
 // Simulated here on the server in 2D (x and z in metres over a SIZE x SIZE map, (0, 0) at a
 // corner), like Sector Defense: pilots move on their own screens and report where they are and
@@ -38,8 +52,7 @@ const SHIELD_RATE = 25;
 const RADIUS = 0.45; // a body's
 const HEIGHT = 1.8;
 const EYE = 1.6;
-const HEAD_Y = 1.5; // hits above this are headshots
-const HEADSHOT = 1.5;
+const HEAD_Y = 1.5; // hits above this are headshots (see PRECISION_HEAD)
 const MOVES_PER_S = 30;
 const SHOTS_PER_S = 20;
 const USES_PER_S = 10;
@@ -54,13 +67,26 @@ const FLAG_R = 1.6;
 const FLAG_RETURN_S = 20;
 const SPOT_S = 1.5; // firing without a suppressor shows you on the enemy's map this long
 const CALL_S = 3; // an AI trooper calling a target shows it to its side this long
-const SUPPLY_EVERY_S = 90; // front-supply drops with a power weapon, this often
+const SUPPLY_EVERY_S = 90; // front-supply drops with a power weapon, this often (Supremacy)
+const HEALTH_DELAY_S = 6; // health comes back this long after the last hit...
+const HEALTH_RATE = 20; // ...this fast (the shield's quicker: SHIELD_DELAY_S, SHIELD_RATE)
+const PRECISION_HEAD = 4; // a precision weapon's headshot on a body whose shield is down
+const SPRINT_SPEED = 6.0; // m/s: faster than this between reports is sprinting (no shield recharge)
+const QUIET_SPEED = 3.0; // m/s: slower than this is crouch-walking (off the motion tracker)
+const TRACKER_R = 25; // the motion tracker's reach, metres
+const MELEE = { damage: 70, ball: 100, range: 2.4, cone: 0.55, gap: 0.9 };
+const OVERSHIELD = { amount: 75, delay: 1.5, decay: 4 }; // on top of the shield, after a delay; it wears off
+const POWER = { first: 30, again: 90, warn: 10, overshield: 120 }; // pads: seconds to the first, between, warning
+const GEAR_AGAIN_S = 30; // a rack has its equipment again this long after it's taken
+const RECENT_DEATH_S = 7; // spawns near a death this recent count against it
+const MULTI_S = 4; // kills this close together make a multikill
 
 // --- Rule sets ---------------------------------------------------------------------------------
 
 const RULES = {
   koth: { name: 'King of the Hill', text: 'Hold the hill alone to score. It moves every 60 seconds.', target: 150, hillS: 60, hillR: 6 },
-  domination: { name: 'Domination', text: 'Hold the 3 control points. Each held point scores 1 every 2 seconds.', target: 250, pointR: 5, captureS: 5, rate: 0.5 },
+  strongholds: { name: 'Strongholds', text: 'Capture the 3 zones. Hold two to score 1 a second, all three for 2. Scoring stops while one you hold is contested.', target: 150, pointR: 5, captureS: 5 },
+  oddball: { name: 'Oddball', text: 'Hold the ball to score 1 a second. Its carrier fights with melee only (V). First to 100.', target: 100, resetS: 15 },
   tdm: { name: 'Team Deathmatch', text: 'First to 50 kills, or the most kills when time runs out.', target: 50 },
   ctf: { name: 'Capture the Flag', text: "Bring the enemy's flag to your base 3 times. Your own flag must be home.", target: 3 },
 };
@@ -71,15 +97,18 @@ const RULE_IDS = Object.keys(RULES);
 // Every item costs one of a class's 10 points. `slot`: primary or secondary weapon, attachment
 // (on the primary, up to 3), perk (up to 3), equipment.
 const WEAPONS = {
-  rifle: { name: 'Assault rifle', slot: 'primary', damage: 28, gap: 0.1, range: 90, mag: 30, reserve: 150, reload: 2.0 },
-  smg: { name: 'SMG', slot: 'primary', damage: 20, gap: 0.07, range: 45, mag: 32, reserve: 160, reload: 1.7, speed: 1.05 },
-  shotgun: { name: 'Shotgun', slot: 'primary', damage: 14, pellets: 8, spread: 0.06, gap: 0.8, range: 18, mag: 6, reserve: 30, reload: 2.6 },
-  sniper: { name: 'Sniper rifle', slot: 'primary', damage: 95, gap: 1.2, range: 200, mag: 5, reserve: 25, reload: 2.8, speed: 0.92 },
-  lmg: { name: 'LMG', slot: 'primary', damage: 26, gap: 0.09, range: 90, mag: 80, reserve: 160, reload: 4.0, speed: 0.88 },
-  pistol: { name: 'Pistol', slot: 'secondary', damage: 24, gap: 0.22, range: 50, mag: 12, reserve: 48, reload: 1.4 },
+  // Kill times against a full shield (150): rifle 1.2 s, SMG 1.1 s, shotgun 0.8 s up close, LMG
+  // 1.2 s, pistol 1.5 s (0.6 s finishing with a headshot), sniper 1.2 s (a headshot at once).
+  // `precision`: headshots finish a body whose shield is down; `headKill`: a headshot kills outright.
+  rifle: { name: 'Assault rifle', slot: 'primary', damage: 12, gap: 0.1, range: 90, mag: 32, reserve: 160, reload: 2.0 },
+  smg: { name: 'SMG', slot: 'primary', damage: 9, gap: 0.07, range: 45, mag: 40, reserve: 200, reload: 1.7, speed: 1.05 },
+  shotgun: { name: 'Shotgun', slot: 'primary', damage: 10, pellets: 8, spread: 0.06, gap: 0.8, range: 18, mag: 6, reserve: 30, reload: 2.6 },
+  sniper: { name: 'Sniper rifle', slot: 'primary', damage: 95, gap: 1.2, range: 200, mag: 5, reserve: 25, reload: 2.8, speed: 0.92, precision: true, headKill: true },
+  lmg: { name: 'LMG', slot: 'primary', damage: 11, gap: 0.09, range: 90, mag: 80, reserve: 160, reload: 4.0, speed: 0.88 },
+  pistol: { name: 'Pistol', slot: 'secondary', damage: 25, gap: 0.3, range: 50, mag: 12, reserve: 48, reload: 1.4, precision: true },
   launcher: { name: 'Launcher', slot: 'secondary', damage: 150, splash: 4, gap: 1.2, range: 120, mag: 1, reserve: 2, reload: 2.5 },
-  // Power weapons: only from supply drops, never in a class.
-  railgun: { name: 'Railgun', slot: 'power', damage: 150, gap: 1.5, range: 200, mag: 4, reserve: 0, reload: 0, pierce: true },
+  // Power weapons: only from their pads (and Supply Drops), never in a class.
+  railgun: { name: 'Railgun', slot: 'power', damage: 150, gap: 1.5, range: 200, mag: 4, reserve: 0, reload: 0, pierce: true, precision: true, headKill: true },
   rockets: { name: 'Rocket launcher', slot: 'power', damage: 220, splash: 5, gap: 1.0, range: 150, mag: 3, reserve: 0, reload: 0 },
 };
 const ATTACHMENTS = {
@@ -100,6 +129,30 @@ const EQUIPMENT = {
   stim: { name: 'Stim', text: '2 stims: heal 60 at once (H)', count: 2 },
 };
 const POINTS = 10;
+
+// Equipment from racks on the map (Halo Infinite's): limited charges, Q to use, dropped on death.
+const GEAR = {
+  sensor: { name: 'Threat Sensor', text: 'A dart where you aim: enemies near it show on your side\'s map, through walls', charges: 2, radius: 12, seconds: 8, range: 25 },
+  wall: { name: 'Drop Wall', text: 'A shield wall in front of you: it stops their shots, not yours', charges: 2, hp: 250, seconds: 12 },
+  thruster: { name: 'Thruster', text: 'A burst of speed the way you move', charges: 3, gap: 2, burst: 8 },
+};
+
+// Medals, for the Postgame Carnage Report (and a word on screen as they're won).
+const MEDALS = {
+  double: 'Double Kill',
+  triple: 'Triple Kill',
+  overkill: 'Overkill',
+  spree: 'Killing Spree',
+  rampage: 'Rampage',
+  headshot: 'Headshot',
+  beatdown: 'Beatdown',
+  flag: 'Flag Capture',
+  zone: 'Zone Capture',
+  ball: 'Ball Carrier',
+  hacker: 'Hacker',
+  repair: 'Repairman',
+  shutdown: 'Killjoy',
+};
 
 // The classes everyone has; pilots build up to CUSTOM_MAX more of their own.
 const DEFAULT_CLASSES = {
@@ -153,6 +206,8 @@ const LAYOUTS = {
     flags: { a: [40, 10], d: [40, 70] },
     holds: [[40, 56], [35, 58], [45, 58], [40, 38]],
     drops: [[25, 44], [55, 44]],
+    racks: [[10, 40, 'sensor'], [70, 40, 'wall'], [36, 44, 'thruster']],
+    callouts: [[40, 44, 'Main Hall'], [20, 44, 'West Pillar'], [60, 44, 'East Pillar'], [40, 24, 'South Yard'], [40, 62, 'North Yard'], [62, 50, 'Plant'], [10, 40, 'West Fence'], [70, 40, 'East Fence']],
   },
   foundry: {
     name: 'Foundry',
@@ -170,6 +225,8 @@ const LAYOUTS = {
     flags: { a: [40, 8], d: [40, 72] },
     holds: [[17, 54], [63, 54], [40, 58], [40, 46]],
     drops: [[40, 30], [40, 50]],
+    racks: [[28, 40, 'sensor'], [52, 40, 'wall'], [40, 46, 'thruster']],
+    callouts: [[17, 40, 'West Hall'], [63, 40, 'East Hall'], [40, 40, 'Furnace'], [40, 24, 'Loading Dock'], [40, 58, 'Slag Yard'], [28, 40, 'West Gate'], [52, 40, 'East Gate']],
   },
   reactor: {
     name: 'Reactor',
@@ -189,6 +246,8 @@ const LAYOUTS = {
     flags: { a: [40, 8], d: [40, 72] },
     holds: [[40, 62], [36, 58], [44, 58], [40, 52]],
     drops: [[16, 30], [64, 30]],
+    racks: [[18, 40, 'sensor'], [62, 40, 'wall'], [40, 52, 'thruster']],
+    callouts: [[40, 30, 'Core South'], [40, 50, 'Core North'], [30, 40, 'West Ring'], [50, 40, 'East Ring'], [16, 40, 'West Vents'], [64, 40, 'East Vents'], [40, 72, 'Control Room']],
   },
   proving: {
     name: 'Proving Grounds',
@@ -206,6 +265,8 @@ const LAYOUTS = {
     flags: { a: [40, 8], d: [40, 72] },
     holds: [[40, 62], [30, 64], [50, 64]],
     drops: [[40, 32], [40, 48]],
+    racks: [[16, 48, 'sensor'], [64, 32, 'wall'], [40, 46, 'thruster']],
+    callouts: [[40, 40, 'Pyramid'], [20, 20, 'SW Block'], [60, 20, 'SE Block'], [20, 60, 'NW Block'], [60, 60, 'NE Block'], [16, 40, 'West Rail'], [64, 40, 'East Rail']],
   },
 };
 const FACTION_LAYOUTS = Object.keys(LAYOUTS).filter((k) => !LAYOUTS[k].generic);
@@ -230,6 +291,10 @@ function buildMap(layoutId, mirror = false, name = null) {
     flags: { a: spot(L.flags.a), d: spot(L.flags.d) },
     holds: L.holds.map(spot),
     drops: L.drops.map(spot),
+    racks: (L.racks || []).map(([x, z, kind]) => [fx(x), z, kind]),
+    callouts: (L.callouts || []).map(([x, z, name]) => [fx(x), z, name]),
+    // Forward spawns: the defenders' choke points, and the same mirrored for the attackers.
+    forward: { d: L.holds.map(spot), a: L.holds.map(([x, z]) => [fx(x), SIZE - z]) },
   };
 }
 
@@ -348,17 +413,24 @@ function hurtBreakable(f, br, damage, by) {
   f.onBreak?.(f, br, by);
 }
 
-function blocked(f, a, b) {
+// The share of the way from a to b that a shot gets before something stops it. Drop Walls stop the
+// other side's shots, never their own side's (`side`: the shooter's).
+function blocked(f, a, b, side = null) {
   let t = 1;
   for (const box of f.blockers) {
     const h = segBox(a, b, box);
     if (h !== null && h < t) t = h;
   }
+  for (const w of f.dropWalls || []) {
+    if (w.side === side) continue;
+    const h = segBox(a, b, w.box);
+    if (h !== null && h < t) t = h;
+  }
   return t;
 }
 
-function clear(f, a, b) {
-  return blocked(f, a, b) >= 1;
+function clear(f, a, b, side = null) {
+  return blocked(f, a, b, side) >= 1;
 }
 
 function boxNear(box, x, z) {
@@ -369,7 +441,7 @@ function boxNear(box, x, z) {
 }
 
 function pushOut(f, x, z, r = RADIUS) {
-  for (const box of f.blockers) {
+  for (const box of f.dropWalls?.length ? [...f.blockers, ...f.dropWalls.map((w) => w.box)] : f.blockers) {
     const q = boxNear(box, x, z);
     if (q.r >= r) continue;
     if (q.r > 1e-6) {
@@ -515,6 +587,17 @@ function newFacility({ id = 'f1', planet, planetName = '', attacker, defender = 
     flags: { a: { home: m.flags.a, x: m.flags.a[0], z: m.flags.a[1], carrier: null, droppedAt: null }, d: { home: m.flags.d, x: m.flags.d[0], z: m.flags.d[1], carrier: null, droppedAt: null } },
     pickups: new Map(),
     nextSupply: SUPPLY_EVERY_S / 2,
+    // Power on the map: weapon pads (and the Overshield's) on timers, equipment racks, and what's
+    // been put down (Threat Sensors, Drop Walls).
+    pads: [
+      ...m.drops.map(([x, z], i) => ({ id: i, kind: i % 2 ? 'rockets' : 'railgun', x, z, next: POWER.first, up: false, warned: false })),
+      ...(r !== 'oddball' && m.hills.length ? [{ id: m.drops.length, kind: 'overshield', x: m.hills[0][0], z: m.hills[0][1], next: POWER.first + 30, up: false, warned: false }] : []),
+    ],
+    racks: (m.racks || []).map(([x, z, kind]) => ({ x, z, kind, next: 5, up: false })),
+    gearObjs: [], // Threat Sensors: { id, kind, side, by, x, z, until }
+    dropWalls: [], // { id, side, box, hp, maxHp, until }
+    deaths: [], // where and when bodies fell, for the spawns: { x, z, t }
+    ball: m.hills.length ? { home: m.hills[0], x: m.hills[0][0], z: m.hills[0][1], carrier: null, droppedAt: null } : null,
     active: [], // streaks running: { kind, side, by, until, x, z, next, left }
     spotted: { a: new Map(), d: new Map() }, // what each side's map shows: body id -> until
     grenades: [],
@@ -559,26 +642,45 @@ function equip(b, cls) {
 }
 
 function newBody(f, { id, name, side, ai = false, cls = 'assault', loadouts = [], fodder = false }) {
-  const b = { id, name, side, ai, fodder, present: true, x: 0, z: 0, yaw: 0, hp: HP, shield: SHIELD, hitAt: -100, alive: false, respawnAt: 0, kills: 0, deaths: 0, caps: 0, streak: 0, earned: [], moveT: 0, lastShot: -100, reloadUntil: 0, want: cls, loadouts, cd: 0, path: null };
+  const b = { id, name, side, ai, fodder, medals: {}, gear: null, present: true, x: 0, z: 0, yaw: 0, hp: HP, shield: SHIELD, hitAt: -100, alive: false, respawnAt: 0, kills: 0, deaths: 0, caps: 0, streak: 0, earned: [], moveT: 0, lastShot: -100, reloadUntil: 0, want: cls, loadouts, cd: 0, path: null };
   equip(b, classOf(cls, loadouts));
   f.bodies.set(id, b);
   spawn(f, b);
   return b;
 }
 
-// Back in at one of the side's spawns (the one furthest from the enemy), with the class it chose.
-// A mode can choose the spawns (f.spawnSpots) and change the body as it comes in (f.onSpawn: an
-// elite trooper, a fodder bot).
+// How good a spawn point is, as Halo weighs them: a base value, more beside a teammate (up to two),
+// much less near an enemy, less again in an enemy's sight, and less where someone just died.
+function spawnScore(f, b, x, z) {
+  let s = 1000 + random(f.rng) * 50;
+  let buddies = 0;
+  for (const o of f.bodies.values()) {
+    if (!o.alive || o === b) continue;
+    const d = Math.hypot(o.x - x, o.z - z);
+    if (o.side === b.side) {
+      if (d < 15 && buddies < 2) [s, buddies] = [s + 250, buddies + 1];
+      continue;
+    }
+    if (d < 25) s -= 700;
+    if (d < 45 && clear(f, { x: o.x, y: EYE, z: o.z }, { x, y: 1.2, z }, o.side)) s -= 1200;
+  }
+  for (const k of f.deaths || []) if (f.t - k.t < RECENT_DEATH_S && Math.hypot(k.x - x, k.z - z) < 8) s -= 500;
+  return s;
+}
+
+// Back in at the best-weighted of the side's spawns (spawnScore), with the class it chose. A mode
+// can choose the spawns (f.spawnSpots) and change the body as it comes in (f.onSpawn: an elite
+// trooper, a fodder bot).
 function spawn(f, b) {
-  const enemies = [...f.bodies.values()].filter((o) => o.alive && o.side !== b.side);
   let best = null;
-  let bd = -1;
-  for (const [x, z] of f.spawnSpots ? f.spawnSpots(f, b) : f.map.spawns[b.side]) {
-    const near = enemies.reduce((m, o) => Math.min(m, Math.hypot(o.x - x, o.z - z)), 999) + random(f.rng) * 4;
-    if (near > bd) [best, bd] = [[x, z], near];
+  let bd = -Infinity;
+  const spots = f.spawnSpots ? f.spawnSpots(f, b) : [...f.map.spawns[b.side], ...(f.map.forward?.[b.side] || [])];
+  for (const [x, z] of spots) {
+    const score = spawnScore(f, b, x, z);
+    if (score > bd) [best, bd] = [[x, z], score];
   }
   equip(b, classOf(b.want, b.loadouts));
-  Object.assign(b, { alive: true, x: best[0], z: best[1], hp: HP, hpMax: HP, shield: b.shieldMax, hitAt: -100, streak: 0, reloadUntil: 0, moveT: f.t, path: null, power: null, damageMul: 1, elite: false });
+  Object.assign(b, { alive: true, x: best[0], z: best[1], hp: HP, hpMax: HP, shield: b.shieldMax, hitAt: -100, streak: 0, reloadUntil: 0, moveT: f.t, path: null, power: null, damageMul: 1, elite: false, overAt: 0, sprintUntil: 0, loudUntil: 0, thrustUntil: 0 });
   b.yaw = b.side === 'd' ? 0 : Math.PI; // facing the other side's end
   f.onSpawn?.(f, b);
 }
@@ -643,8 +745,11 @@ function move(f, name, msg) {
   const dx = msg.x - b.x;
   const dz = msg.z - b.z;
   const far = Math.hypot(dx, dz);
-  const most = WALK * b.speed * dt + 1;
+  const most = WALK * b.speed * dt + 1 + (b.thrustUntil > f.t ? GEAR.thruster.burst : 0);
   const k = far > most ? most / far : 1;
+  // Running shows on the enemy's motion tracker; sprinting holds the shield's recharge off.
+  if (far / dt > SPRINT_SPEED) b.sprintUntil = f.t + 0.4;
+  if (far / dt > QUIET_SPEED) b.loudUntil = Math.max(b.loudUntil || 0, f.t + 0.6);
   [b.x, b.z] = pushOut(f, b.x + dx * k, b.z + dz * k);
   if (num(msg.yaw)) b.yaw = msg.yaw;
   b.moveT = f.t;
@@ -657,10 +762,25 @@ function touch(f, b) {
   for (const u of [...f.pickups.values()]) {
     if (b.ai || Math.hypot(u.x - b.x, u.z - b.z) > PICKUP_R) continue;
     f.pickups.delete(u.id);
-    const def = WEAPONS[u.weapon];
-    b.power = { weapon: u.weapon, mag: def.mag, magMax: def.mag, reserve: 0, reloadS: 0, range: def.range };
-    if (!b.ai) b.weapon = 'power';
-    f.feed.push({ text: `${b.name} took the ${def.name}`, side: b.side });
+    const pad = u.pad !== undefined ? f.pads?.find((p) => p.id === u.pad) : null;
+    if (pad) [pad.up, pad.warned, pad.next] = [false, false, f.t + (pad.kind === 'overshield' ? POWER.overshield : POWER.again)];
+    if (u.rack !== undefined && f.racks?.[u.rack]) [f.racks[u.rack].up, f.racks[u.rack].next] = [false, f.t + GEAR_AGAIN_S];
+    if (u.kind === 'overshield') {
+      b.overAt = f.t + OVERSHIELD.delay; // it takes hold after a moment: costly to grab under fire
+      f.feed.push({ text: `${b.name} took the Overshield`, side: b.side });
+    } else if (u.kind === 'gear') {
+      const def = GEAR[u.gear];
+      b.gear = { kind: u.gear, charges: b.gear?.kind === u.gear ? Math.min(def.charges, b.gear.charges + (u.charges ?? def.charges)) : u.charges ?? def.charges };
+    } else {
+      const def = WEAPONS[u.weapon];
+      b.power = { weapon: u.weapon, mag: def.mag, magMax: def.mag, reserve: 0, reloadS: 0, range: def.range };
+      b.weapon = 'power';
+      f.feed.push({ text: `${b.name} took the ${def.name}`, side: b.side });
+    }
+  }
+  if (f.rule === 'oddball' && f.ball && !f.ball.carrier && Math.hypot(f.ball.x - b.x, f.ball.z - b.z) <= PICKUP_R) {
+    [f.ball.carrier, f.ball.droppedAt] = [b.id, null];
+    f.feed.push({ text: `${b.name} has the ball` });
   }
   if (f.rule !== 'ctf') return;
   const own = f.flags[b.side];
@@ -680,11 +800,22 @@ function touch(f, b) {
     [theirs.x, theirs.z] = theirs.home;
     f.score[b.side] += 1;
     b.caps += 1;
+    medal(f, b, 'flag');
     f.feed.push({ text: `${b.name} captured the flag: ${f.score[b.side]} of ${RULES.ctf.target}` });
   }
 }
 
+// A body drops what it carries when it falls or leaves: a flag, the ball, its equipment.
 function dropFlag(f, b) {
+  if (f.ball?.carrier === b.id) {
+    [f.ball.carrier, f.ball.x, f.ball.z, f.ball.droppedAt] = [null, r1(b.x), r1(b.z), f.t];
+    f.feed.push({ text: `${b.name} dropped the ball` });
+  }
+  if (b.gear?.charges > 0 && !b.alive && f.racks) {
+    const id = f.nextId++;
+    f.pickups.set(id, { id, kind: 'gear', gear: b.gear.kind, charges: b.gear.charges, x: r1(b.x), z: r1(b.z) });
+  }
+  if (!b.alive) b.gear = null;
   for (const s of ['a', 'd']) {
     const fl = f.flags[s];
     if (fl.carrier !== b.id) continue;
@@ -769,12 +900,16 @@ function shoot(f, b, o, dir) {
   const g = gunOf(b);
   if (!g) return fail('no weapon');
   const def = WEAPONS[g.weapon];
+  if (f.ball?.carrier === b.id) return fail("you're carrying the ball: melee only (V)");
   if (b.reloadUntil > f.t) return { ok: true, quiet: true, reason: 'reloading' };
   if (f.t - b.lastShot < def.gap * 0.8) return { ok: true, quiet: true };
   if (g.mag <= 0) return fail('empty: reload (R)');
   g.mag -= 1;
   b.lastShot = f.t;
-  if (!g.suppressed) spot(f, b, SPOT_S);
+  if (!g.suppressed) {
+    spot(f, b, SPOT_S);
+    b.loudUntil = f.t + 1.5; // gunfire shows on the motion tracker
+  }
   if (b.weapon === 'power' && g.mag <= 0) {
     b.power = null;
     b.weapon = b.guns.primary ? 'primary' : 'secondary';
@@ -793,7 +928,7 @@ function shoot(f, b, o, dir) {
       d = { x: d.x / dn, y: d.y / dn, z: d.z / dn };
     }
     const end = { x: o.x + d.x * g.range, y: o.y + d.y * g.range, z: o.z + d.z * g.range };
-    const wall = blocked(f, o, end) * g.range;
+    const wall = blocked(f, o, end, b.side) * g.range;
     if (def.pierce) {
       // The railgun goes through everyone in its way (not walls).
       const skip = new Set();
@@ -816,13 +951,94 @@ function shoot(f, b, o, dir) {
       const back = Math.max(0, at - 0.3);
       blast(f, { x: o.x + d.x * back, y: o.y + d.y * back, z: o.z + d.z * back }, def.splash, def.damage * b.damageMul, b, g.weapon, false);
       hits += best ? 1 : 0;
-    } else if (best) hits += hurtTarget(f, best, def.damage * b.damageMul * (best.y > HEAD_Y ? HEADSHOT : 1), b, g.weapon);
+    } else if (best) hits += hurtTarget(f, best, hitDamage(f, def, best, b), b, g.weapon);
     else if (at < g.range) {
       const br = breakableAt(f, b, o, end, g.range, at);
       if (br) hurtBreakable(f, br, def.damage * b.damageMul, b);
+      else hitDropWall(f, b, o, end, g.range, at, def.damage * b.damageMul);
     }
   }
   return { ok: true, hits };
+}
+
+// What a bullet does: its damage, except a precision weapon's headshot, which finishes a body
+// whose shield is down (or, a sniper's, kills outright).
+function hitDamage(f, def, best, by) {
+  const d = def.damage * by.damageMul;
+  const t = best.body;
+  if (!t || !(best.y > HEAD_Y) || !def.precision) return d;
+  by.headAt = f.t;
+  if (def.headKill) return t.hp + t.shield + 1;
+  return t.shield <= 0 ? d * PRECISION_HEAD : d;
+}
+
+// A shot that stopped on an enemy Drop Wall: it takes the damage, and breaks.
+function hitDropWall(f, b, o, end, range, at, damage) {
+  for (const w of f.dropWalls || []) {
+    if (w.side === b.side) continue;
+    const t = segBox(o, end, w.box);
+    if (t === null || Math.abs(t * range - at) > 1e-6) continue;
+    w.hp -= damage;
+    if (w.hp <= 0) {
+      f.dropWalls = f.dropWalls.filter((x) => x !== w);
+      f.feed.push({ text: `${b.name} broke a Drop Wall` });
+    }
+    return;
+  }
+}
+
+// facility_melee: a strike at the nearest enemy in front, close enough (the ball's carrier hits harder).
+function melee(f, name) {
+  const b = f.bodies.get(name);
+  if (!b?.alive || f.result || f.t - (b.meleeAt ?? -10) < MELEE.gap) return { ok: true, quiet: true };
+  b.meleeAt = f.t;
+  b.loudUntil = f.t + 1;
+  const fx = -Math.sin(b.yaw);
+  const fz = -Math.cos(b.yaw);
+  let best = null;
+  let bd = Infinity;
+  for (const t of f.bodies.values()) {
+    if (!t.alive || t.side === b.side) continue;
+    const dx = t.x - b.x;
+    const dz = t.z - b.z;
+    const d = Math.hypot(dx, dz);
+    if (d > MELEE.range + RADIUS || d >= bd) continue;
+    if (d > 0.3 && (dx * fx + dz * fz) / d < MELEE.cone) continue;
+    if (!clear(f, { x: b.x, y: 1.2, z: b.z }, { x: t.x, y: 1.2, z: t.z }, b.side)) continue;
+    [best, bd] = [t, d];
+  }
+  f.shots.push([b.id, r1(b.x), r1(b.z), r1(best ? best.x : b.x + fx * 2), r1(best ? best.z : b.z + fz * 2), 'melee']);
+  if (best) hurt(f, best, (f.ball?.carrier === b.id ? MELEE.ball : MELEE.damage) * b.damageMul, b, 'melee');
+  return { ok: true, hit: best ? best.id : null };
+}
+
+// facility_gear: use the equipment you carry. A Threat Sensor goes where you aim (x, z, within
+// reach); a Drop Wall stands in front of you; the Thruster lets you move a burst further.
+function useGear(f, name, msg) {
+  const b = f.bodies.get(name);
+  if (!b?.alive || f.result) return { ok: true, quiet: true };
+  const g = b.gear;
+  if (!g || g.charges <= 0) return fail('no equipment: take some from a rack');
+  const def = GEAR[g.kind];
+  const fx = -Math.sin(b.yaw);
+  const fz = -Math.cos(b.yaw);
+  if (g.kind === 'thruster') {
+    if (f.t - (b.thrustAt ?? -10) < def.gap) return fail('the Thruster is recharging');
+    [b.thrustAt, b.thrustUntil] = [f.t, f.t + 0.5];
+  } else if (g.kind === 'sensor') {
+    let [x, z] = num(msg.x) && num(msg.z) ? [msg.x, msg.z] : [b.x + fx * 10, b.z + fz * 10];
+    const d = Math.hypot(x - b.x, z - b.z);
+    if (d > def.range) [x, z] = [b.x + ((x - b.x) * def.range) / d, b.z + ((z - b.z) * def.range) / d];
+    [x, z] = pushOut(f, x, z, 0.2);
+    f.gearObjs.push({ id: f.nextId++, kind: 'sensor', side: b.side, by: b.id, x: r1(x), z: r1(z), until: f.t + def.seconds });
+  } else {
+    const [cx, cz] = [b.x + fx * 1.6, b.z + fz * 1.6];
+    const box = Math.abs(fz) >= Math.abs(fx) ? [r1(cx), r1(cz), 3.2, 0.4, 1.9] : [r1(cx), r1(cz), 0.4, 3.2, 1.9];
+    f.dropWalls.push({ id: f.nextId++, side: b.side, box, hp: def.hp, maxHp: def.hp, until: f.t + def.seconds });
+  }
+  g.charges -= 1;
+  if (g.charges <= 0) b.gear = null;
+  return { ok: true };
 }
 
 function hurtTarget(f, t, damage, by, weapon) {
@@ -865,11 +1081,20 @@ function hurt(f, t, damage, by, weapon = null) {
   kill(f, t, by, weapon);
 }
 
+// A medal for `b` (not a fodder bot), for the Postgame Carnage Report and a word on its screen.
+function medal(f, b, id) {
+  if (!b?.medals || b.fodder) return;
+  b.medals[id] = (b.medals[id] || 0) + 1;
+  f.feed.push({ medal: id, name: b.name });
+}
+
 function kill(f, t, by, weapon) {
+  const spree = t.streak;
   t.alive = false;
   t.hp = 0;
   t.deaths += 1;
   t.streak = 0;
+  f.deaths?.push({ x: t.x, z: t.z, t: f.t });
   t.reloading = null;
   dropFlag(f, t);
   if (f.unlimited || f.reinforcements[t.side] > 0) {
@@ -891,6 +1116,15 @@ function kill(f, t, by, weapon) {
       }
       if (by.items.includes('scavenger')) for (const g of Object.values(by.guns)) g.reserve = WEAPONS[g.weapon].reserve;
     }
+    // Medals: multikills, sprees, how it was done, and ending someone else's spree.
+    by.multi = f.t - (by.lastKillAt ?? -99) <= MULTI_S ? (by.multi || 1) + 1 : 1;
+    by.lastKillAt = f.t;
+    if (by.multi >= 2) medal(f, by, by.multi === 2 ? 'double' : by.multi === 3 ? 'triple' : 'overkill');
+    if (by.streak === 5) medal(f, by, 'spree');
+    if (by.streak === 10) medal(f, by, 'rampage');
+    if (weapon === 'melee') medal(f, by, 'beatdown');
+    else if (WEAPONS[weapon]?.precision && by.headAt === f.t) medal(f, by, 'headshot');
+    if (spree >= 5) medal(f, by, 'shutdown');
   }
   f.onKill?.(f, t, by);
   if (!t.fodder) f.feed.push({ kill: [by ? by.name : null, t.name, weapon], text: by ? `${by.name} killed ${t.name}` : `${t.name} died` });
@@ -943,6 +1177,7 @@ function useBy(f, b, dt) {
     tu.at = f.t;
     if (tu.repair >= REPAIR_S) {
       [tu.hp, tu.repair] = [tu.maxHp, 0];
+      medal(f, b, 'repair');
       f.feed.push({ text: `${b.name} repaired a turret` });
     }
     return { ok: true, repair: tu.repair / REPAIR_S };
@@ -957,6 +1192,7 @@ function useBy(f, b, dt) {
   pl.at = f.t;
   if (pl.progress >= HACK_S) {
     f.hacked = true;
+    medal(f, b, 'hacker');
     f.map.doors.forEach((d, i) => {
       if (d[4]) f.doors[i] = true;
     });
@@ -1067,7 +1303,14 @@ const yawTo = (dx, dz) => Math.atan2(-dx, -dz);
 function aiGoal(f, b) {
   const idx = Number(String(b.id).slice(2)) || 0;
   if (f.rule === 'koth') return f.map.hills[f.hill];
-  if (f.rule === 'domination') {
+  if (f.rule === 'oddball' && f.ball) {
+    // The carrier keeps away toward its side's end; the rest escort it, or go for the ball.
+    const c = f.ball.carrier && f.bodies.get(f.ball.carrier);
+    if (c === b) return f.map.flags[b.side];
+    if (c && c.side === b.side) return [c.x + ((idx % 3) - 1) * 3, c.z + ((idx % 2) * 2 - 1) * 3];
+    return [f.ball.x, f.ball.z];
+  }
+  if (f.rule === 'strongholds') {
     const mine = b.side === 'a' ? -1 : 1;
     const want = f.points.filter((p) => p.owner !== b.side);
     if (b.side === 'd' && idx % 2 === 0) {
@@ -1107,7 +1350,7 @@ function aiStep(f, b, dt) {
     if (!t.alive || t.side === b.side) continue;
     const d = Math.hypot(t.x - b.x, t.z - b.z);
     if (d > AI.range || d >= td) continue;
-    if (!clear(f, eye, { x: t.x, y: 1.2, z: t.z }) && !clear(f, eye, { x: t.x, y: EYE, z: t.z })) continue;
+    if (!clear(f, eye, { x: t.x, y: 1.2, z: t.z }, b.side) && !clear(f, eye, { x: t.x, y: EYE, z: t.z }, b.side)) continue;
     [target, td] = [t, d];
   }
   // A mode can have troopers go for breakables first (boarders and a reactor in sight).
@@ -1115,7 +1358,9 @@ function aiStep(f, b, dt) {
   if (target) {
     if (!target.items.includes('ghost')) spot(f, target, CALL_S);
     if (!broke) b.yaw = yawTo(target.x - b.x, target.z - b.z);
-    if (b.cd <= 0) {
+    if (b.cd <= 0 && f.ball?.carrier === b.id) {
+      if (td <= MELEE.range + RADIUS) melee(f, b.id);
+    } else if (b.cd <= 0) {
       b.cd = AI.reload;
       // Fodder bots are poor shots and hit softly.
       const hit = random(f.rng) < (0.45 - (0.25 * td) / AI.range) * (b.fodder ? 0.5 : 1);
@@ -1162,6 +1407,7 @@ function aiStep(f, b, dt) {
   const h = Math.atan2(to[0] - b.x, to[1] - b.z);
   const step = Math.min(AI.speed * b.speed * dt, Math.hypot(to[0] - b.x, to[1] - b.z) + 0.2);
   [b.x, b.z] = pushOut(f, b.x + Math.sin(h) * step, b.z + Math.cos(h) * step);
+  b.loudUntil = f.t + 0.6; // troopers on the move show on the motion tracker
   if (!target) b.yaw = yawTo(Math.sin(h), Math.cos(h));
   touch(f, b);
 }
@@ -1234,20 +1480,46 @@ function objectivesStep(f, dt) {
     if (s.a && !s.d) f.score.a += dt;
     if (s.d && !s.a) f.score.d += dt;
   }
-  if (f.rule === 'domination') {
+  if (f.rule === 'strongholds') {
+    // Zones are taken by standing in them alone; a side holding two scores 1 a second, all three 2,
+    // but not while a zone it holds is contested.
     for (const p of f.points) {
-      const s = inside(p.x, p.z, RULES.domination.pointR);
+      const s = inside(p.x, p.z, RULES.strongholds.pointR);
+      p.contested = s.a > 0 && s.d > 0;
       const push = s.a && !s.d ? -1 : s.d && !s.a ? 1 : 0;
-      if (push) {
-        p.progress = clamp(p.progress + (push * dt) / RULES.domination.captureS, -1, 1);
-        const owner = p.progress <= -1 ? 'a' : p.progress >= 1 ? 'd' : p.owner && Math.sign(p.progress) === (p.owner === 'a' ? -1 : 1) ? p.owner : null;
-        if (owner !== p.owner) {
-          p.owner = owner;
-          const name = 'ABC'[f.points.indexOf(p)];
-          f.feed.push({ text: owner ? `${sideName(f, owner)} took point ${name}` : `Point ${name} is neutral` });
-        }
+      if (!push) continue;
+      p.progress = clamp(p.progress + (push * dt) / RULES.strongholds.captureS, -1, 1);
+      const owner = p.progress <= -1 ? 'a' : p.progress >= 1 ? 'd' : p.owner && Math.sign(p.progress) === (p.owner === 'a' ? -1 : 1) ? p.owner : null;
+      if (owner === p.owner) continue;
+      p.owner = owner;
+      const name = 'ABC'[f.points.indexOf(p)];
+      f.feed.push({ text: owner ? `${sideName(f, owner)} took zone ${name}` : `Zone ${name} is neutral` });
+      if (!owner) continue;
+      for (const b of f.bodies.values()) {
+        if (!b.alive || b.side !== owner || Math.hypot(b.x - p.x, b.z - p.z) > RULES.strongholds.pointR) continue;
+        b.caps += 1;
+        medal(f, b, 'zone');
       }
-      if (p.owner) f.score[p.owner] += dt * RULES.domination.rate;
+    }
+    for (const side of ['a', 'd']) {
+      const held = f.points.filter((p) => p.owner === side);
+      if (held.length >= 2 && !held.some((p) => p.contested)) f.score[side] += dt * (held.length === 3 ? 2 : 1);
+    }
+  }
+  if (f.rule === 'oddball' && f.ball) {
+    const c = f.ball.carrier && f.bodies.get(f.ball.carrier);
+    if (c?.alive) {
+      [f.ball.x, f.ball.z] = [r1(c.x), r1(c.z)];
+      f.score[c.side] += dt;
+      c.ballT = (c.ballT || 0) + dt;
+      if (c.ballT >= 25) {
+        c.ballT -= 25;
+        medal(f, c, 'ball');
+      }
+      spot(f, c, 0.5); // everyone knows where the ball is
+    } else if (f.ball.droppedAt !== null && f.t - f.ball.droppedAt >= RULES.oddball.resetS) {
+      [f.ball.x, f.ball.z, f.ball.droppedAt] = [f.ball.home[0], f.ball.home[1], null];
+      f.feed.push({ text: 'The ball has reset' });
     }
   }
   if (f.rule === 'ctf') {
@@ -1261,6 +1533,59 @@ function objectivesStep(f, dt) {
       }
     }
   }
+}
+
+// A body's shield and health: the shield recharges after a short delay (not while sprinting), health
+// after a longer one; an Overshield takes hold a moment after it's taken, then wears off.
+function vitals(f, b, dt) {
+  if (b.overAt && f.t >= b.overAt) [b.shield, b.overAt] = [b.shieldMax + OVERSHIELD.amount, 0];
+  if (b.shield > b.shieldMax) b.shield = Math.max(b.shieldMax, b.shield - OVERSHIELD.decay * dt);
+  else if (b.shield < b.shieldMax && f.t - b.hitAt >= SHIELD_DELAY_S && !(b.sprintUntil > f.t)) b.shield = Math.min(b.shieldMax, b.shield + SHIELD_RATE * dt);
+  const most = b.hpMax || HP;
+  if (b.hp < most && f.t - b.hitAt >= HEALTH_DELAY_S) b.hp = Math.min(most, b.hp + HEALTH_RATE * dt);
+}
+
+// The callout nearest a spot (a map's named places), for the announcements.
+function calloutAt(f, x, z) {
+  let best = null;
+  let bd = Infinity;
+  for (const [cx, cz, name] of f.map.callouts || []) {
+    const d = Math.hypot(cx - x, cz - z);
+    if (d < bd) [best, bd] = [name, d];
+  }
+  return best;
+}
+
+// Power pads on their timers, announced ten seconds before they come up; equipment racks; Threat
+// Sensors showing what's near them; Drop Walls standing their time.
+function powerStep(f) {
+  for (const p of f.pads || []) {
+    if (p.up) continue;
+    const name = p.kind === 'overshield' ? 'Overshield' : WEAPONS[p.kind].name;
+    const where = calloutAt(f, p.x, p.z);
+    if (!p.warned && f.t >= p.next - POWER.warn) {
+      p.warned = true;
+      f.feed.push({ power: p.kind, text: `${name} in ${POWER.warn} seconds${where ? ` at ${where}` : ''}` });
+    }
+    if (f.t < p.next) continue;
+    p.up = true;
+    const id = f.nextId++;
+    f.pickups.set(id, p.kind === 'overshield' ? { id, kind: 'overshield', x: p.x, z: p.z, pad: p.id } : { id, weapon: p.kind, x: p.x, z: p.z, pad: p.id });
+    f.feed.push({ power: p.kind, text: `${name} is up${where ? ` at ${where}` : ''}` });
+  }
+  (f.racks || []).forEach((r, i) => {
+    if (r.up || f.t < r.next) return;
+    r.up = true;
+    const id = f.nextId++;
+    f.pickups.set(id, { id, kind: 'gear', gear: r.kind, x: r.x, z: r.z, rack: i });
+  });
+  for (const g of f.gearObjs || []) {
+    if (g.kind !== 'sensor') continue;
+    for (const t of f.bodies.values()) if (t.alive && t.side !== g.side && Math.hypot(t.x - g.x, t.z - g.z) <= GEAR.sensor.radius) spot(f, t, 0.5);
+  }
+  if (f.gearObjs?.length) f.gearObjs = f.gearObjs.filter((g) => g.until > f.t);
+  if (f.dropWalls?.length) f.dropWalls = f.dropWalls.filter((w) => w.until > f.t);
+  if (f.deaths?.length) f.deaths = f.deaths.filter((k) => f.t - k.t < RECENT_DEATH_S);
 }
 
 function supplyStep(f) {
@@ -1303,7 +1628,7 @@ function tick(f, dt) {
     if (!b.alive && f.t >= b.respawnAt) spawn(f, b);
     if (!b.alive) continue;
     finishReload(f, b);
-    if (b.shield < b.shieldMax && f.t - b.hitAt >= SHIELD_DELAY_S) b.shield = Math.min(b.shieldMax, b.shield + SHIELD_RATE * dt);
+    vitals(f, b, dt);
   }
   doorsStep(f);
   for (const b of [...f.bodies.values()]) if (b.ai && b.alive && !f.result) aiStep(f, b, dt);
@@ -1311,7 +1636,7 @@ function tick(f, dt) {
   grenadesStep(f, dt);
   streaksStep(f);
   objectivesStep(f, dt);
-  supplyStep(f);
+  powerStep(f);
   for (const s of ['a', 'd']) for (const [id, until] of f.spotted[s]) if (until < f.t) f.spotted[s].delete(id);
   if (f.t - (f.flowsAt || 0) > 2) {
     f.flows.clear(); // the field to a moving target goes stale
@@ -1339,9 +1664,12 @@ function frame(f) {
     plant: f.map.plant ? Math.round((100 * f.plant.progress) / HACK_S) : null,
     turrets: f.turrets.map((t) => [Math.round(t.hp), Math.round((100 * t.repair) / REPAIR_S)]),
     hill: f.rule === 'koth' ? f.hill : null,
-    points: f.rule === 'domination' ? f.points.map((p) => [p.owner, Math.round(p.progress * 100)]) : null,
+    points: f.rule === 'strongholds' ? f.points.map((p) => [p.owner, Math.round(p.progress * 100), p.contested ? 1 : 0]) : null,
+    ball: f.rule === 'oddball' && f.ball ? [f.ball.x, f.ball.z, f.ball.carrier] : null,
+    pads: (f.pads || []).map((p) => [p.id, p.kind, p.x, p.z, p.up, Math.max(0, Math.ceil(p.next - f.t))]),
+    gear: [...(f.gearObjs || []).map((g) => [g.id, 'sensor', g.side, g.x, g.z, GEAR.sensor.radius]), ...(f.dropWalls || []).map((w) => [w.id, 'wall', w.side, ...w.box, Math.round(w.hp)])],
     flags: f.rule === 'ctf' ? { a: [f.flags.a.x, f.flags.a.z, f.flags.a.carrier], d: [f.flags.d.x, f.flags.d.z, f.flags.d.carrier] } : null,
-    pickups: [...f.pickups.values()].map((u) => [u.id, u.weapon, u.x, u.z]),
+    pickups: [...f.pickups.values()].map((u) => [u.id, u.weapon || (u.kind === 'gear' ? `gear:${u.gear}` : u.kind), u.x, u.z]),
     grenades: f.grenades.map((g) => [g.id, r1(g.x), r1(g.y), r1(g.z)]),
     active: f.active.map((a) => [a.kind, a.side, r1(a.x), r1(a.z), r1(Math.max(0, a.until - f.t))]),
     shots: f.shots,
@@ -1351,6 +1679,13 @@ function frame(f) {
   f.shots = [];
   f.feed = [];
   return out;
+}
+
+// What the motion tracker shows a body: enemies near it who run, fire or strike (not those
+// crouch-walking or standing still).
+function tracker(f, b) {
+  if (!b?.alive) return [];
+  return [...f.bodies.values()].filter((t) => t.alive && t.side !== b.side && t.loudUntil > f.t && Math.hypot(t.x - b.x, t.z - b.z) <= TRACKER_R).map((t) => t.id);
 }
 
 // One pilot's view of a frame: their own state, and their side's map (who it shows, and EMP).
@@ -1363,6 +1698,7 @@ function stateFor(f, fr, name) {
     type: 'facility_state',
     ...fr,
     spotted: emp ? [] : [...f.spotted[side].keys()],
+    tracker: emp ? [] : tracker(f, b),
     emp,
     me: b
       ? {
@@ -1389,6 +1725,10 @@ function stateFor(f, fr, name) {
           earned: b.earned.slice(),
           speed: b.speed,
           scope: b.items.includes('scope'),
+          hpMax: b.hpMax || HP,
+          gear: b.gear ? { ...b.gear } : null,
+          overshield: b.shield > b.shieldMax || Boolean(b.overAt),
+          sprinting: b.sprintUntil > f.t,
           x: r1(b.x),
           z: r1(b.z),
         }
@@ -1418,6 +1758,9 @@ function joined(f, name) {
     attachments: ATTACHMENTS,
     perks: PERKS,
     equipment: EQUIPMENT,
+    gear: GEAR,
+    medals: MEDALS,
+    trackerRange: TRACKER_R,
     points: POINTS,
     classes: DEFAULT_CLASSES,
     customMax: CUSTOM_MAX,
@@ -1427,6 +1770,16 @@ function joined(f, name) {
 }
 
 // --- The server's matches ------------------------------------------------------------------------------
+
+// The Postgame Carnage Report: the score, and everyone's kills, deaths, objective points and
+// medals, best first; with what Queue again needs (the planet and the mode).
+function carnage(f) {
+  const rows = [...f.bodies.values()]
+    .filter((b) => !b.fodder && (b.present || !b.ai))
+    .map((b) => ({ name: b.name, side: b.side, ai: b.ai, kills: b.kills, deaths: b.deaths, caps: b.caps, medals: { ...b.medals } }))
+    .sort((x, y) => y.kills - x.kills || x.deaths - y.deaths);
+  return { planet: f.planet, mode: f.mode || 'facility', rule: f.rule, score: { a: Math.floor(f.score.a), d: Math.floor(f.score.d) }, rows };
+}
 
 // Facility Battles a server runs. `loadouts(name)`: a pilot's custom classes; `onEnd(f, winner,
 // vsAi)` scores the result for the campaign and returns the points.
@@ -1496,6 +1849,10 @@ function createFacilities({ now = Date.now, speed = 1, send, changed, loadouts =
         return use(f, me.name);
       case 'facility_streak':
         return useStreak(f, me.name, msg);
+      case 'facility_melee':
+        return melee(f, me.name);
+      case 'facility_gear':
+        return useGear(f, me.name, msg);
       case 'facility_class': {
         // The class to come back with (and at once, before the first spawn's been used).
         const b = f.bodies.get(me.name);
@@ -1516,9 +1873,10 @@ function createFacilities({ now = Date.now, speed = 1, send, changed, loadouts =
     const how = { score: RULES[f.rule].name, wiped: 'no reinforcements left', time: 'time ran out', nuke: 'Tactical Nuke', abandoned: 'everyone left' }[f.how] || '';
     const text = f.how === 'abandoned' ? 'The match ended: everyone left' : winner ? `${F.FACTIONS[winner].name} won the match (${how}), ${Math.floor(f.score.a)} to ${Math.floor(f.score.d)}: +${pts} campaign points on ${f.planetName}` : `A draw (${how}), ${Math.floor(f.score.a)} to ${Math.floor(f.score.d)}: no campaign points`;
     const fr = frame(f);
+    const report = carnage(f);
     for (const [name, c] of conns.get(f.id)) {
       send(c, stateFor(f, fr, name));
-      send(c, { type: 'facility_end', match: f.id, winner: f.result, won: f.bodies.get(name)?.side === f.result, text });
+      send(c, { type: 'facility_end', match: f.id, winner: f.result, won: f.bodies.get(name)?.side === f.result, text, report });
     }
     changed();
     const timer = setTimeout(() => {
@@ -1594,6 +1952,18 @@ module.exports = {
   LAYOUTS,
   RADIUS,
   EYE,
+  GEAR,
+  MEDALS,
+  POWER,
+  OVERSHIELD,
+  MELEE,
+  TRACKER_R,
+  vitals,
+  melee,
+  useGear,
+  tracker,
+  spawnScore,
+  carnage,
   SHOTS_PER_S,
   MOVES_PER_S,
   USES_PER_S,

@@ -71,6 +71,7 @@ const PILOT_ONLY = {
   facility_move: 'only pilots fight', facility_fire: 'only pilots fight', facility_reload: 'only pilots fight', facility_switch: 'only pilots fight',
   facility_throw: 'only pilots fight', facility_stim: 'only pilots fight', facility_use: 'only pilots fight', facility_streak: 'only pilots fight',
   facility_class: 'only pilots fight', facility_leave: 'only pilots fight', loadout_save: 'only pilots build classes',
+  facility_melee: 'only pilots fight', facility_gear: 'only pilots fight', supremacy_melee: 'only pilots fight', supremacy_gear: 'only pilots fight',
   supremacy_move: 'only pilots fight', supremacy_fire: 'only pilots fight', supremacy_reload: 'only pilots fight', supremacy_switch: 'only pilots fight',
   supremacy_throw: 'only pilots fight', supremacy_stim: 'only pilots fight', supremacy_use: 'only pilots fight', supremacy_streak: 'only pilots fight',
   supremacy_class: 'only pilots fight', supremacy_elite: 'only pilots fight', supremacy_leave: 'only pilots fight',
@@ -777,6 +778,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'facility_use':
       case 'facility_streak':
       case 'facility_class':
+      case 'facility_melee':
+      case 'facility_gear':
       case 'facility_leave':
         result = facilities.handle(me, msg);
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
@@ -791,6 +794,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'supremacy_streak':
       case 'supremacy_class':
       case 'supremacy_elite':
+      case 'supremacy_melee':
+      case 'supremacy_gear':
       case 'supremacy_leave':
         result = supremacies.handle(me, msg);
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });

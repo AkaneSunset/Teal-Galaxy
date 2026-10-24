@@ -264,6 +264,9 @@ function newSupremacy({ id = 's1', planet, planetName = '', attacker, defender =
     shots: [],
     feed: [],
     breakables: [],
+    deaths: [],
+    dropWalls: [],
+    gearObjs: [],
     result: null,
     how: null,
   };
@@ -541,7 +544,7 @@ function tick(f, dt) {
     if (!b.alive && f.t >= b.respawnAt) FC.spawn(f, b);
     if (!b.alive) continue;
     FC.finishReload(f, b);
-    if (b.shield < b.shieldMax && f.t - b.hitAt >= 4) b.shield = Math.min(b.shieldMax, b.shield + 25 * dt);
+    FC.vitals(f, b, dt);
   }
   for (const b of [...f.bodies.values()]) if (b.ai && b.alive && !f.result) FC.aiStep(f, b, dt);
   FC.grenadesStep(f, dt);
@@ -735,6 +738,10 @@ function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts 
         return FC.useStreak(f, me.name, msg);
       case 'supremacy_use':
         return { ok: true, quiet: true };
+      case 'supremacy_melee':
+        return FC.melee(f, me.name);
+      case 'supremacy_gear':
+        return FC.useGear(f, me.name, msg);
       case 'supremacy_class':
         if (!b) return { ok: true, quiet: true };
         b.loadouts = loadouts(me.name);
