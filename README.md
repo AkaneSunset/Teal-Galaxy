@@ -340,12 +340,14 @@ screen reports where its pilot stands and every shot it fires.
 The third campaign mode: team against team on foot inside an outpost facility, about 10 minutes
 (`server/facility.js`, the view in `game/facility/`). The planet's holder defends. Sides are 4 to 8
 strong: AI troopers fill the empty slots on both sides, and step aside as pilots join. A win scores 4
-campaign points (half against an all-AI side). Each match plays one of four rule sets, picked at random:
+campaign points (half against an all-AI side). Each match plays one of five rule sets, picked at random:
 
 - **King of the Hill**: score while your side alone stands on the hill, which moves every 60 seconds.
   First to 150.
-- **Domination**: take the 3 control points (stand on one alone for 5 seconds); each held point scores
-  1 every 2 seconds. First to 250.
+- **Strongholds**: take the 3 zones (stand in one alone for 5 seconds). Holding two scores 1 a second,
+  all three 2 a second, but nothing while a zone you hold is contested. First to 150.
+- **Oddball**: hold the ball to score 1 a second; its carrier fights with melee only and shows on
+  everyone's map. A dropped ball resets after 15 seconds. First to 100.
 - **Team Deathmatch**: first to 50 kills.
 - **Capture the Flag**: carry the enemy's flag to your base while your own is home. First to 3. A dropped
   flag goes back after 20 seconds, or at once when its side touches it.
@@ -380,9 +382,38 @@ left and everyone down loses.
   they're Ghosts), or are caught by a Sensor Array.
 - AI troopers push the objective when attacking and hold the choke points when defending, finding their
   way round the facility.
-- W A S D walk, Shift run, Space jump, mouse look and fire, right mouse aim, R reload, 1/2/3 weapons,
-  G grenade, H stim, F repair or hack, 5-0 kill streaks, L class, Tab scoreboard, Esc pause (*Leave
-  match*).
+- W A S D walk, Shift run, C crouch, Space jump, mouse look and fire, right mouse aim, V melee, Q
+  equipment, R reload, 1/2/3 weapons, G grenade, H stim, F repair or hack, 5-0 kill streaks, L class,
+  Tab scoreboard, Esc pause (*Leave match*).
+
+#### The Halo pass
+
+Facility Battles take the lessons of Halo's multiplayer design: an even start, power you can see
+coming, and information you earn.
+
+- **The Dance**: health comes back on its own 6 seconds after the last hit, behind the shield. Sprinting
+  stops the shield recharging. Melee (V) strikes whoever is close in front for 70 (100 with the ball);
+  a kill with it is a *Beatdown*. The pistol, sniper and railgun are precision weapons: a headshot finishes
+  a body whose shield is down (the sniper's and railgun's kill outright).
+- **Readable power**: power weapons and the Overshield sit on fixed pads, on known timers (the first at
+  30 seconds, then 90 apart; the Overshield 120), announced 10 seconds before with where they are. The
+  pads show their countdowns on the map, on the minimap and in a line on the HUD. The Overshield adds 75
+  shield that wears off slowly (the shield bar turns violet).
+- **Equipment** from racks on the map, Q to use, limited charges, dropped on death: the Threat Sensor (a
+  dart where you aim that shows nearby enemies on your side's map for 8 seconds), the Drop Wall (a
+  shield in front of you that stops their shots but not yours, 250 health, 12 seconds) and the Thruster
+  (a burst of speed the way you're moving).
+- **The motion tracker**: enemies within 25 m who run, fire or strike pulse on your minimap. Crouching
+  (C) is slow and keeps you off it.
+- **Callouts**: every map's places have names, on signs and on the HUD (where you are), and the power
+  announcements use them. Each side's half of the floor is faintly in its colour.
+- **Spawns** weigh distance from enemies, their line of sight and recent deaths, with forward spawns
+  near what your side holds.
+- **Medals** (Double Kill, Triple Kill, Overkill, Killing Spree, Rampage, Headshot, Beatdown, flag, zone
+  and ball medals, Hacker, Repairman, Killjoy) show big on screen as you win them.
+- **The Postgame Carnage Report** at the end: everyone's kills, deaths, objectives and medals, best
+  first, with *Queue again* (straight back into the queue for the same planet and mode) and *Back to
+  carrier*.
 
 The server decides everything a pilot could cheat with: each weapon's rate of fire and magazine, what
 each shot hits, through walls and shut doors, and every kill.

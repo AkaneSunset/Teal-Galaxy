@@ -180,18 +180,48 @@ func _steps(delta: float) -> void:
 					_finish(false, "the HUD should show the rule, score and reinforcements: " + _view._top.text)
 					return
 				await _shot("facility-03-fight")
-				_view.leave()
-				_go("left", 1.0)
+				_go("halo")
 				return
 			if _step_clock > 120.0:
 				_finish(false, "heading for the fight and firing at enemies in sight should hurt one")
 				return
 			_hunt(delta)
+		"halo":
+			# The Halo pass: power pads with timers, racks and callouts on the map, melee, medals,
+			# the motion tracker's range, and the Postgame Carnage Report.
+			if _view._pads.is_empty() or not _view._power_line.text.begins_with("Power:"):
+				_finish(false, "the power pads should be on the map with their timers: '%s'" % _view._power_line.text)
+				return
+			if _view._where.text == "":
+				_finish(false, "the HUD should name where you are (the nearest callout)")
+				return
+			if float(_view.info.get("trackerRange", 0)) <= 0.0 or not _view.info.get("gear", {}).has("wall"):
+				_finish(false, "the match should send the motion tracker's range and the equipment")
+				return
+			_view.strike()
+			if _view._clock - _view._jab_t > 0.01:
+				_finish(false, "V should strike (melee)")
+				return
+			_view.show_medal("double")
+			if _view._medal.text != "DOUBLE KILL":
+				_finish(false, "a medal should show big on screen: " + _view._medal.text)
+				return
+			_view._show_report({"planet": PLANET, "mode": "facility", "rows": [
+				{"name": PILOT, "side": "a", "ai": false, "kills": 3, "deaths": 1, "caps": 1, "medals": {"double": 1, "beatdown": 2}},
+				{"name": "Trooper", "side": "d", "ai": true, "kills": 1, "deaths": 3, "caps": 0, "medals": {}}]})
+			if _view._report_box.find_child("QueueAgain", true, false) == null or _view._report_box.get_child(1).get_child_count() != 15:
+				_finish(false, "the Postgame Carnage Report should list everyone, with Queue again")
+				return
+			_view._banner.visible = true
+			await _shot("facility-04-carnage")
+			_view._banner.visible = false
+			_view.leave()
+			_go("left", 1.0)
 		"left":
 			if load("res://facility/facility_view.gd").active or is_instance_valid(_view) and _view.is_inside_tree():
 				_finish(false, "leaving should close the view")
 				return
-			_finish(true, "queued for Facility Battles over Cinder, went in against the Compact's AI on %s (%s), AI filled both sides, built and saved a Pick 10 class, hurt an enemy it could see, left the match" % [str(_joined.get("map", {}).get("name", "")), str(_joined.get("ruleName", ""))])
+			_finish(true, "queued for Facility Battles over Cinder, went in against the Compact's AI on %s (%s), AI filled both sides, built and saved a Pick 10 class, hurt an enemy it could see, saw the power pads, callouts, melee, a medal and the Carnage Report, left the match" % [str(_joined.get("map", {}).get("name", "")), str(_joined.get("ruleName", ""))])
 
 
 ## Heads for the nearest enemy (sliding along walls, stepping aside when stuck), and fires at the

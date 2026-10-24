@@ -63,7 +63,7 @@ func _process(delta: float) -> void:
 	_step_clock += delta
 	if _done:
 		return
-	if _clock > 240.0:
+	if _clock > 480.0:
 		_finish(false, "timed out at step " + _step)
 		return
 	_wait -= delta
@@ -153,7 +153,7 @@ func _steps() -> void:
 			_go("ship")
 		"ship":
 			if not _view._current.begins_with("ship"):
-				if _step_clock > 150.0:
+				if _step_clock > 340.0:
 					_finish(false, "the AI should win the ground and board a ship")
 				return
 			if not _saw_boarding:

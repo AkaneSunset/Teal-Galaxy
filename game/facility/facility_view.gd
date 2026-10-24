@@ -22,6 +22,12 @@ const GRAVITY := 14.0
 const EYE := 1.6
 const MOVE_HZ := 15.0
 const END_S := 8.0
+const REPORT_S := 40.0 # the Postgame Carnage Report stays up this long (unless you pick sooner)
+const CROUCH := 2.5 # crouch-walking: under the motion tracker's notice
+const CROUCH_EYE := 1.1
+const THRUST_SPEED := 16.0
+const THRUST_S := 0.35
+const MEDAL_S := 2.2
 const SILENT_S := 10.0
 const USE_EVERY := 0.2
 const STREAK_KEYS := {KEY_5: "sensor", KEY_6: "drop", KEY_7: "barrage", KEY_8: "gunship", KEY_9: "emp", KEY_0: "nuke"}
@@ -70,6 +76,16 @@ var _mats := {}
 var _last_hp := 999.0
 var _spotted := {}
 var _class_pick := false # the class menu is open
+var _ball: Node3D
+var _pads := {} # pad id -> {"node", "label", "kind"}
+var _gear_objs := {} # gear id -> Node3D (Threat Sensors, Drop Walls)
+var _tracked := {} # enemy id -> true: on the motion tracker
+var _gun: Node3D
+var _jab_t := -10.0
+var _thrust_t := -10.0
+var _thrust_dir := Vector3.ZERO
+var _medal_t := -10.0
+var _report := {} # facility_end's Postgame Carnage Report
 
 var _hud: CanvasLayer
 var _top: Label
@@ -96,6 +112,10 @@ var _editor_name: LineEdit
 var _editor_points: Label
 var _editor_checks := {} # item -> CheckBox
 var _hit_flash: ColorRect
+var _medal: Label
+var _power_line: Label
+var _where: Label
+var _report_box: VBoxContainer
 
 
 ## Opens the view for the match the server just put the pilot in (`joined`: facility_joined).
@@ -155,6 +175,9 @@ func rebuild_world() -> void:
 	_flags = {}
 	_hill_ring = null
 	_plant_label = null
+	_ball = null
+	_pads = {}
+	_gear_objs = {}
 	_tracers = []
 	_build_world()
 	_world.add_child(_player)
@@ -306,6 +329,21 @@ func _build_world() -> void:
 	for s in ["a", "d"]:
 		for p in m.get("spawns", {}).get(s, []):
 			_disc(_world, 0.6, Vector3(float(p[0]), 0.03, float(p[1])), _side_colour(s).darkened(0.4))
+	_build_halves(m, mw, md)
+	# Equipment racks: a bench with its kit's name (lit while the kit is on it, see the pickups).
+	for r in m.get("racks", []):
+		var root := Node3D.new()
+		root.position = Vector3(float(r[0]), 0, float(r[1]))
+		_world.add_child(root)
+		_box(root, Vector3(1.4, 0.7, 0.5), Vector3(0, 0.35, 0), Color(0.28, 0.3, 0.34), false)
+		_box(root, Vector3(1.5, 0.05, 0.6), Vector3(0, 0.72, 0), Color(0.4, 0.95, 0.75), false, 1.5)
+		_tag(root, "RACK: " + str(info.get("gear", {}).get(str(r[2]), {}).get("name", r[2])).to_upper(), 2.3, Color(0.5, 0.95, 0.8), 32)
+	# Callouts: the map's named places, on signs, so a team can say where.
+	for c in m.get("callouts", []):
+		var sign := Node3D.new()
+		sign.position = Vector3(float(c[0]), 0, float(c[1]))
+		_world.add_child(sign)
+		_tag(sign, str(c[2]).to_upper(), 3.4, Color(0.8, 0.85, 0.95, 0.55), 30)
 	_build_objectives(m)
 	# The gunship, when one is up.
 	_gunship = Node3D.new()
@@ -320,6 +358,29 @@ func _floor_colour() -> Color:
 	return Color(0.24, 0.25, 0.27)
 
 
+## Each side's half of the floor, faintly in its colour (the side whose spawns are nearer), so
+## you can tell your ground from theirs at a glance.
+func _build_halves(m: Dictionary, mw: float, md: float) -> void:
+	var spawns: Dictionary = m.get("spawns", {})
+	var za := _mean_z(spawns.get("a", []))
+	var zd := _mean_z(spawns.get("d", []))
+	if is_nan(za) or is_nan(zd) or absf(za - zd) < 4.0:
+		return
+	for s in ["a", "d"]:
+		var low: bool = (za < zd) == (s == "a")
+		var c := _side_colour(s)
+		_box(_world, Vector3(mw, 0.02, md / 2), Vector3(mw / 2, 0.012, md / 4 if low else md * 0.75), Color(c.r, c.g, c.b, 0.07), false)
+
+
+func _mean_z(spots: Array) -> float:
+	if spots.is_empty():
+		return NAN
+	var t := 0.0
+	for p in spots:
+		t += float(p[1])
+	return t / spots.size()
+
+
 ## The rule's objectives on the map: the hill, the control points, the flags.
 func _build_objectives(m: Dictionary) -> void:
 	match str(info.get("rule", "")):
@@ -329,7 +390,7 @@ func _build_objectives(m: Dictionary) -> void:
 			_disc(_hill_ring, 6.0, Vector3(0, 0.04, 0), Color(1.0, 0.85, 0.3, 0.35))
 			_box(_hill_ring, Vector3(0.3, 10, 0.3), Vector3(0, 5, 0), Color(1.0, 0.85, 0.3), false, 2.5)
 			_tag(_hill_ring, "HILL", 10.6, Color(1.0, 0.85, 0.3), 64)
-		"domination":
+		"strongholds", "domination":
 			var names := "ABC"
 			var i := 0
 			for p in m.get("points", []):
@@ -340,6 +401,19 @@ func _build_objectives(m: Dictionary) -> void:
 				_box(root, Vector3(0.25, 6, 0.25), Vector3(0, 3, 0), Color(0.9, 0.9, 0.9), false, 2.0)
 				_points.append({"node": root, "disc": disc, "label": _tag(root, names[i], 6.8, Color.WHITE, 90)})
 				i += 1
+		"oddball":
+			_ball = Node3D.new()
+			_world.add_child(_ball)
+			var mesh := SphereMesh.new()
+			mesh.radius = 0.35
+			mesh.height = 0.7
+			mesh.material = _mat(Color(1.0, 0.95, 0.6), 4.0)
+			var mi := MeshInstance3D.new()
+			mi.mesh = mesh
+			mi.position.y = 0.5
+			_ball.add_child(mi)
+			_box(_ball, Vector3(0.12, 12, 0.12), Vector3(0, 6.5, 0), Color(1.0, 0.95, 0.6, 0.6), false, 2.0)
+			_tag(_ball, "BALL", 1.4, Color(1.0, 0.95, 0.6), 48)
 		"ctf":
 			for s in ["a", "d"]:
 				var home: Array = m.get("flags", {}).get(s, [40, 40])
@@ -361,6 +435,7 @@ func _build_player() -> void:
 	shape.shape.height = 1.8
 	shape.position.y = 0.9
 	_player.add_child(shape)
+	_player.collision_mask = 3 # the facility, and your own side's Drop Walls
 	var start: Array = info.get("start", [40, 4])
 	_player.position = Vector3(float(start[0]), 0.1, float(start[1]))
 	_player.rotation.y = PI if side == "a" else 0.0
@@ -374,6 +449,7 @@ func _build_player() -> void:
 	var gun := Node3D.new()
 	gun.position = Vector3(0.22, -0.2, -0.75)
 	_camera.add_child(gun)
+	_gun = gun
 	_box(gun, Vector3(0.05, 0.07, 0.42), Vector3.ZERO, Color(0.15, 0.16, 0.18), false)
 	_box(gun, Vector3(0.03, 0.012, 0.14), Vector3(0, 0.04, -0.06), _side_colour(side), false, 1.5)
 
@@ -425,6 +501,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_switch("power")
 		elif key == KEY_G:
 			throw_frag()
+		elif key == KEY_V:
+			strike()
+		elif key == KEY_Q:
+			use_gear()
 		elif STREAK_KEYS.has(key):
 			call_streak(str(STREAK_KEYS[key]))
 
@@ -464,15 +544,24 @@ func _crosshair_point() -> Vector3:
 func _physics_process(delta: float) -> void:
 	_clock += delta
 	if ended:
-		if _clock - _ended_at > END_S:
+		if _clock - _ended_at > (END_S if _report.is_empty() else REPORT_S):
 			close()
 		return
 	var walking := not _menu_open() and _alive()
 	var input := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back") if walking else Vector2.ZERO
-	var speed := (SPRINT if Input.is_action_pressed("foot_sprint") else WALK) * float(_me.get("speed", 1.0))
+	# Crouching is slow and quiet: it keeps you off their motion trackers.
+	var crouched := walking and Input.is_action_pressed("foot_crouch")
+	var speed := (CROUCH if crouched else SPRINT if Input.is_action_pressed("foot_sprint") else WALK) * float(_me.get("speed", 1.0))
 	var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
 	_player.velocity.x = dir.x * speed
 	_player.velocity.z = dir.z * speed
+	if _clock - _thrust_t < THRUST_S:
+		_player.velocity.x = _thrust_dir.x * THRUST_SPEED
+		_player.velocity.z = _thrust_dir.z * THRUST_SPEED
+	_camera.position.y = lerpf(_camera.position.y, CROUCH_EYE if crouched else EYE, 1.0 - exp(-12.0 * delta))
+	# The melee jab: the gun lunges forward and back.
+	var jab := clampf(1.0 - (_clock - _jab_t) / 0.25, 0.0, 1.0)
+	_gun.position = Vector3(0.22 - 0.12 * jab, -0.2 + 0.05 * jab, -0.75 - 0.35 * jab)
 	if _player.is_on_floor():
 		if walking and Input.is_action_just_pressed("foot_jump"):
 			_player.velocity.y = JUMP
@@ -513,14 +602,47 @@ func fire() -> void:
 	_fire_cd = float(def.get("gap", 0.1))
 	var from := _camera.global_position
 	var dir := _aim_dir()
-	Net.send({"type": prefix + "_fire", "match": match_id, "y": _player.position.y + EYE, "dx": dir.x, "dy": dir.y, "dz": dir.z})
+	Net.send({"type": prefix + "_fire", "match": match_id, "y": _camera.global_position.y, "dx": dir.x, "dy": dir.y, "dz": dir.z})
 	var to := from + dir * float(def.get("range", 90))
-	var q := PhysicsRayQueryParameters3D.create(from, to, 0xFFFFFFFF, [_player.get_rid()])
+	var q := PhysicsRayQueryParameters3D.create(from, to, 0xFFFFFFFD, [_player.get_rid()])
 	var hit := _world.get_world_3d().direct_space_state.intersect_ray(q)
 	if not hit.is_empty():
 		to = hit.position
 	var colour := Color(1.0, 0.6, 0.2) if def.has("splash") else Color(0.6, 0.9, 1.0) if gun == "railgun" else _side_colour(side).lightened(0.4)
 	_tracer(from + dir * 0.6 + _camera.global_basis.x * 0.2 - _camera.global_basis.y * 0.15, to, colour)
+
+
+## Melee (V): a strike at whoever is close in front. The server judges the hit.
+func strike() -> void:
+	if not _alive() or _clock - _jab_t < 0.6:
+		return
+	_jab_t = _clock
+	Net.send({"type": prefix + "_melee", "match": match_id})
+
+
+## Equipment (Q): a Threat Sensor goes where you aim, a Drop Wall in front of you, a Thruster
+## bursts you the way you're moving.
+func use_gear() -> void:
+	var g = _me.get("gear")
+	if not (g is Dictionary) or int(g.get("charges", 0)) <= 0:
+		_say("No equipment: take some from a rack", Color(1.0, 0.6, 0.5))
+		return
+	var msg := {"type": prefix + "_gear", "match": match_id}
+	var kind := str(g.get("kind", ""))
+	if kind == "sensor":
+		var p := _crosshair_point()
+		msg.x = p.x
+		msg.z = p.z
+	elif kind == "thruster":
+		var gap := float(info.get("gear", {}).get("thruster", {}).get("gap", 2))
+		if _clock - _thrust_t < gap:
+			return
+		var input := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back")
+		if input == Vector2.ZERO:
+			input = Vector2(0, -1)
+		_thrust_dir = (_player.global_basis * Vector3(input.x, 0, input.y)).normalized()
+		_thrust_t = _clock
+	Net.send(msg)
 
 
 func throw_frag() -> void:
@@ -640,6 +762,9 @@ func _snapshot(msg: Dictionary) -> void:
 	_spotted = {}
 	for id in msg.get("spotted", []):
 		_spotted[str(id)] = true
+	_tracked = {}
+	for id in msg.get("tracker", []):
+		_tracked[str(id)] = true
 	_update_bodies(msg.get("bodies", []))
 	_update_facility(msg)
 	_update_pickups(msg.get("pickups", []))
@@ -663,6 +788,8 @@ func _snapshot(msg: Dictionary) -> void:
 			_tracer(_gunship.position, b, Color(1.0, 0.5, 0.2), 0.1)
 		elif who == Net.my_name:
 			continue
+		elif kind == "melee":
+			_tracer(a, Vector3(b.x, 1.3, b.z), Color(1, 1, 1), 0.12)
 		else:
 			var b2: Dictionary = _bodies.get(who, {})
 			var colour := _side_colour(str(b2.get("side", "d"))).lightened(0.3) if not b2.is_empty() else _side_colour("d")
@@ -672,11 +799,17 @@ func _snapshot(msg: Dictionary) -> void:
 			if kind == "rockets" or kind == "launcher":
 				_boom(b, 2.0, Color(1.0, 0.55, 0.2))
 	for f in msg.get("feed", []):
+		if f.has("medal"):
+			if str(f.get("name", "")) == Net.my_name:
+				show_medal(str(f.medal))
+			continue
 		var text := str(f.get("text", ""))
 		if text == "":
 			continue
 		var colour := Color(0.9, 0.93, 0.95)
-		if f.has("kill"):
+		if f.has("power"):
+			colour = Color(0.75, 0.6, 1.0)
+		elif f.has("kill"):
 			var k: Array = f.kill
 			colour = Color(0.5, 1.0, 0.6) if str(k[0]) == Net.my_name else Color(1.0, 0.5, 0.42) if str(k[1]) == Net.my_name else Color(0.8, 0.82, 0.86)
 		elif f.has("earned") and str(f.get("name", "")) == Net.my_name:
@@ -760,7 +893,17 @@ func _update_facility(msg: Dictionary) -> void:
 			var owner = points[i][0]
 			var c := Color(0.9, 0.9, 0.9, 0.3) if owner == null else Color(_side_colour(str(owner)), 0.45)
 			(_points[i].disc as MeshInstance3D).mesh.material = _mat(c, 1.5)
-			(_points[i].label as Label3D).modulate = Color.WHITE if owner == null else _side_colour(str(owner)).lightened(0.3)
+			var label: Label3D = _points[i].label
+			label.modulate = Color.WHITE if owner == null else _side_colour(str(owner)).lightened(0.3)
+			var contested: bool = points[i].size() > 2 and int(points[i][2]) == 1
+			if not label.has_meta("name"):
+				label.set_meta("name", label.text)
+			label.text = str(label.get_meta("name")) + ("\nCONTESTED" if contested else "")
+	var ball = msg.get("ball")
+	if _ball and ball is Array and ball.size() >= 2:
+		_ball.position = Vector3(float(ball[0]), 1.2 if ball.size() > 2 and ball[2] != null else 0.0, float(ball[1]))
+	_update_pads(msg.get("pads", []))
+	_update_gear(msg.get("gear", []))
 	var flags = msg.get("flags")
 	if flags is Dictionary:
 		for s in _flags:
@@ -768,6 +911,61 @@ func _update_facility(msg: Dictionary) -> void:
 			if fl.size() >= 2:
 				var carried: bool = fl.size() > 2 and fl[2] != null
 				(_flags[s] as Node3D).position = Vector3(float(fl[0]), 1.0 if carried else 0.0, float(fl[1]))
+
+
+## Power pads: a base on the floor, its weapon's name and when it comes up (it's a pickup when up).
+func _update_pads(rows: Array) -> void:
+	for row in rows:
+		var id := str(row[0])
+		var kind := str(row[1])
+		if not _pads.has(id):
+			var root := Node3D.new()
+			root.position = Vector3(float(row[2]), 0, float(row[3]))
+			_world.add_child(root)
+			_disc(root, 1.3, Vector3(0, 0.05, 0), Color(0.6, 0.4, 1.0, 0.5))
+			_pads[id] = {"node": root, "label": _tag(root, "", 2.7, Color(0.8, 0.65, 1.0), 40), "kind": kind}
+		var label: Label3D = _pads[id].label
+		label.text = "%s  %s" % [_power_name(kind), "UP" if bool(row[4]) else _time(int(row[5]))]
+
+
+func _power_name(kind: String) -> String:
+	if kind == "overshield":
+		return "OVERSHIELD"
+	return str(info.get("weapons", {}).get(kind, {}).get("name", kind)).to_upper()
+
+
+## Threat Sensors (a pole and the ring they see) and Drop Walls (a shield that stops the other
+## side's shots: solid to you only if it's theirs to shoot through).
+func _update_gear(rows: Array) -> void:
+	var seen := {}
+	for row in rows:
+		var id := str(row[0])
+		seen[id] = true
+		var mine := str(row[2]) == side
+		var c := _side_colour(str(row[2]))
+		if not _gear_objs.has(id):
+			var node: Node3D
+			if str(row[1]) == "sensor":
+				node = Node3D.new()
+				node.position = Vector3(float(row[3]), 0, float(row[4]))
+				_box(node, Vector3(0.12, 1.2, 0.12), Vector3(0, 0.6, 0), Color(0.3, 0.32, 0.36), false)
+				_box(node, Vector3(0.25, 0.25, 0.25), Vector3(0, 1.3, 0), c, false, 3.0)
+				var ring := _disc(node, float(row[5]), Vector3(0, 0.03, 0), Color(c.r, c.g, c.b, 0.12))
+				ring.visible = mine
+				_world.add_child(node)
+			else:
+				node = _box(_world, Vector3(float(row[5]), float(row[7]), float(row[6])), Vector3(float(row[3]), float(row[7]) / 2.0, float(row[4])), Color(c.r, c.g, c.b, 0.35), true, 1.2)
+				if mine:
+					(node as StaticBody3D).collision_layer = 2 # your own shots go through it
+				node.set_meta("label", _tag(node, "", float(row[7]) / 2.0 + 0.4, c.lightened(0.3), 30))
+			_gear_objs[id] = node
+		var n: Node3D = _gear_objs[id]
+		if n.has_meta("label") and row.size() > 8:
+			(n.get_meta("label") as Label3D).text = "DROP WALL  %d" % int(row[8])
+	for id in _gear_objs.keys():
+		if not seen.has(id):
+			_gear_objs[id].queue_free()
+			_gear_objs.erase(id)
 
 
 func _update_pickups(rows: Array) -> void:
@@ -780,10 +978,19 @@ func _update_pickups(rows: Array) -> void:
 		var weapon := str(row[1])
 		var root := Node3D.new()
 		root.position = Vector3(float(row[2]), 0, float(row[3]))
+		# Weapons orange, the Overshield violet, equipment teal.
+		var c := Color(1.0, 0.55, 0.2)
+		var name := str(info.get("weapons", {}).get(weapon, {}).get("name", weapon)).to_upper()
+		if weapon == "overshield":
+			c = Color(0.65, 0.4, 1.0)
+			name = "OVERSHIELD"
+		elif weapon.begins_with("gear:"):
+			c = Color(0.35, 0.95, 0.75)
+			name = str(info.get("gear", {}).get(weapon.substr(5), {}).get("name", weapon.substr(5))).to_upper()
 		_box(root, Vector3(1.2, 0.5, 0.6), Vector3(0, 0.25, 0), Color(0.3, 0.3, 0.32), false)
-		_box(root, Vector3(1.0, 0.12, 0.2), Vector3(0, 0.6, 0), Color(1.0, 0.55, 0.2), false, 3.0)
-		_box(root, Vector3(0.1, 8.0, 0.1), Vector3(0, 4.5, 0), Color(1.0, 0.55, 0.2), false, 2.0)
-		_tag(root, str(info.get("weapons", {}).get(weapon, {}).get("name", weapon)).to_upper(), 1.3, Color(1.0, 0.7, 0.3), 40)
+		_box(root, Vector3(1.0, 0.12, 0.2), Vector3(0, 0.6, 0), c, false, 3.0)
+		_box(root, Vector3(0.1, 8.0, 0.1), Vector3(0, 4.5, 0), c, false, 2.0)
+		_tag(root, name, 1.3, c.lightened(0.2), 40)
 		_world.add_child(root)
 		_pickups[id] = root
 	for id in _pickups.keys():
@@ -823,10 +1030,71 @@ func _end(msg: Dictionary) -> void:
 	_banner_title.text = "Draw" if draw else ("Victory" if won else "Defeat")
 	_banner_title.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9) if draw else (Color(0.45, 1.0, 0.6) if won else Color(1.0, 0.42, 0.35)))
 	_banner_text.text = str(msg.get("text", ""))
+	var report = msg.get("report")
+	if report is Dictionary and not (report.get("rows", []) as Array).is_empty():
+		_show_report(report)
 	_banner.visible = true
 	_pause.visible = false
 	_classes.visible = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## The Postgame Carnage Report: everyone's kills, deaths, objectives and medals, best first;
+## then Queue again (the same planet and mode) or back to the carrier.
+func _show_report(report: Dictionary) -> void:
+	_report = report
+	for c in _report_box.get_children():
+		c.queue_free()
+	var head := _label(_report_box, 20, Color(1.0, 0.85, 0.5))
+	head.text = "Postgame Carnage Report"
+	head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var grid := GridContainer.new()
+	grid.columns = 5
+	grid.add_theme_constant_override("h_separation", 18)
+	_report_box.add_child(grid)
+	for h in ["Pilot", "Kills", "Deaths", "Objective", "Medals"]:
+		_label(grid, 14, Color(0.7, 0.75, 0.8)).text = h
+	for row in report.get("rows", []):
+		var c := _side_colour(str(row.get("side", "a"))).lightened(0.35)
+		var me := str(row.get("name", "")) == Net.my_name
+		if me:
+			c = Color(1.0, 1.0, 0.75)
+		_label(grid, 15, c).text = str(row.get("name", "")) + (" (AI)" if bool(row.get("ai", false)) else "")
+		_label(grid, 15, c).text = str(int(row.get("kills", 0)))
+		_label(grid, 15, c).text = str(int(row.get("deaths", 0)))
+		_label(grid, 15, c).text = str(int(row.get("caps", 0)))
+		var medals: Array = []
+		var won: Dictionary = row.get("medals", {})
+		for id in won:
+			medals.append("%s%s" % [str(info.get("medals", {}).get(id, id)), " ×%d" % int(won[id]) if int(won[id]) > 1 else ""])
+		var ml := _label(grid, 13, c)
+		ml.text = ", ".join(medals) if not medals.is_empty() else "–"
+		ml.custom_minimum_size = Vector2(260, 0)
+		ml.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 16)
+	_report_box.add_child(buttons)
+	var again := Button.new()
+	again.text = "Queue again"
+	again.name = "QueueAgain"
+	again.pressed.connect(queue_again)
+	buttons.add_child(again)
+	var back := Button.new()
+	back.text = "Back to carrier"
+	back.pressed.connect(close)
+	buttons.add_child(back)
+	var note := _banner.find_child("BackNote", true, false)
+	if note:
+		(note as Label).text = "Back to your carrier in %d seconds" % int(REPORT_S)
+
+
+## Queue again: straight back into the queue for the same planet and mode.
+func queue_again() -> void:
+	Net.send({"type": prefix + "_leave", "match": match_id})
+	if _report.has("planet"):
+		Net.send({"type": "campaign_queue", "planet": str(_report.planet), "mode": str(_report.get("mode", "facility"))})
+	close()
 
 
 ## Leave match: your side fights on (an AI trooper takes your place).
@@ -1133,6 +1401,22 @@ func _build_hud() -> void:
 	dot.position -= Vector2(2, 2)
 	dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(dot)
+	# A medal as it's won: big, in the middle, for a moment.
+	_medal = _label(root, 34, Color(1.0, 0.85, 0.35))
+	_medal.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_medal.offset_left = -450
+	_medal.offset_right = 450
+	_medal.offset_top = -150
+	_medal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# Power on the map (when the pads come up), and where you are (the nearest callout).
+	_power_line = _label(root, 15, Color(0.8, 0.68, 1.0))
+	_power_line.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_power_line.offset_top = 70
+	_power_line.offset_left = -560
+	_power_line.offset_right = 560
+	_power_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_where = _label(root, 15, Color(0.8, 0.85, 0.95))
+	_where.position = Vector2(16, 222)
 	_down = _label(root, 28, Color(1.0, 0.5, 0.42))
 	_down.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_down.offset_left = -450
@@ -1161,7 +1445,12 @@ func _build_hud() -> void:
 	_banner_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_banner_text = _label(bv, 18, Color(0.9, 0.93, 0.95))
 	_banner_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_label(bv, 14, Color(0.7, 0.75, 0.8)).text = "Back to your carrier in a few seconds"
+	_report_box = VBoxContainer.new()
+	_report_box.add_theme_constant_override("separation", 6)
+	bv.add_child(_report_box)
+	var back_note := _label(bv, 14, Color(0.7, 0.75, 0.8))
+	back_note.text = "Back to your carrier in a few seconds"
+	back_note.name = "BackNote"
 	# Paused: Esc. Leave match goes back to the carrier.
 	_pause = _panel(root)
 	var pv := VBoxContainer.new()
@@ -1206,6 +1495,11 @@ func _say(text: String, colour := Color(0.9, 0.93, 0.95)) -> void:
 		_feed.get_child(0).free()
 
 
+func show_medal(id: String) -> void:
+	_medal.text = str(info.get("medals", {}).get(id, id)).to_upper()
+	_medal_t = _clock
+
+
 func _time(s: int) -> String:
 	return "%d:%02d" % [s / 60, s % 60]
 
@@ -1213,7 +1507,31 @@ func _time(s: int) -> String:
 func _update_hud() -> void:
 	_top.text = _top_text()
 	_objective.text = _objective_text()
+	_power_line.text = _power_text()
+	_where.text = _location()
+	_medal.modulate.a = clampf((MEDAL_S - (_clock - _medal_t)) * 2.0, 0.0, 1.0)
 	_update_vitals()
+
+
+## The power pads' timers, one line ("Railgun 0:08 · Overshield UP").
+func _power_text() -> String:
+	var parts: Array = []
+	for row in _state.get("pads", []):
+		parts.append("%s %s" % [_power_name(str(row[1])).capitalize(), "UP" if bool(row[4]) else _time(int(row[5]))])
+	return "Power:  " + "   ·   ".join(parts) if not parts.is_empty() else ""
+
+
+## The nearest of the map's named places.
+func _location() -> String:
+	var best := ""
+	var bd := INF
+	var me := Vector2(_player.position.x, _player.position.z)
+	for c in _map().get("callouts", []):
+		var d := me.distance_to(Vector2(float(c[0]), float(c[1])))
+		if d < bd:
+			bd = d
+			best = str(c[2])
+	return best
 
 
 ## The line across the top: the rule, map, score, clock and reinforcements.
@@ -1232,13 +1550,21 @@ func _top_text() -> String:
 func _update_vitals() -> void:
 	_hp_bar.max_value = float(_me.get("hpMax", info.get("hp", 100)))
 	_hp_bar.value = float(_me.get("hp", 100))
-	_shield_bar.max_value = float(_me.get("shieldMax", 50))
+	# An Overshield runs the shield bar past full: the bar stretches and turns violet.
+	var over := bool(_me.get("overshield", false))
+	_shield_bar.max_value = maxf(float(_me.get("shieldMax", 50)), float(_me.get("shield", 0)))
 	_shield_bar.value = float(_me.get("shield", 0))
+	(_shield_bar.get_theme_stylebox("fill") as StyleBoxFlat).bg_color = Color(0.7, 0.45, 1.0) if over else Color(0.4, 0.8, 1.0)
 	var gun := str(_me.get("gun", ""))
 	var def: Dictionary = info.get("weapons", {}).get(gun, {})
-	_ammo.text = "%s  %s\nFrags %d (G)   Stims %d (H)%s" % [
+	var gear = _me.get("gear")
+	var gear_text := ""
+	if gear is Dictionary:
+		gear_text = "\n%s ×%d (Q)" % [str(info.get("gear", {}).get(str(gear.get("kind", "")), {}).get("name", gear.get("kind", ""))), int(gear.get("charges", 0))]
+	_ammo.text = "%s  %s\nFrags %d (G)   Stims %d (H)   Melee (V)%s%s%s" % [
 		str(def.get("name", "")), "Reloading…" if bool(_me.get("reloading", false)) else "%d / %d" % [_mag, int(_me.get("reserve", 0))],
-		int(_me.get("frags", 0)), int(_me.get("stims", 0)), "   Power weapon (3)" if _me.get("power") != null and str(_me.get("weapon", "")) != "power" else ""]
+		int(_me.get("frags", 0)), int(_me.get("stims", 0)), "   Power weapon (3)" if _me.get("power") != null and str(_me.get("weapon", "")) != "power" else "",
+		gear_text, "\nOVERSHIELD" if over else ""]
 	var earned: Array = _me.get("earned", [])
 	var ready: Array = []
 	for k in STREAK_KEYS:
@@ -1262,15 +1588,34 @@ func _objective_text() -> String:
 		"koth":
 			var t := float(s.get("t", 0))
 			return "Hold the hill alone   ·   it moves in %d s" % ceili(60.0 - fmod(t, 60.0))
-		"domination":
+		"strongholds", "domination":
 			var parts: Array = []
 			var names := "ABC"
 			var pts = s.get("points")
+			var mine := 0
+			var theirs := 0
 			if pts is Array:
 				for i in pts.size():
 					var o = pts[i][0]
-					parts.append("%s: %s" % [names[i], "neutral" if o == null else ("yours" if str(o) == side else "theirs")])
-			return "   ".join(parts)
+					var contested: bool = pts[i].size() > 2 and int(pts[i][2]) == 1
+					if o != null:
+						if str(o) == side:
+							mine += 1
+						else:
+							theirs += 1
+					parts.append("%s: %s%s" % [names[i], "neutral" if o == null else ("yours" if str(o) == side else "theirs"), " (contested)" if contested else ""])
+			var rate := "you score %d a second" % (2 if mine == 3 else 1) if mine >= 2 else "they score %d a second" % (2 if theirs == 3 else 1) if theirs >= 2 else "hold two zones to score"
+			return "   ".join(parts) + "   ·   " + rate
+		"oddball":
+			var ball = s.get("ball")
+			if not (ball is Array) or ball.size() < 3:
+				return "Find the ball"
+			if ball[2] == null:
+				return "The ball is loose: take it"
+			if str(ball[2]) == Net.my_name:
+				return "You have the ball: stay alive (melee only, V)"
+			var holder: Dictionary = _bodies.get(str(ball[2]), {})
+			return "%s has the ball" % ("Your side" if str(holder.get("side", "")) == side else "Their side")
 		"ctf":
 			var fl = s.get("flags")
 			if not (fl is Dictionary):
@@ -1355,7 +1700,7 @@ class FacilityMinimap:
 				if view._state.get("hill") != null and not hills.is_empty():
 					var h: Array = hills[int(view._state.hill) % hills.size()]
 					draw_circle(Vector2(float(h[0]), float(h[1])) * k, 6.0 * k, Color(1.0, 0.85, 0.3, 0.4))
-			"domination":
+			"strongholds", "domination":
 				var pts = view._state.get("points")
 				var j := 0
 				for p in m.get("points", []):
@@ -1368,15 +1713,36 @@ class FacilityMinimap:
 					for s in fl:
 						var f: Array = fl[s]
 						draw_rect(Rect2(Vector2(float(f[0]), float(f[1])) * k - Vector2(3, 3), Vector2(6, 6)), view._side_colour(str(s)))
+			"oddball":
+				var ball = view._state.get("ball")
+				if ball is Array and ball.size() >= 2:
+					draw_circle(Vector2(float(ball[0]), float(ball[1])) * k, 4.0, Color(1.0, 0.95, 0.6))
+		for pad in view._state.get("pads", []):
+			var at := Vector2(float(pad[2]), float(pad[3])) * k
+			draw_arc(at, 4.0, 0, TAU, 12, Color(0.75, 0.55, 1.0), 2.0)
+			if bool(pad[4]):
+				draw_circle(at, 2.5, Color(0.75, 0.55, 1.0))
+		for g in view._state.get("gear", []):
+			if str(g[2]) == view.side and str(g[1]) == "sensor":
+				draw_arc(Vector2(float(g[3]), float(g[4])) * k, float(g[5]) * k, 0, TAU, 24, Color(view._side_colour(view.side), 0.6), 1.0)
 		view._minimap_objectives(self, k)
 		for row in view._state.get("bodies", []):
 			if not bool(row[7]) or str(row[0]) == Net.my_name:
 				continue
 			var mine := str(row[2]) == view.side
-			if not mine and not (data.spotted as Dictionary).has(str(row[0])):
+			var tracked := view._tracked.has(str(row[0]))
+			if not mine and not tracked and not (data.spotted as Dictionary).has(str(row[0])):
 				continue
-			draw_circle(Vector2(float(row[3]), float(row[4])) * k, 3.0, Color(0.4, 0.9, 1.0) if mine else Color(1.0, 0.3, 0.25))
+			var at := Vector2(float(row[3]), float(row[4])) * k
+			if tracked and not (data.spotted as Dictionary).has(str(row[0])):
+				# On the motion tracker: they're moving fast or firing near you.
+				draw_circle(at, 3.0 + 1.5 * absf(sin(view._clock * 6.0)), Color(1.0, 0.35, 0.25, 0.8))
+			else:
+				draw_circle(at, 3.0, Color(0.4, 0.9, 1.0) if mine else Color(1.0, 0.3, 0.25))
 		var me := Vector2(view._player.position.x, view._player.position.z) * k
+		var range_m := float(view.info.get("trackerRange", 0))
+		if range_m > 0.0:
+			draw_arc(me, range_m * k, 0, TAU, 40, Color(1, 1, 1, 0.18), 1.0)
 		var fwd := Vector2(-sin(view._player.rotation.y), -cos(view._player.rotation.y))
 		draw_line(me, me + fwd * 9.0, Color.WHITE, 2.0)
 		draw_circle(me, 3.5, Color.WHITE)
