@@ -8,6 +8,17 @@ const H = require('../heist');
 const G = require('../galaxy');
 const { startServer } = require('../server');
 
+// Akane's outpost on Cinder, held by her faction (the Terran Compact), and raiders from the Ashen
+// Collective, who may break into it.
+function outpost(g, type, owner = 'Akane') {
+  G.setCommandLevel(g, G.claimBase(g, owner).id, 5); // room for every outpost
+  if (!g.bases[owner].faction) G.chooseFaction(g, 'builder', owner, 'compact');
+  for (const pilot of ['Pilot A', 'Pilot B']) if (!g.pilots[pilot]?.faction) G.chooseFaction(g, 'explorer', pilot, 'ashen');
+  const r = G.foundSite(g, owner, type, 'cinder', 'cinder-1');
+  assert.ok(r.ok, r.reason);
+  return r;
+}
+
 test('every level connects, the lifts line up, and the safe room is locked on the deepest', () => {
   for (const tier of [1, 2, 3])
     for (let floors = 1; floors <= H.MAX_FLOORS; floors++)
@@ -105,7 +116,7 @@ function setup(vault = { alloy: 10, drive: 2 }, { security = 1, levels = 1, insi
   g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   g.stock.metal = 999;
   G.claimBase(g, 'Akane');
-  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const { site } = outpost(g, 'refinery');
   const fac = G.facility(g, site.id, 0);
   fac.vault = { ...vault };
   fac.security = security;
@@ -281,7 +292,7 @@ test('facilities fill their vaults, ship to HQ and buy security', () => {
   g.stock.metal = 999;
   g.credits = 5000;
   G.claimBase(g, 'Akane');
-  const id = G.foundSite(g, 'Akane', 'refinery').site.id;
+  const id = outpost(g, 'refinery').site.id;
   for (let i = 0; i < 15; i++) G.tick(g);
   const fac = G.facility(g, id, 0);
   assert.deepStrictEqual(fac.vault, { alloy: 15, isotope: 2 });
@@ -507,7 +518,11 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     await phone.next((m) => m.type === 'welcome');
     await pc.next((m) => m.type === 'welcome');
 
-    phone.send({ type: 'found_site', facility: 'refinery' });
+    phone.send({ type: 'choose_faction', faction: 'compact' });
+    pc.send({ type: 'choose_faction', faction: 'ashen' });
+    await phone.next((m) => m.type === 'state' && m.state.pilots['Pilot A']?.faction === 'ashen' && m.state.bases.Akane.faction === 'compact');
+    G.setCommandLevel(server.galaxy, 'aster', 2); // outposts open at level 2
+    phone.send({ type: 'found_site', facility: 'refinery', planet: 'cinder', sector: 'cinder-1' });
     await phone.next((m) => m.type === 'state' && m.state.system.planets.length === 2);
     const site = server.galaxy.system.planets[1].id;
     server.galaxy.system.planets[1].buildings[0].vault = { isotope: 5 };
@@ -578,7 +593,7 @@ test('a raid over the wire: board, search, steal from the vault, alarm, extract'
     assert.strictEqual(end.result.outcome, 'extracted');
     assert.ok(end.result.kept.some((k) => k.item === 'isotope'));
 
-    const after = await phone.next((m) => m.type === 'state' && m.state.raids.length === 0);
+    const after = await phone.next((m) => m.type === 'state' && m.state.raids.length === 0 && m.state.raidLog.length > 0);
     const fac = after.state.system.planets[1].buildings[0];
     assert.ok(fac.vault.isotope < 5, 'the Builder lost what was carried out');
     assert.strictEqual(after.state.raidLog[0].outcome, 'extracted');
@@ -606,7 +621,7 @@ test('the run clock ends a raid as missing in action', async () => {
     await pc.next((m) => m.type === 'welcome');
     server.galaxy.stock.metal = 999;
     G.claimBase(server.galaxy, 'Akane');
-    const { site } = G.foundSite(server.galaxy, 'Akane', 'spire');
+    const { site } = outpost(server.galaxy, 'spire');
     pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     clock += 17 * 60_000;
@@ -627,7 +642,7 @@ test('the self-destruct kills a raider still inside when it ends', async () => {
     pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
     await pc.next((m) => m.type === 'welcome');
     G.claimBase(server.galaxy, 'Akane');
-    const { site } = G.foundSite(server.galaxy, 'Akane', 'refinery');
+    const { site } = outpost(server.galaxy, 'refinery');
     pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
     await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     pc.send({ type: 'raid_vent_start', vent: 'v2' });
@@ -659,7 +674,7 @@ test('healing over the wire: the server counts, the app waits for the timer', as
     pc.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
     await pc.next((m) => m.type === 'welcome');
     G.claimBase(server.galaxy, 'Akane');
-    const { site } = G.foundSite(server.galaxy, 'Akane', 'refinery');
+    const { site } = outpost(server.galaxy, 'refinery');
     pc.send({ type: 'raid_start', planet: site.id, slot: 0 });
     const begin = await pc.next((m) => m.type === 'raid' && m.ev === 'begin');
     assert.deepStrictEqual(begin.run.pouch, H.STARTER_POUCH, 'a new raider gets the starter kit');

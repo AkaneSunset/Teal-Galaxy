@@ -10,6 +10,10 @@ signal server_error(reason: String)
 signal connection_changed(online: bool)
 ## Raid events for the raider: begin, container, reveal, inventory, heat, extracting, end, ...
 signal raid_event(msg: Dictionary)
+## Every message from the server, after the handling below (battles, walkers, docking...).
+signal message(msg: Dictionary)
+## War supply credited to this character (ledger.ts): {"text", "credited", "capped", "planet", ...}.
+signal war_receipt(receipt: Dictionary)
 
 var state: Dictionary = {}
 ## Items, facilities and security tiers, from the server.
@@ -20,6 +24,27 @@ var my_name := ""
 var home := ""
 ## The last ship position exactly as the server sent it (64-bit numbers, metres from the star).
 var last_ship_pos: Array = []
+## True when the server took our admin key: the Coma director's controls show.
+var admin := false
+## Admin keys typed into Settings, the start screen or the phone's refusal screen, one per server
+## (server_key(url) -> key), saved with the settings (controls.gd). A saved key only ever goes to
+## the server it was typed for. `--admin-key=` on the command line wins over it; see admin_key().
+var admin_keys := {}
+## Why the server turned away our hello on this connection (a Coma Conglomerate character
+## without the admin key, or a wrong password, say), or "" once it welcomes us.
+var refused := ""
+## The account we sign in to (empty: play as a guest, where the server allows it) and its password,
+## kept in memory only. After the first welcome the server's token signs us in again on reconnects.
+var account := ""
+var password := ""
+var _token := ""
+## The account as the server sent it with the welcome: {"name", "characters", "locks"}, or {}.
+var account_info: Dictionary = {}
+
+const INBOUND_BUFFER := 4 * 1024 * 1024 # bytes: room for the largest state message
+## Where Settings live (controls.gd writes them); the admin keys are read from here.
+const SETTINGS_PATH := "user://controls.cfg"
+const Controls := preload("res://controls.gd")
 
 var _socket := WebSocketPeer.new()
 var _url := ""
@@ -27,14 +52,90 @@ var _role := ""
 var _started := false
 var _online := false
 var _retry_in := 0.0
+var _admin_key_arg := ""
+var _welcomed := false # the server has welcomed us on this connection
 
 
-func connect_to(url: String, role: String, player_name: String) -> void:
+func _ready() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--admin-key="):
+			_admin_key_arg = arg.trim_prefix("--admin-key=")
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) == OK:
+		var keys = cfg.get_value("settings", "admin_keys", {})
+		if keys is Dictionary:
+			admin_keys = keys
+
+
+## The admin key to say hello with: the command line's (it goes to the server given with it),
+## else the one saved for this server (empty: none).
+func admin_key() -> String:
+	return _admin_key_arg if _admin_key_arg != "" else saved_admin_key(_url)
+
+
+## The server this app connects to, as typed.
+func server_url() -> String:
+	return _url
+
+
+## A server's address as its admin key is saved under it: the same however it was typed.
+static func server_key(url: String) -> String:
+	var u := url.strip_edges().to_lower().trim_suffix("/")
+	return u if u.contains("://") else "ws://" + u
+
+
+## The admin key saved for a server, or "".
+func saved_admin_key(url: String) -> String:
+	return str(admin_keys.get(server_key(url), ""))
+
+
+## Saves the admin key for a server with the settings, or forgets it when `key` is empty.
+func save_admin_key(url: String, key: String) -> void:
+	if key.strip_edges() == saved_admin_key(url):
+		return
+	if key.strip_edges() == "":
+		admin_keys.erase(server_key(url))
+	else:
+		admin_keys[server_key(url)] = key.strip_edges()
+	Controls.save_admin_keys(admin_keys)
+
+
+func connect_to(url: String, role: String, player_name: String, account_name := "", account_password := "") -> void:
 	_url = url
 	_role = role
 	my_name = player_name
+	account = account_name.strip_edges()
+	password = account_password
+	_token = ""
 	_started = true
 	_open()
+
+
+## Signs in again with another password (after a wrong one): a fresh hello on this connection.
+func sign_in(account_password: String) -> void:
+	password = account_password
+	_token = ""
+	send(hello_message())
+
+
+## The hello for this app: role, name, and the account (with its token once we have one, and the
+## password in case the server has restarted since) and admin key when there are any.
+func hello_message() -> Dictionary:
+	var hello := {"type": "hello", "role": _role, "name": my_name}
+	if admin_key() != "":
+		hello.admin_key = admin_key()
+	if account != "":
+		hello.account = account
+		hello.password = password
+		if _token != "":
+			hello.token = _token
+	return hello
+
+
+## Drops the connection; it comes back in a moment with a fresh hello (a new admin key, say).
+func reconnect() -> void:
+	if _started:
+		_socket.close()
 
 
 func send(msg: Dictionary) -> void:
@@ -43,7 +144,11 @@ func send(msg: Dictionary) -> void:
 
 
 func _open() -> void:
+	_welcomed = false
+	refused = ""
 	_socket = WebSocketPeer.new()
+	# The galaxy state (the war map's sectors above all) is well over the default 64 KiB a message.
+	_socket.inbound_buffer_size = INBOUND_BUFFER
 	var err := _socket.connect_to_url(_url)
 	if err != OK:
 		server_error.emit("Could not reach %s" % _url)
@@ -59,7 +164,7 @@ func _process(delta: float) -> void:
 			if not _online:
 				_online = true
 				connection_changed.emit(true)
-				send({"type": "hello", "role": _role, "name": my_name})
+				send(hello_message())
 			while _socket.get_available_packet_count() > 0:
 				var msg = JSON.parse_string(_socket.get_packet().get_string_from_utf8())
 				if msg is Dictionary:
@@ -81,10 +186,17 @@ func _handle(msg: Dictionary) -> void:
 			my_id = int(msg.id)
 			my_name = msg.name
 			home = str(msg.get("home", "")) if msg.get("home") != null else ""
+			admin = msg.get("admin", false) == true
+			account_info = msg.account if msg.get("account") is Dictionary else {}
+			_token = str(account_info.get("token", ""))
+			_welcomed = true
+			refused = ""
 			catalog = msg.get("catalog", {})
 			state = msg.state
 			state_changed.emit(state)
 		"state":
+			if not _welcomed:
+				return # not ours to see: the server hasn't taken our hello (yet, or at all)
 			state = msg.state
 			state_changed.emit(state)
 		"ship":
@@ -98,8 +210,23 @@ func _handle(msg: Dictionary) -> void:
 			ship_left.emit(int(msg.id))
 		"raid":
 			raid_event.emit(msg)
+		"war_receipt":
+			if msg.get("receipt") is Dictionary:
+				war_receipt.emit(msg.receipt)
+		"tunables":
+			# The server reloaded its rule numbers.
+			if msg.get("tunables") is Dictionary:
+				catalog.tunables = msg.tunables
 		"error":
+			# The first error before a welcome is the hello's refusal (later ones only say hello first).
+			# After one, an admins-only reason means the server turned this character away: an admin
+			# took it into the Coma Conglomerate while this app played it without the key.
+			var reason := str(msg.reason)
+			if (not _welcomed and refused == "") or (_welcomed and reason.ends_with(": admins only")):
+				_welcomed = false
+				refused = reason
 			server_error.emit(msg.reason)
+	message.emit(msg)
 
 
 ## True when any planet in the system (or just `planet_id`) has a building of this type.

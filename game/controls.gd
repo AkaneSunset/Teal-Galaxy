@@ -45,6 +45,13 @@ const ACTIONS := [
 	["nav_map", "Navigation map", [KEY_M], ["button", JOY_BUTTON_BACK]],
 	["chat", "Chat", [KEY_ENTER], ["button", JOY_BUTTON_GUIDE]],
 	["menu", "Settings", [KEY_ESCAPE], ["button", JOY_BUTTON_START]],
+	# A fleet carrier (the demo's ship) is walkable: leave the pilot's chair and walk around it.
+	["leave_seat", "Leave seat (walk your carrier)", [KEY_G], ["button", JOY_BUTTON_RIGHT_STICK]],
+	["outside_view", "Outside view (carrier)", [KEY_V], null],
+	# Space Battles: a starfighter's weapons.
+	["ship_fire", "Space Battles: fire lasers", ["mouse", MOUSE_BUTTON_LEFT], null],
+	["ship_secondary", "Space Battles: missile / torpedo", ["mouse", MOUSE_BUTTON_RIGHT], null],
+	["ship_target", "Space Battles: target ahead", [KEY_T], null],
 	# On foot, inside a facility.
 	["foot_forward", "On foot: forward", [KEY_W], ["axis", JOY_AXIS_LEFT_Y, -1]],
 	["foot_back", "On foot: back", [KEY_S], ["axis", JOY_AXIS_LEFT_Y, 1]],
@@ -240,11 +247,22 @@ func save_settings() -> void:
 	cfg.set_value("settings", "invert_mouse", invert_mouse)
 	cfg.set_value("settings", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("settings", "hud_colour", hud_colour)
+	cfg.set_value("settings", "admin_keys", Net.admin_keys) # Net reads them back itself
 	for a in ACTIONS:
 		var specs := []
 		for e in InputMap.action_get_events(a[0]):
 			specs.append(_spec(e))
 		cfg.set_value("bindings", a[0], specs)
+	cfg.save(SAVE_PATH)
+
+
+## Saves the admin keys (Net.admin_keys: server -> key) and leaves the rest of the settings file as
+## it is. Net calls it when a key is typed, on the start screen and the phone too, where there are
+## no controls to save.
+static func save_admin_keys(keys: Dictionary) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(SAVE_PATH) # no file yet is fine: it starts empty
+	cfg.set_value("settings", "admin_keys", keys)
 	cfg.save(SAVE_PATH)
 
 

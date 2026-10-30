@@ -1,0 +1,46 @@
+{
+  "campaign": {
+    "aiShare": 0.5,
+    "finalMultiplier": 2,
+    "modes": {
+      "sector": { "points": 10 },
+      "supremacy": { "points": 8 },
+      "space": { "points": 6 },
+      "facility": { "points": 4 },
+      "defense": { "points": 6 }
+    }
+  },
+  "orders": {
+    "reward": { "order": 250, "member": 50, "operation": 750 }
+  },
+  "ledger": {
+    "shares": { "arena": 0.15, "frontier": 0.4 },
+    "underdog": { "min": 0.8, "max": 1.3, "slope": 0.5 },
+    "perMerit": 0.05,
+    "match": { "win": 10, "loss": 4, "aiShare": 0.5 },
+    "receiptsKept": 20,
+    "historyKept": 4
+  },
+  "accounts": {
+    "charactersMax": 8,
+    "nameMax": 24,
+    "passwordMin": 6,
+    "attemptsPerMinute": 5
+  },
+  "sideLock": {
+    "on": true
+  },
+  "telemetry": {
+    "windowMs": 60000,
+    "tickBudgetMs": 60,
+    "alertsKept": 50,
+    "eventsKept": 500
+  },
+  "sector": {
+    "pilots": 32,
+    "aiUnits": 400,
+    "fallbackUnits": 250,
+    "tickMs": 100,
+    "p99BudgetMs": 60
+  }
+}

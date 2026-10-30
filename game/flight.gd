@@ -32,6 +32,31 @@ const SMALL_SHIP := {
 	"hull": 100.0,
 }
 
+# A fleet carrier, the demo's ship: about 260 m of hull with a flight deck, hangars and a crew. It
+# flies like the small ship but heavier: slower to turn and to get going, a gentler boost that
+# lasts longer. Its phase-shift drive is the same, so trips across the system take as long.
+const CARRIER := {
+	"class": "Carrier",
+	"top_speed": 220.0,
+	"zero_pip_speed": 0.72,
+	"reverse": 0.4,
+	"strafe": 0.3,
+	"boost_speed": 330.0,
+	"boost_time": 3.5,
+	"boost_cooldown": 8.0,
+	"boost_energy": 12.0,
+	"accel": 22.0, # 0 to cruise in about 10 s
+	"accel_lateral": 10.0,
+	"align_rate": 0.9, # the hull swings its momentum round slowly
+	"pitch": 0.26, # 15 degrees a second
+	"yaw": 0.17, # 10 degrees a second
+	"roll": 0.45,
+	"phase_charge": 6.0,
+	"phase_accel": 0.55,
+	"shields": 100.0,
+	"hull": 100.0,
+}
+
 const PHASE_MIN := 1_000.0 # m/s
 const PHASE_MAX := 2001.0 * 299_792_458.0
 const PHASE_PER_ALTITUDE := 0.5 # phase speed limit per metre from the nearest body, per second
