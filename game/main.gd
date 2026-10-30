@@ -3,13 +3,17 @@ extends Node
 ##
 ## Skip the screen with command-line options after `--`:
 ##   godot --path game -- --mode=builder --name=Akane --server=ws://192.168.1.20:8080
+##   (add --account=<name> --password=<password> to sign in; a server that isn't in demo mode
+##   needs it, and the first sign-in with a new account name opens that account)
 
 const DEFAULT_SERVER := "ws://127.0.0.1:8080"
-const START_PATH := "user://start.cfg" # the name and server last typed on the start screen
+const START_PATH := "user://start.cfg" # the name, account and server last typed on the start screen (never the password)
 const BuilderMode := preload("res://builder.gd")
 const ExplorerMode := preload("res://explorer.gd")
 
 var _name_edit: LineEdit
+var _account_edit: LineEdit
+var _password_edit: LineEdit
 var _server_edit: LineEdit
 var _key_edit: LineEdit
 var _mode: Node # the Builder or Explorer, once started
@@ -18,11 +22,11 @@ var _mode: Node # the Builder or Explorer, once started
 func _ready() -> void:
 	var opts := _parse_args()
 	if opts.has("mode"):
-		_start(opts.mode, opts.get("name", _default_name(opts.mode)), opts.get("server", DEFAULT_SERVER))
+		_start(opts.mode, opts.get("name", _default_name(opts.mode)), opts.get("server", DEFAULT_SERVER), opts.get("account", ""), opts.get("password", ""))
 	else:
 		var last := ConfigFile.new()
 		last.load(START_PATH)
-		_show_menu(opts.get("server", last.get_value("start", "server", DEFAULT_SERVER)), last.get_value("start", "name", ""))
+		_show_menu(opts.get("server", last.get_value("start", "server", DEFAULT_SERVER)), last.get_value("start", "name", ""), last.get_value("start", "account", ""))
 
 
 ## Android's back button: the mode closes what's open first (Builder: back_pressed()), else quit.
@@ -45,7 +49,7 @@ func _default_name(mode: String) -> String:
 	return "Builder" if mode == "builder" else "Pilot %d" % (randi() % 900 + 100)
 
 
-func _show_menu(server: String, last_name: String) -> void:
+func _show_menu(server: String, last_name: String, last_account: String) -> void:
 	var phone := OS.has_feature("mobile")
 	if phone:
 		# Finger-sized on a dense phone screen, as in the Builder.
@@ -67,8 +71,17 @@ func _show_menu(server: String, last_name: String) -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(title)
 
+	# Sign in once, play several characters: the account owns each character it has played.
+	_account_edit = LineEdit.new()
+	_account_edit.placeholder_text = "Account"
+	_account_edit.text = last_account
+	box.add_child(_account_edit)
+	_password_edit = LineEdit.new()
+	_password_edit.placeholder_text = "Password (a new account name opens an account)"
+	_password_edit.secret = true
+	box.add_child(_password_edit)
 	_name_edit = LineEdit.new()
-	_name_edit.placeholder_text = "Your name"
+	_name_edit.placeholder_text = "Character name"
 	_name_edit.text = last_name
 	box.add_child(_name_edit)
 	_server_edit = LineEdit.new()
@@ -109,18 +122,19 @@ func _start_from_menu(mode: String) -> void:
 	Net.save_admin_key(server, _key_edit.text) # an empty box forgets the key for that server
 	var last := ConfigFile.new()
 	last.set_value("start", "name", n)
+	last.set_value("start", "account", _account_edit.text.strip_edges())
 	last.set_value("start", "server", server)
 	last.save(START_PATH)
-	_start(mode, n if n != "" else _default_name(mode), server)
+	_start(mode, n if n != "" else _default_name(mode), server, _account_edit.text.strip_edges(), _password_edit.text)
 
 
-func _start(mode: String, player_name: String, server: String) -> void:
+func _start(mode: String, player_name: String, server: String, account := "", password := "") -> void:
 	for child in get_children():
 		child.queue_free()
 	if mode == "builder" and not OS.has_feature("mobile"):
 		# Phone-shaped window (held sideways) when testing the Builder on a PC.
 		DisplayServer.window_set_size(Vector2i(1040, 480))
 	get_window().title = "Teal Galaxy: %s (%s)" % [mode.capitalize(), player_name]
-	Net.connect_to(server, mode, player_name)
+	Net.connect_to(server, mode, player_name, account, password)
 	_mode = BuilderMode.new() if mode == "builder" else ExplorerMode.new()
 	add_child(_mode)

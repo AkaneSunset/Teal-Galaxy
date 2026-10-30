@@ -176,6 +176,7 @@ func _ready() -> void:
 		if Net.refused == "":
 			_say("Server: " + reason))
 	Net.connection_changed.connect(func(_on): _refresh_refusal())
+	Net.war_receipt.connect(func(r): _say(str(r.get("text", ""))))
 	Net.raid_event.connect(_on_raid_event)
 	Net.message.connect(_on_net_message)
 	controls.capture_mouse()
@@ -1877,6 +1878,8 @@ func _refresh_refusal() -> void:
 	_refusal.visible = Net.refused != ""
 	if _refusal.visible:
 		_refusal_text.text = Net.refused.substr(0, 1).to_upper() + Net.refused.substr(1) + "."
+		if Net.refused.begins_with("wrong password") or Net.refused.begins_with("sign in") or Net.refused.contains("belongs to"):
+			_refusal_text.text += "\nRestart the game and sign in from the start screen (or play another character)."
 
 
 # --- The war's screens ------------------------------------------------------------------------

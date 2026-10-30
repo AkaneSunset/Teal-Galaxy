@@ -16,6 +16,7 @@
 
 const D = require('./director');
 const F = require('./factions');
+const TM = require('./telemetry.ts');
 const W = require('./war');
 
 const SIZE = 1600; // the map is SIZE x SIZE metres
@@ -1542,7 +1543,7 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
       for (const [name, c] of conns.get(b.id)) send(c, stateFor(b, f, name));
     }
   }
-  const ticker = setInterval(tickAll, TICK_MS);
+  const ticker = setInterval(TM.timed('sector', tickAll), TICK_MS);
 
   // The running battles, as everyone may see them in the galaxy state.
   function list() {

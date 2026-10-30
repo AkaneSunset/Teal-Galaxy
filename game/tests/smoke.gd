@@ -35,7 +35,8 @@ func _ready() -> void:
 			_role = arg.substr(7)
 		elif arg.begins_with("--server="):
 			_server = arg.substr(9)
-	Net.connect_to(_server, _role, "Smoke " + _role)
+	# Signed in: the smoke servers aren't demo servers, so they need an account.
+	Net.connect_to(_server, _role, "Smoke " + _role, "Smoke " + _role, "smoke-test")
 	_admin = Net.admin_key() != "" # Net reads --admin-key= itself, or the key saved for this server
 	_mode = BuilderMode.new() if _role == "builder" else ExplorerMode.new()
 	add_child(_mode)

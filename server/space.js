@@ -18,6 +18,7 @@
 // torpedoes and AI, and runs the turrets. In memory only.
 
 const F = require('./factions');
+const TM = require('./telemetry.ts');
 
 const PILOTS = 12; // a side, AI pilots filling the empty slots...
 const SKY = 6; // ...and this many more AI fighters
@@ -765,7 +766,7 @@ function createSpaces({ now = Date.now, speed = 1, send, changed, onEnd = null }
       for (const [name, c] of conns.get(f.id)) send(c, stateFor(f, fr, name));
     }
   }
-  const ticker = setInterval(tickAll, TICK_MS);
+  const ticker = setInterval(TM.timed('space', tickAll), TICK_MS);
 
   function running(planet) {
     return [...matches.values()].filter((f) => !f.result && f.planet === planet);

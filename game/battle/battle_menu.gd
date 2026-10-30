@@ -294,6 +294,13 @@ func _refresh_campaign(wp: Dictionary) -> void:
 	var bonus: Dictionary = cat.get("bonuses", {}).get(str(c.get("bonus", "")), {})
 	_camp_head.text = "Campaign for %s: %s
 Planet bonus, %s: %s" % [wp.get("name", ""), "   ·   ".join(parts) if not parts.is_empty() else "no factions in it", str(bonus.get("name", "")), str(bonus.get("text", ""))]
+	# The front's war supply (the ledger): by faction and source, and your side's multiplier.
+	var supply := WarInfo.supply_lines(str(wp.get("id", "")))
+	var shares: Dictionary = Net.catalog.get("ledger", {}).get("shares", {})
+	var share_note := "the arena at most %d%%, the Frontier at most %d%% of a side's" % [roundi(float(shares.get("arena", 0.15)) * 100.0), roundi(float(shares.get("frontier", 0.4)) * 100.0)]
+	_camp_head.text += "\nWar supply this campaign: %s  (%s)" % ["   ·   ".join(supply) if not supply.is_empty() else "none yet", share_note]
+	if mine != "" and not is_equal_approx(WarInfo.supply_multiplier(mine), 1.0):
+		_camp_head.text += "\n%s's war supply counts x%.2f (underdog multiplier)" % [WarInfo.faction_name(mine), WarInfo.supply_multiplier(mine)]
 	# The mode buttons: queue for one, or leave the queue you're in.
 	var key := "%s/%s/%s/%s" % [wp.id, mine, queued.get("planet", ""), queued.get("mode", "")]
 	if key != _modes_key:

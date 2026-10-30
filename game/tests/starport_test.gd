@@ -29,7 +29,7 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--server="):
 			_server = arg.substr(9)
-	Net.connect_to(_server, "explorer", "Port P")
+	Net.connect_to(_server, "explorer", "Port P", "Port P", "port-test") # signed in: not a demo server
 	_explorer = ExplorerMode.new()
 	add_child(_explorer)
 	for name in [BUILDER, "Port A1", "Port A2"]:
@@ -64,9 +64,9 @@ func _steps() -> void:
 			for name in _peers:
 				if _peers[name].get_ready_state() != WebSocketPeer.STATE_OPEN:
 					return
-			_send(BUILDER, {"type": "hello", "role": "builder", "name": BUILDER})
+			_send(BUILDER, {"type": "hello", "role": "builder", "name": BUILDER, "account": BUILDER, "password": "port-test"})
 			for name in ["Port A1", "Port A2"]:
-				_send(name, {"type": "hello", "role": "explorer", "name": name})
+				_send(name, {"type": "hello", "role": "explorer", "name": name, "account": name, "password": "port-test"})
 			_collect(10)
 			_step = "home"
 		"home":

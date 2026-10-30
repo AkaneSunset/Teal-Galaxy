@@ -12,6 +12,8 @@ signal connection_changed(online: bool)
 signal raid_event(msg: Dictionary)
 ## Every message from the server, after the handling below (battles, walkers, docking...).
 signal message(msg: Dictionary)
+## War supply credited to this character (ledger.ts): {"text", "credited", "capped", "planet", ...}.
+signal war_receipt(receipt: Dictionary)
 
 var state: Dictionary = {}
 ## Items, facilities and security tiers, from the server.
@@ -29,8 +31,15 @@ var admin := false
 ## the server it was typed for. `--admin-key=` on the command line wins over it; see admin_key().
 var admin_keys := {}
 ## Why the server turned away our hello on this connection (a Coma Conglomerate character
-## without the admin key, say), or "" once it welcomes us.
+## without the admin key, or a wrong password, say), or "" once it welcomes us.
 var refused := ""
+## The account we sign in to (empty: play as a guest, where the server allows it) and its password,
+## kept in memory only. After the first welcome the server's token signs us in again on reconnects.
+var account := ""
+var password := ""
+var _token := ""
+## The account as the server sent it with the welcome: {"name", "characters", "locks"}, or {}.
+var account_info: Dictionary = {}
 
 const INBOUND_BUFFER := 4 * 1024 * 1024 # bytes: room for the largest state message
 ## Where Settings live (controls.gd writes them); the admin keys are read from here.
@@ -91,12 +100,36 @@ func save_admin_key(url: String, key: String) -> void:
 	Controls.save_admin_keys(admin_keys)
 
 
-func connect_to(url: String, role: String, player_name: String) -> void:
+func connect_to(url: String, role: String, player_name: String, account_name := "", account_password := "") -> void:
 	_url = url
 	_role = role
 	my_name = player_name
+	account = account_name.strip_edges()
+	password = account_password
+	_token = ""
 	_started = true
 	_open()
+
+
+## Signs in again with another password (after a wrong one): a fresh hello on this connection.
+func sign_in(account_password: String) -> void:
+	password = account_password
+	_token = ""
+	send(hello_message())
+
+
+## The hello for this app: role, name, and the account (with its token once we have one, and the
+## password in case the server has restarted since) and admin key when there are any.
+func hello_message() -> Dictionary:
+	var hello := {"type": "hello", "role": _role, "name": my_name}
+	if admin_key() != "":
+		hello.admin_key = admin_key()
+	if account != "":
+		hello.account = account
+		hello.password = password
+		if _token != "":
+			hello.token = _token
+	return hello
 
 
 ## Drops the connection; it comes back in a moment with a fresh hello (a new admin key, say).
@@ -131,10 +164,7 @@ func _process(delta: float) -> void:
 			if not _online:
 				_online = true
 				connection_changed.emit(true)
-				var hello := {"type": "hello", "role": _role, "name": my_name}
-				if admin_key() != "":
-					hello.admin_key = admin_key()
-				send(hello)
+				send(hello_message())
 			while _socket.get_available_packet_count() > 0:
 				var msg = JSON.parse_string(_socket.get_packet().get_string_from_utf8())
 				if msg is Dictionary:
@@ -157,6 +187,8 @@ func _handle(msg: Dictionary) -> void:
 			my_name = msg.name
 			home = str(msg.get("home", "")) if msg.get("home") != null else ""
 			admin = msg.get("admin", false) == true
+			account_info = msg.account if msg.get("account") is Dictionary else {}
+			_token = str(account_info.get("token", ""))
 			_welcomed = true
 			refused = ""
 			catalog = msg.get("catalog", {})
@@ -178,6 +210,13 @@ func _handle(msg: Dictionary) -> void:
 			ship_left.emit(int(msg.id))
 		"raid":
 			raid_event.emit(msg)
+		"war_receipt":
+			if msg.get("receipt") is Dictionary:
+				war_receipt.emit(msg.receipt)
+		"tunables":
+			# The server reloaded its rule numbers.
+			if msg.get("tunables") is Dictionary:
+				catalog.tunables = msg.tunables
 		"error":
 			# The first error before a welcome is the hello's refusal (later ones only say hello first).
 			# After one, an admins-only reason means the server turned this character away: an admin

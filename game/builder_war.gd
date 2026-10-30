@@ -13,6 +13,7 @@ extends PanelContainer
 ## builder.gd builds it, passes itself as `ui` (its UI helpers, colours and economy) and
 ## refreshes it with the rest of the HUD.
 
+const WarInfo := preload("res://war_info.gd")
 const R := 13.0 # a system's radius on the map, in pixels
 const RING := 30.0 # how far from a system's centre its planets sit
 const TRAVEL_S := 120.0 # seconds a jump takes at speed 1 (navy.js TRAVEL_S)
@@ -46,6 +47,7 @@ var _send_for := "" # the picked system _send_to was chosen for
 var _armada_power := 60
 var _donate_item := ""
 var _donate_qty := 10
+var _donate_front := "" # the contested planet a donation counts for in the war-supply ledger
 var _lay_scale := 1.0 # map pixels per unit of a system's pos
 var _lay_origin := Vector2.ZERO
 
@@ -807,6 +809,38 @@ func _build_supply(state: Dictionary, war: Dictionary) -> void:
 			refresh(Net.state))
 		grid.add_child(b)
 		_ticks.append(func(): b.text = "%s: %d  (%d merit each)" % [_item_name(item), int(ui._econ().stock.get(item, 0)), int(values.get(item, 0))])
+	# The front the goods count for in the war-supply ledger: a contested planet in your system
+	# whose campaign your faction is in. Donating there takes your account's side on it.
+	var fronts := []
+	for wp in WarInfo.planets_in(str(state.system.id)):
+		var c: Dictionary = war.get("campaigns", {}).get(str(wp.id), {})
+		if not c.is_empty() and c.get("entrants", []).has(faction):
+			fronts.append(wp)
+	if not fronts.is_empty():
+		if fronts.all(func(wp): return str(wp.id) != _donate_front):
+			_donate_front = str(fronts[0].id)
+		var front_row := HFlowContainer.new()
+		front_row.add_theme_constant_override("h_separation", 6)
+		_supply.add_child(front_row)
+		var for_label: Label = ui._label(front_row, 15)
+		for_label.text = "For the front at"
+		var fronts_group := ButtonGroup.new()
+		for wp in fronts:
+			var fb := Button.new()
+			fb.toggle_mode = true
+			fb.button_group = fronts_group
+			fb.text = str(wp.name)
+			fb.add_theme_font_size_override("font_size", 14)
+			fb.add_theme_stylebox_override("pressed", ui._box(ui.C_TEAL.darkened(0.45), ui.C_AMBER, 12))
+			fb.button_pressed = str(wp.id) == _donate_front
+			var id := str(wp.id)
+			fb.pressed.connect(func(): _donate_front = id)
+			front_row.add_child(fb)
+		var front_line := _note(_supply, "")
+		_ticks.append(func():
+			var mine: Dictionary = WarInfo.front_supply(_donate_front).get("factions", {}).get(str(faction), {})
+			var per_merit := float(Net.catalog.get("ledger", {}).get("perMerit", 0.05))
+			front_line.text = "%s has %s war supply there this campaign. Every %d War Merit of goods adds 1, times your side's underdog multiplier (x%.2f)." % [ui._faction_name(faction), WarInfo._num(float(mine.get("total", 0))), roundi(1.0 / per_merit) if per_merit > 0 else 0, WarInfo.supply_multiplier(str(faction))])
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	_supply.add_child(row)
@@ -816,7 +850,11 @@ func _build_supply(state: Dictionary, war: Dictionary) -> void:
 	var edit: LineEdit = ui._qty_picker(row, _donate_qty, func(): return int(ui._econ().stock.get(_donate_item, 0)), func(n): _donate_qty = n)
 	var give := Button.new()
 	give.icon = load(ui.ICONS + "send.png")
-	give.pressed.connect(func(): Net.send({"type": "donate", "item": _donate_item, "qty": ui._qty(edit)}))
+	give.pressed.connect(func():
+		var msg := {"type": "donate", "item": _donate_item, "qty": ui._qty(edit)}
+		if _donate_front != "":
+			msg.planet = _donate_front
+		Net.send(msg))
 	row.add_child(give)
 	_ticks.append(func():
 		var n: int = ui._qty(edit)

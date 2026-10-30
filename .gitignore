@@ -8,3 +8,4 @@ build/
 # Server
 server/node_modules/
 server/galaxy.json
+server/telemetry.jsonl

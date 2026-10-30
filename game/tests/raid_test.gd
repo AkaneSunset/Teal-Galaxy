@@ -73,6 +73,7 @@ func _process(delta: float) -> void:
 	match _step:
 		"build":
 			if _builder.get_ready_state() == WebSocketPeer.STATE_CLOSED:
+				_builder.inbound_buffer_size = 4 * 1024 * 1024 # the welcome is over the default 64 KiB
 				_builder.connect_to_url(_server)
 			_builder.poll()
 			if _builder.get_ready_state() != WebSocketPeer.STATE_OPEN:

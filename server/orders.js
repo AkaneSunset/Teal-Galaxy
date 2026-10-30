@@ -19,6 +19,7 @@
 
 const C = require('./campaign');
 const F = require('./factions');
+const T = require('./tunables.ts');
 const W = require('./war');
 
 const DAY = 24 * 3600_000;
@@ -26,7 +27,9 @@ const OP_SLOTS = 3;
 const DEMO_OP_MS = 2 * C.DEMO_CYCLE_MS; // the demo war: three 20-minute orders
 const ARCHIVE_MAX = 12;
 const PLAYER_FACTIONS = ['compact', 'ashen', 'luminar'];
-const REWARD = { order: 250, member: 50, operation: 750 }; // credits: to a won order's contributors, to every member, for a won operation
+// Credits: to a won order's contributors, to every member, for a won operation (tunables orders.reward).
+const REWARD = { order: 250, member: 50, operation: 750 };
+T.onReload((t) => Object.assign(REWARD, t.orders.reward));
 const COMA_CHANCE = 0.5; // an operation has a Coma offensive in one of its slots this often
 
 // Each faction's High Command, its voice for briefings and outcomes.

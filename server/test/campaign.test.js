@@ -136,3 +136,35 @@ test('a campaign match scores for its winner instead of taking a sector; the min
   assert.ok(Math.abs(m.pilots.get('Holder').mass - B.MASS_START * 1.15) < 1e-6);
   W.setDemo(false);
 });
+
+test('side locks: checked when a pilot queues and as they go in, taken as they go in', () => {
+  const h = harness();
+  const A = require('../accounts.ts');
+  A.reset();
+  const g = h.g;
+  const key = A.signIn(g, { name: 'Akane', password: 'secret1' }).key;
+  const names = { planetName: 'Cinder', factionName: (f) => f };
+  const sides = {
+    check: (me, planet, faction) => A.checkSide(g, me.account, planet, faction, h.now(), names),
+    take: (me, planet, faction) => A.takeSide(g, me.account, planet, faction, g.war.campaigns[planet].endsAt, `explorer/${me.name}`, h.now()),
+  };
+  const mm = C.createMatchmaking({ galaxy: () => g, now: h.now, battles: h.battles, where: (me) => ({ over: me.over }), factionOf: (me) => me.faction,
+    send: (c, msg) => h.sent.push([c.name, msg]), changed: () => {}, wait: 10_000, sides });
+  mm.close();
+  // Two of Akane's pilots queue for Cinder on opposite sides before either has fought there: the
+  // match starts with both factions, Kite (attacking) goes in first and takes the Ashen side for
+  // the account, and Rook stays out.
+  const kite = { ...h.pilot('Kite', 'ashen', 'cinder'), account: key };
+  const rook = { ...h.pilot('Rook', 'compact', 'cinder'), account: key };
+  assert.ok(mm.join(kite, 'cinder', 'sector').ok);
+  assert.ok(mm.join(rook, 'cinder', 'sector').ok, 'nobody has taken a side yet');
+  const [b] = h.battles.campaignMatches('cinder');
+  assert.deepStrictEqual([b.attacker, b.defender, kite.battle, rook.battle], ['ashen', 'compact', b.id, null]);
+  assert.strictEqual(A.lockOn(g, key, 'cinder', h.now()).faction, 'ashen');
+  const refused = h.sent.find(([n, m]) => n === 'Rook' && m.type === 'error');
+  assert.match(refused[1].reason, /^your account took the ashen's side on Cinder this campaign \(Kite\)/);
+  assert.deepStrictEqual(mm.list(), {}, 'and out of the queue');
+  assert.match(mm.join(rook, 'cinder', 'sector').reason, /took the ashen's side on Cinder/, 'queueing again is refused at once');
+  assert.ok(mm.join({ ...h.pilot('Guest', 'compact', 'cinder'), account: null }, 'cinder', 'sector').ok, 'other players are free');
+  W.setDemo(false);
+});

@@ -15,6 +15,7 @@
 // In memory only: a server restart ends every match with no result.
 
 const F = require('./factions');
+const TM = require('./telemetry.ts');
 
 const SIZE = 120; // the arena is SIZE x SIZE metres
 const SQUAD_MAX = 4;
@@ -776,7 +777,7 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
       for (const [name, c] of conns.get(d.id)) send(c, stateFor(d, f, name));
     }
   }
-  const ticker = setInterval(tickAll, TICK_MS);
+  const ticker = setInterval(TM.timed('defense', tickAll), TICK_MS);
 
   function running(planet) {
     return [...matches.values()].filter((d) => !d.result && d.planet === planet);

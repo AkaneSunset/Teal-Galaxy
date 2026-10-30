@@ -32,6 +32,7 @@
 // doors stopping it, runs the AI, and keeps the score. In memory only.
 
 const F = require('./factions');
+const TM = require('./telemetry.ts');
 const W = require('./war');
 
 const SIZE = 80;
@@ -1904,7 +1905,7 @@ function createFacilities({ now = Date.now, speed = 1, send, changed, loadouts =
       for (const [name, c] of conns.get(f.id)) send(c, stateFor(f, fr, name));
     }
   }
-  const ticker = setInterval(tickAll, TICK_MS);
+  const ticker = setInterval(TM.timed('facility', tickAll), TICK_MS);
 
   function running(planet) {
     return [...matches.values()].filter((f) => !f.result && f.planet === planet);

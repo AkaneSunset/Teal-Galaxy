@@ -13,10 +13,12 @@ extends Control
 ## for the planet shown (`wants_battles`): attack a sector or join a battle running there.
 ## For the galaxy's admins (Net.admin) it has two more things: "Take for Coma" on sectors the Coma
 ## Conglomerate can take (`admin_capture`, every rule applies), and the Coma director page
-## (director_panel.gd), swapped in for the sectors with the buttons at the top.
+## (director_panel.gd) and the server dashboard (dashboard_panel.gd), swapped in for the sectors
+## with the buttons at the top.
 
 const WarInfo := preload("res://war_info.gd")
 const DirectorPanel := preload("res://director_panel.gd")
+const DashboardPanel := preload("res://dashboard_panel.gd")
 
 signal closed
 signal wants_faction # the pilot has no side yet and asked to pick one
@@ -49,11 +51,13 @@ var _taking_for := "" # and for which faction
 var _take_coma: Button
 var _battles: Button
 var _fleets: Label
-var _pages: HBoxContainer # admins: Sectors | Coma director
+var _pages: HBoxContainer # admins: Sectors | Coma director | Dashboard
 var _sectors_page: Button
 var _director_page: Button
+var _dashboard_page: Button
 var _row: HBoxContainer # the sectors page
 var _director: Control
+var _dashboard: Control
 
 
 func _ready() -> void:
@@ -99,10 +103,12 @@ func _ready() -> void:
 	_sectors_page.text = "Sectors"
 	_director_page = Button.new()
 	_director_page.text = "Coma director (admin)"
-	for b in [_sectors_page, _director_page]:
+	_dashboard_page = Button.new()
+	_dashboard_page.text = "Dashboard (admin)"
+	for b in [_sectors_page, _director_page, _dashboard_page]:
 		b.toggle_mode = true
 		b.button_group = group
-		b.pressed.connect(_show_page.bind(b == _director_page))
+		b.pressed.connect(_show_page.bind("director" if b == _director_page else "dashboard" if b == _dashboard_page else "sectors"))
 		_pages.add_child(b)
 	_sectors_page.button_pressed = true
 	var close := Button.new()
@@ -119,6 +125,10 @@ func _ready() -> void:
 	_director.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_director.visible = false
 	page.add_child(_director)
+	_dashboard = DashboardPanel.new()
+	_dashboard.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_dashboard.visible = false
+	page.add_child(_dashboard)
 
 	# Left: the planets of the war, then orbital control.
 	var left := VBoxContainer.new()
@@ -202,7 +212,7 @@ func _ready() -> void:
 	right.add_child(_status)
 	Net.server_error.connect(func(reason):
 		_taking = ""
-		if visible and not _director.visible:
+		if visible and _row.visible:
 			_status.text = "Server: " + reason)
 	refresh()
 
@@ -240,11 +250,12 @@ func refresh() -> void:
 	_side.add_theme_color_override("font_color", WarInfo.faction_color(mine) if mine != "" else Color(1, 1, 1, 0.6))
 	_pick_side.visible = mine == ""
 	_pages.visible = Net.admin
-	if not Net.admin and _director.visible:
-		_show_page(false)
+	if not Net.admin and not _row.visible:
+		_show_page("sectors")
 	if _director.visible:
 		_director.colour = colour
 		_director.refresh()
+	_dashboard.colour = colour
 	_refresh_list()
 	var wp := WarInfo.planet(planet_id)
 	if wp.is_empty():
@@ -364,11 +375,14 @@ func _take_for_coma() -> void:
 
 
 ## Admins: the sectors, or the Coma director in their place.
-func _show_page(director: bool) -> void:
-	_director.visible = director
-	_row.visible = not director
-	(_director_page if director else _sectors_page).set_pressed_no_signal(true)
-	(_sectors_page if director else _director_page).set_pressed_no_signal(false)
+## "sectors", "director" or "dashboard".
+func _show_page(page: String) -> void:
+	_director.visible = page == "director"
+	_dashboard.visible = page == "dashboard"
+	_row.visible = page == "sectors"
+	_sectors_page.set_pressed_no_signal(page == "sectors")
+	_director_page.set_pressed_no_signal(page == "director")
+	_dashboard_page.set_pressed_no_signal(page == "dashboard")
 	_status.text = ""
 	refresh()
 

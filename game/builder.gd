@@ -159,7 +159,8 @@ var _faction_overlay: PanelContainer
 var _faction_cards := {} # faction id -> its Join button
 var _refused: Control # why the server turned this character away (at hello, or later: Net.refused)
 var _refused_text: Label
-var _refused_key: HBoxContainer # an admin key to try, when the character is admins only
+var _refused_key: HBoxContainer # an admin key (or the account's password) to try again with
+var _refused_edit: LineEdit
 var _faction_armed := "" # the faction whose Join was tapped once; a second tap joins
 var _faction_armed_at := 0.0
 var _last_alert_at := -1.0
@@ -181,6 +182,7 @@ func _ready() -> void:
 	Net.state_changed.connect(_refresh)
 	Net.chat_received.connect(_on_chat)
 	Net.server_error.connect(_on_server_error)
+	Net.war_receipt.connect(func(r): toast(str(r.get("text", "")), C_TEAL if float(r.get("capped", 0)) == 0.0 else C_AMBER, 5.0))
 	Net.connection_changed.connect(func(online): toast("Connected" if online else "Connection lost, retrying...", C_TEAL if online else C_RED))
 	_title.text = "Connecting..."
 
@@ -897,7 +899,8 @@ func _build_refused(layer: Control) -> void:
 	_refused_text = _label(col, 16)
 	_refused_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	# The key can be typed here as well as on the start screen: it's saved for this server (only)
-	# and goes with every hello to it from now on (reconnects too).
+	# and goes with every hello to it from now on (reconnects too). After a wrong password, the
+	# same box takes the account's password instead (kept in memory only).
 	_refused_key = HBoxContainer.new()
 	_refused_key.add_theme_constant_override("separation", 8)
 	col.add_child(_refused_key)
@@ -906,14 +909,20 @@ func _build_refused(layer: Control) -> void:
 	key.secret = true
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_refused_key.add_child(key)
+	_refused_edit = key
 	var retry := Button.new()
 	retry.text = "Try again"
 	_refused_key.add_child(retry)
 	var try_key := func(_t = ""):
 		if key.text.strip_edges() == "":
 			return
+		if key.placeholder_text == "Password":
+			Net.refused = ""
+			Net.sign_in(key.text)
+			key.text = ""
+			return
 		Net.save_admin_key(Net.server_url(), key.text)
-		Net.send({"type": "hello", "role": "builder", "name": Net.my_name, "admin_key": Net.admin_key()})
+		Net.send(Net.hello_message())
 	retry.pressed.connect(try_key)
 	key.text_submitted.connect(try_key)
 
@@ -925,12 +934,16 @@ func _on_server_error(reason: String) -> void:
 		var why := Net.refused if Net.refused != "" else reason
 		var text := why.left(1).to_upper() + why.substr(1) + "."
 		var admins_only := why.contains("admins only")
-		if admins_only and Net.admin_key() != "":
+		var password := why.begins_with("wrong password")
+		if password:
+			text += "\n\nType the password again."
+		elif admins_only and Net.admin_key() != "":
 			text += "\n\nThat admin key didn't match. Type it again, or play under another name."
 		elif admins_only:
 			text += "\n\nOnly a server admin can play this character: type the admin key, or play under another name."
 		_refused_text.text = text
-		_refused_key.visible = admins_only
+		_refused_key.visible = admins_only or password
+		_refused_edit.placeholder_text = "Password" if password else "Admin key"
 		_refused.visible = true
 		_title.text = "Not connected"
 		_subtitle.text = "As %s" % Net.my_name

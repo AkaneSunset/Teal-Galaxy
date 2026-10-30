@@ -13,12 +13,15 @@ ground, in real-time sector battles commanded from a walkable fleet carrier.
 
 | Folder | What it is |
 | --- | --- |
-| `game/` | One Godot 4.5 project with two modes: **Builder** (phone) and **Explorer** (PC) |
-| `server/` | The galaxy server (Node.js + WebSockets). Holds the shared galaxy and keeps every app in sync |
+| `game/` | One Godot 4.7 project with two modes: **Builder** (phone) and **Explorer** (PC) |
+| `server/` | The galaxy server (Node.js + WebSockets). Holds the shared galaxy and keeps every app in sync. New modules are TypeScript, which Node runs as is |
+| `server/tunables.json` | Every rule number the server plays by, in one file it reloads while running |
+| `docs/monetization-charter.md` | What may and may never be sold: no paid power, no paid randomness |
 
 ## Run it on one computer
 
-You need [Godot 4.5](https://godotengine.org/download) and [Node.js 20+](https://nodejs.org).
+You need [Godot 4.7.2](https://godotengine.org/download) and [Node.js 22.18+](https://nodejs.org) (the
+server's TypeScript modules need it; older versions stop with a message saying so).
 
 **Quick way:** set `GODOT` to your Godot program and run the launcher. It starts the server,
 a phone-shaped Builder window, and two Explorer windows. It re-imports the project first, which
@@ -35,8 +38,11 @@ set GODOT=C:\path\to\Godot.exe & run_local.bat   # Windows
 1. Start the server: `cd server && npm install && npm start`
 2. Open `game/project.godot` in Godot.
 3. Debug > Customize Run Instances: enable multiple instances, set 3, and give them launch arguments
-   `-- --mode=builder --name=Akane`, `-- --mode=explorer --name=PilotA`, `-- --mode=explorer --name=PilotB`.
-4. Press Play. Without arguments the game shows a start screen where you pick a mode.
+   `-- --mode=builder --name=Akane --account=Akane --password=local-play`,
+   `-- --mode=explorer --name=PilotA --account=PilotA --password=local-play` and
+   `-- --mode=explorer --name=PilotB --account=PilotB --password=local-play`.
+4. Press Play. Without arguments the game shows a start screen where you pick a mode and
+   [sign in](#accounts-and-side-locks).
 
 **Demo mode:** start the server with `DEMO=1 npm start` and every Builder base gets 2000 metal, 200 ice,
 200 alloy, 40 isotope cells, a few plans and 5000 credits, enough to try every building, defence, warship and
@@ -51,8 +57,42 @@ are waived, a captured planet locks for 5 minutes instead of a week, and every p
 (the game tests use 10 to 20).
 
 **Admins:** start the server with `ADMIN_KEY=<any secret> npm start`, and apps that say hello with
-that key can play the Coma Conglomerate and steer its AI director (see
+that key can play the Coma Conglomerate, steer its AI director and open the server dashboard (see
 [The Coma Conglomerate](#the-coma-conglomerate-admins-and-the-ai-director)).
+
+**Signing in:** a server requires [accounts](#accounts-and-side-locks) unless it runs the demo
+(`DEMO=1`) or is started with `SIGN_IN=optional`, which let guests play without one.
+
+**The rules file:** every number the war plays by (campaign points, order rewards, the war-supply shares
+and multiplier, account limits, the telemetry budgets, the sector benchmark) is in
+`server/tunables.json`, or the file `TUNABLES_FILE` names. The server checks it when it starts and
+whenever it changes on disk: a good file takes effect at once, without a restart, and the apps are sent
+the new numbers; a bad one (a missing or unknown field, a number out of range) is refused with the
+reason, and the server keeps the numbers it had.
+
+**Telemetry:** the server times its loops (sector battles, the other modes, the galaxy, raids) against
+their tick budget, raises an alert when a minute's p99 goes over, and records sign-ins, refusals and
+war supply. It writes them to `server/telemetry.jsonl`, or the file `TELEMETRY_FILE` names (`off` for
+none), and admins see them on the [dashboard](#the-server-dashboard).
+
+## Accounts and side locks
+
+You sign in once and play several characters (`server/accounts.ts`). Type an **account** name and
+**password** on the start screen, next to the character's name (or start the game with
+`-- --account=<name> --password=<password>`). The first sign-in with a new account name opens the
+account; its password needs 6 characters or more. Every character you play from then on, Builders and
+pilots alike, belongs to that account, up to 8 of them, and no other account can play them. The server
+keeps a salted hash of the password, never the password itself, and the app never saves it: it keeps
+the server's session token instead, so it reconnects without asking again (until the server restarts).
+After 5 wrong passwords in a minute an account waits a minute before the next try. A wrong password
+on the phone turns its retry box into a password box.
+
+**One side per front.** Once any of your characters fights for a faction on a contested planet (queues
+for or joins one of its campaign matches, starts or joins a sector battle there, or donates war supply
+to it), none of your account's characters can fight there for another faction until that planet's
+campaign ends. The refusal says which faction and character took the side, and how long is left. Other
+fronts are unaffected, and guests on a demo server have no locks. `sideLock.on` in the rules file turns
+the check off.
 
 ## The Builder screen
 
@@ -261,6 +301,29 @@ whose side of a running match on the planet has room (8 commanders a side) joins
 match is fought on one of the planet's sector maps but takes no sector: its winner scores instead. The
 RTS view opens by itself when a match starts, wherever you are. Facility Battles are matched the same
 way, and Supremacy and Space Battles too.
+
+### War supply on the fronts
+
+Every front keeps a **war-supply ledger** for its campaign (`server/ledger.ts`): how much war supply
+each faction in it has sent, and from where. For now it's the record of each side's effort; campaign
+points still decide the planet.
+
+- **Sources:** Builder donations to the front (1 for every 20 War Merit of goods), battles (every pilot
+  in a campaign match: 10 for a win and 4 for a loss, half against AI only), the arena (Facility
+  Battles, paid the same way) and the Frontier (to come).
+- **No daily cap.** A side can send as much as it likes. But the arena may be **at most 15%** of a
+  faction's war supply on a front, and the Frontier at most 40%: whatever would go past that isn't
+  credited, and the receipt says so.
+- **The underdog multiplier.** Each faction's war supply is multiplied by 0.8 to 1.3 by its strength as
+  the Coma director scores it: the weakest faction's counts for more, the strongest's for less. It
+  touches war supply only, never campaign points or rewards.
+- **Receipts.** Whoever earned war supply is told at once, with the sum ("+13 war supply for the
+  Luminar Accord on Halcyon from battles (10 x1.3 underdog multiplier)"), on the phone as a toast and on
+  PC in the HUD. The server keeps each character's last 20.
+- **Where to see it:** the campaign head of the **Sector Battles** screen shows every side's war supply
+  this campaign by source, and your side's multiplier; the Builder's **Supply** tab shows your side's on
+  the front you're donating to; admins see every front on the [dashboard](#the-server-dashboard). When a
+  campaign ends its ledger goes into the front's history (the last 4) and the next starts from nothing.
 
 ### Faction orders
 
@@ -495,7 +558,9 @@ from stock, paid their share of the reward as they go; the goods go in the pilot
 cancel it and get back whatever hasn't been paid.
 
 **War supply and War Merit.** The War screen's **Supply** tab gives goods from stock to your faction's
-war supply in your system, which sector battles will spend. Each unit earns War Merit by its value
+war supply in your system, which sector battles will spend. When your faction is in a campaign on a
+planet of your system, pick the front the goods go to (*For the front at*): they count for it in its
+[war-supply ledger](#war-supply-on-the-fronts), and your account takes your faction's side there. Each unit earns War Merit by its value
 (metal 2, ice 3, any other item what it's worth), and Merit ranks make your outposts produce more:
 
 | Rank | War Merit | Outposts produce |
@@ -558,6 +623,20 @@ diamond on the maps) with its ships, and they fight, hold orbit and count for or
 fleet. They need no supplies, and they stand down when they get home to Comae. The war log says what
 they do ("A Coma armada of 2 Destroyers and 3 Frigates is heading for Teal Prime") but never shows the
 director's numbers. Players are never sent the director's settings, or which armadas an admin sent.
+
+### The server dashboard
+
+Admins have a third page on the PC War terminal, *Dashboard (admin)*, which asks the server for its
+numbers every 3 seconds while it's open (`admin_dashboard`; anyone else is refused):
+
+- who's online: pilots and Builders, how many accounts and guests, and whether the server requires
+  sign-in;
+- the underdog multiplier of each faction;
+- every front: its holder, when its campaign ends, campaign points, pilots over it, queued and in its
+  matches, and each side's war supply with its rate over the last hour;
+- each loop's tick times over the last minute (p50, p99 and max), flagged when the p99 is over the
+  budget (`telemetry.tickBudgetMs`, 60 ms);
+- telemetry's latest alerts and events (sign-ins and refusals, side locks, war supply).
 
 ## Raids: outposts and the pilots who rob them
 
@@ -866,8 +945,17 @@ Sign every build with the same keystore so a new APK installs over the old one.
 ## Tests
 
 ```bash
-cd server && npm test     # every server rule (jobs, raids, the war, the director, admin keys, shared spaces, sector battles) and games over real WebSockets
+cd server && npm test     # every server rule (jobs, raids, the war, the director, admin keys, accounts, the ledger, the rules file, sector battles) and games over real WebSockets
+npm run typecheck         # the TypeScript modules, checked with tsc (npm install first)
+npm run bench             # the sector tick benchmark
 ```
+
+**The sector benchmark** (`server/bench/sector.ts`) runs one Sector Battle flat out with 32 pilots and
+400 units kept on the field, fighting, for 3000 ticks, timing each tick as the server runs it (the
+step, and a snapshot to every pilot every other tick). It passes when the p99 tick is within 60 ms of
+the 100 ms tick (it takes about 17 ms); if one day it doesn't, it says which of the fallbacks is next
+(worker threads, then 250 units). `node bench/sector.ts --units=250 --ticks=600 --json` tries other
+sizes. `npm test` runs a short version.
 
 The game tests play against a running server, each on a **fresh galaxy**: give the server a save file
 that doesn't exist yet, and a port of its own if you run several at once.
@@ -876,6 +964,7 @@ that doesn't exist yet, and a port of its own if you run several at once.
 (instant buildings). Run the two roles at the same time: the Builder joins the Terran Compact, posts the
 ice job, founds a Fuel Depot on a sector of Cinder with the ice and opens the War screen; the pilot
 joins the Ashen Collective, mines and delivers the ice, and opens the war map and the War terminal.
+Both sign in to accounts of their own, as this server requires.
 
 ```bash
 cd server && rm -f /tmp/smoke.json && SAVE_FILE=/tmp/smoke.json PORT=9000 BUILD_SPEED=0 npm start
@@ -887,6 +976,17 @@ For the admin check, start the server with `ADMIN_KEY=letmein` as well and add `
 to both: they check that the Coma Conglomerate is on the faction cards and the Director opens. Run
 them without the key against the same kind of server and they check that neither shows. Each run
 prints PASS or FAIL (instructions at the top of `game/tests/smoke.gd`).
+
+`game/tests/signin_test.tscn` checks accounts in the game against a server that requires sign-in, with
+an admin key: a guest and a wrong password are turned away, a pilot signs in and opens an account, the
+account's Builder joins the Terran Compact and donates to the front at Cinder and gets its receipt, the
+pilot sees the front's war supply, then joins the Ashen Collective and is refused Cinder with the side
+lock's reason, and the admin dashboard opens with the fronts.
+
+```bash
+cd server && rm -f /tmp/signin.json && SAVE_FILE=/tmp/signin.json PORT=9013 ADMIN_KEY=k3y npm start
+godot --headless --path game res://tests/signin_test.tscn -- --server=ws://127.0.0.1:9013 --admin-key=k3y
+```
 
 `game/tests/raid.tscn` plays a whole raid against a running server (`DEMO=1 BUILD_SPEED=0`): a
 Luminar Accord Builder founds an Extractor on a sector of Halcyon, lays it out and upgrades it to

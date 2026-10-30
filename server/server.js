@@ -12,12 +12,25 @@
 //   BUILD_SPEED=0 node server.js   (buildings finish instantly, for the game smoke tests)
 //   ADMIN_KEY=<secret> node server.js   (apps that say hello with this admin_key are admins: they can
 //                                        play the Coma Conglomerate and steer its AI director)
+//   SIGN_IN=optional node server.js   (guests may play without an account; the demo allows them
+//                                      anyway. Otherwise every app signs in: accounts.ts)
+//   TUNABLES_FILE=x.json node server.js   (the rule numbers, reloaded when the file changes; default
+//                                          tunables.json)
+//   TELEMETRY_FILE=x.jsonl node server.js   (the telemetry log; default telemetry.jsonl, "off" for none)
+//
+// Needs Node 22.18 or newer: the newer modules are TypeScript (*.ts), which Node runs as it is.
+
+if (!process.features.typescript) {
+  console.error(`Teal Galaxy's server needs Node 22.18 or newer (this is ${process.version}): its newer modules are TypeScript.`);
+  process.exit(1);
+}
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
+const A = require('./accounts.ts');
 const B = require('./battle');
 const C = require('./campaign');
 const DF = require('./defense');
@@ -29,9 +42,12 @@ const D = require('./director');
 const F = require('./factions');
 const G = require('./galaxy');
 const H = require('./heist');
+const L = require('./ledger.ts');
 const N = require('./navy');
 const S = require('./sites');
 const SP = require('./spaces');
+const T = require('./tunables.ts');
+const TM = require('./telemetry.ts');
 const W = require('./war');
 
 const TICK_MS = 5000;
@@ -79,7 +95,7 @@ const PILOT_ONLY = {
   starfight_move: 'only pilots fly', starfight_fire: 'only pilots fly', starfight_missile: 'only pilots fly', starfight_torpedo: 'only pilots fly', starfight_class: 'only pilots fly', starfight_leave: 'only pilots fly',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
-const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order'];
+const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order', 'admin_dashboard'];
 
 // Whether a hello's admin_key is the server's ADMIN_KEY (none set: nobody is an admin). The bytes
 // are compared in constant time, so the key can't be found a character at a time; a key of another
@@ -94,9 +110,12 @@ function adminCheck(secret) {
 }
 
 // `demoWar` turns the demo war (war.js setDemo) on or off for the whole process; left out, it stays
-// as it is. `battleSpeed` is BATTLE_SPEED.
-function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, demoWar, buildSpeed = null, adminKey = null, battleSpeed = 1, queueWait = null } = {}) {
+// as it is. `battleSpeed` is BATTLE_SPEED. `signIn`: 'required' (every app signs in to an account)
+// or 'optional' (guests may play characters no account owns). `tunablesFile`: watched and reloaded
+// while the server runs (null: the numbers stay as they are).
+function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Date.now, demo = false, demoWar, buildSpeed = null, adminKey = null, battleSpeed = 1, queueWait = null, signIn = 'optional', tunablesFile = null } = {}) {
   if (demoWar !== undefined) W.setDemo(demoWar);
+  const signInRequired = signIn === 'required';
   let galaxy = G.newGalaxy();
   if (saveFile && fs.existsSync(saveFile)) {
     galaxy = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
@@ -144,15 +163,17 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // battles running now (`battles`), which are never saved.
   // The faction orders are secret: each faction's players see their own (and what their
   // intelligence has revealed), in the orders and in the war log.
+  // Accounts (password hashes) and the ledger's receipts never go to any app; everyone sees the
+  // ledger's totals for every front.
   function playerView(faction = null) {
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
     const orders = O.viewFor(galaxy, faction, now());
     const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
-    return { ...galaxy, director: undefined, war: { ...galaxy.war, fleets, orders, log }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -218,11 +239,54 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     else if (galaxy.bases?.[name]) galaxy.bases[name].credits = (galaxy.bases[name].credits || 0) + credits;
   }
 
+  // --- Side locks and the war-supply ledger -----------------------------------------------------
+
+  const factionName = (f) => F.FACTIONS[f]?.name ?? f;
+
+  // Whether a character's account may act for `faction` on front `planet` (accounts.ts).
+  function sideCheck(me, planet, faction) {
+    const r = A.checkSide(galaxy, me.account ?? null, planet, faction, now(), { planetName: W.planet(galaxy, planet)?.name ?? planet, factionName });
+    if (!r.ok) TM.event('side_refused', { account: me.account, character: A.charKey(me.role, me.name), planet, faction });
+    return r;
+  }
+
+  // The character's account takes `faction`'s side on `planet` until the campaign there ends.
+  function takeSide(me, planet, faction) {
+    const c = galaxy.war.campaigns?.[planet];
+    if (c && A.takeSide(galaxy, me.account ?? null, planet, faction, c.endsAt, A.charKey(me.role, me.name), now())) save();
+  }
+
+  // The apps playing a character.
+  function appsOf(role, name) {
+    return [...clients.values()].filter((c) => c.role === role && c.name === name);
+  }
+
+  // War supply to the ledger for one character (source: 'builder', 'battle' or 'arena'); the
+  // receipt goes to their apps.
+  function supply(role, name, planet, faction, source, base) {
+    const who = A.charKey(role, name);
+    const r = L.credit(galaxy, { planet, faction, source, base, who, factionName }, now());
+    if (!r) return null;
+    TM.event('war_supply', { character: who, planet, faction, source, base: r.base, multiplier: r.multiplier, credited: r.credited, capped: r.capped });
+    for (const c of appsOf(role, name)) send(c.ws, { type: 'war_receipt', receipt: r });
+    return r;
+  }
+
+  // A campaign match ended: every pilot in it gets war supply for their faction on its planet (a
+  // win's or a loss's, less against AI only). `who`: [{name, faction, won}].
+  function supplyMatch(planet, mode, who, vsAi) {
+    const m = T.get().ledger.match;
+    const source = mode === 'facility' ? 'arena' : 'battle';
+    const k = vsAi || C.MODES[mode]?.alwaysAi ? m.aiShare : 1;
+    for (const p of who) if (p.faction) supply('explorer', p.name, planet, p.faction, source, (p.won ? m.win : m.loss) * k);
+  }
+
   const battles = B.createBattles({
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onCampaignEnd: (b, winner, vsAi) => {
       const side = winner === b.attacker ? 'a' : 'd';
       won(b.planet, 'sector', winner, side === 'a' ? b.defender : b.attacker, [...b.pilots.values()].filter((p) => p.side === side).map((p) => p.name));
+      supplyMatch(b.planet, 'sector', [...b.pilots.values()].map((p) => ({ name: p.name, faction: p.side === 'a' ? b.attacker : b.defender, won: p.side === side })), vsAi);
       return C.score(galaxy, b.planet, 'sector', winner, vsAi, now());
     },
   });
@@ -232,6 +296,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     onEnd: (d, winner) => {
       const squad = d.result === 'won';
       won(d.planet, 'defense', winner, squad ? d.enemy : d.faction, squad ? [...d.pilots.values()].map((p) => p.name) : []);
+      supplyMatch(d.planet, 'defense', [...d.pilots.values()].map((p) => ({ name: p.name, faction: d.faction, won: squad })), true);
       return C.score(galaxy, d.planet, 'defense', winner, true, now(), squad ? DF.bonusPoints(d) : 0);
     },
   });
@@ -242,6 +307,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     onEnd: (f, winner, vsAi) => {
       won(f.planet, 'facility', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && b.side === f.result).map((b) => b.name));
+      supplyMatch(f.planet, 'facility', [...f.bodies.values()].filter((b) => !b.ai).map((b) => ({ name: b.name, faction: f.factions[b.side], won: b.side === f.result })), vsAi);
       return C.score(galaxy, f.planet, 'facility', winner, vsAi, now());
     },
   });
@@ -253,6 +319,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
     onEnd: (f, winner, vsAi) => {
       won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name));
+      supplyMatch(f.planet, 'supremacy', [...f.bodies.values()].filter((b) => !b.ai && !b.fodder).map((b) => ({ name: b.name, faction: f.factions[b.side], won: b.side === f.result })), vsAi);
       return C.score(galaxy, f.planet, 'supremacy', winner, vsAi, now());
     },
   });
@@ -262,6 +329,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onEnd: (f, winner, vsAi) => {
       won(f.planet, 'space', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.craft.values()].filter((c) => !c.ai && c.side === f.result).map((c) => c.name));
+      supplyMatch(f.planet, 'space', [...f.craft.values()].filter((c) => !c.ai).map((c) => ({ name: c.name, faction: f.factions[c.side], won: c.side === f.result })), vsAi);
       const pts = C.score(galaxy, f.planet, 'space', winner, vsAi, now());
       const wp = W.planet(galaxy, f.planet);
       const c = galaxy.war.campaigns?.[f.planet];
@@ -274,6 +342,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   const matchmaking = C.createMatchmaking({
     galaxy: () => galaxy, now, battles, defenses, facilities, supremacies, spaces: spaceBattles, where: (me) => where(me), factionOf: (me) => pilotFaction(me),
     send: (c, msg) => send(c.ws, msg), changed, wait: queueWait,
+    sides: { check: sideCheck, take: takeSide },
   });
 
   // Where a pilot is, for the battle rules: the planet the carrier they're aboard is over (its
@@ -529,6 +598,56 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     return { ...r, quiet: true };
   }
 
+  // The front a Builder's donation counts for: `planet` if their faction is in its campaign (and it
+  // isn't over), else the first such front in the Builder's system; null if there's none.
+  function donationFront(faction, planet = null) {
+    if (!faction) return null;
+    const open = (id) => {
+      const c = galaxy.war.campaigns?.[id];
+      return c && c.entrants.includes(faction) && now() < c.endsAt;
+    };
+    if (planet) return open(String(planet)) ? String(planet) : null;
+    return galaxy.war.planets.find((wp) => wp.system === galaxy.system.id && open(wp.id))?.id ?? null;
+  }
+
+  // The admins' dashboard: every front (campaign points, pilots there and in its matches, war
+  // supply by faction and source, the rate over the last hour), who's online, the loops' tick
+  // timings, and the alerts and latest events from telemetry.
+  function dashboard() {
+    const t = now();
+    const lists = { sector: battles.list(), defense: defenses.list(), facility: facilities.list(), supremacy: supremacies.list(), space: spaceBattles.list() };
+    const queued = matchmaking.list();
+    const fronts = [];
+    for (const [id, c] of Object.entries(galaxy.war.campaigns || {})) {
+      const wp = W.planet(galaxy, id);
+      if (!wp) continue;
+      const inMatches = {};
+      for (const [mode, list] of Object.entries(lists)) {
+        const n = list.filter((m) => m.planet === id).reduce((a, m) => a + (m.pilots?.length || 0), 0);
+        if (n) inMatches[mode] = n;
+      }
+      const waiting = Object.values(queued[id] || {}).reduce((a, by) => a + Object.values(by).reduce((x, n) => x + n, 0), 0);
+      const over = pilots().filter((c2) => where(c2).over === id).length;
+      fronts.push({ planet: id, name: wp.name, system: wp.system, holder: wp.owner ?? null, endsAt: c.endsAt, points: c.points, over, queued: waiting, inMatches, supply: L.frontView(galaxy, id, t) });
+    }
+    const online = { builders: 0, pilots: 0, guests: 0, accounts: new Set() };
+    for (const c of clients.values()) {
+      if (!c.role) continue;
+      if (c.role === 'builder') online.builders++;
+      else online.pilots++;
+      if (c.account) online.accounts.add(c.account);
+      else online.guests++;
+    }
+    return { at: t, fronts, online: { ...online, accounts: online.accounts.size }, multipliers: L.multipliers(galaxy), telemetry: TM.snapshot(40), signIn: signInRequired ? 'required' : 'optional' };
+  }
+
+  // A hello's sign-in: { ok, key (null: a guest), token, created }, or why not.
+  function account(msg) {
+    const named = typeof msg.account === 'string' && msg.account.trim() !== '';
+    if (!named) return signInRequired ? { ok: false, reason: 'sign in with an account to play on this server' } : { ok: true, key: null };
+    return A.signIn(galaxy, { name: msg.account, password: msg.password, token: msg.token }, now());
+  }
+
   function handle(ws, me, msg) {
     if (msg.type === 'hello') {
       const role = msg.role === 'builder' ? 'builder' : 'explorer';
@@ -541,8 +660,25 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       }
       const locked = !me.admin && adminsOnly(role, name);
       if (locked) return turnAway(ws, me, locked);
+      // Signing in (accounts.ts): with an account name and its password (or the token from an
+      // earlier sign-in), or as a guest where the server allows guests.
+      const signed = account(msg);
+      if (!signed.ok) {
+        me.role = me.name = me.account = null;
+        TM.event('sign_in_refused', { account: A.keyOf(String(msg.account ?? '')) || null, character: A.charKey(role, name), reason: signed.reason });
+        return send(ws, { type: 'error', reason: signed.reason });
+      }
+      const claim = A.claim(galaxy, signed.key, role, name);
+      if (!claim.ok) {
+        me.role = me.name = me.account = null;
+        TM.event('sign_in_refused', { account: signed.key, character: A.charKey(role, name), reason: claim.reason });
+        return send(ws, { type: 'error', reason: claim.reason });
+      }
       me.role = role;
       me.name = name;
+      me.account = signed.key;
+      TM.event('sign_in', { account: signed.key, character: A.charKey(role, name), created: !!signed.created, claimed: !!claim.claimed, admin: me.admin });
+      if (signed.created || claim.claimed) save();
       const catalog = {
         sites: { grid: S.GRID, core: S.CORE, max: S.MAX_SITES, pieces: S.PIECES, obstacles: S.OBSTACLES },
         ships: N.SHIPS, hangar: N.HANGAR, shipQueueMax: N.QUEUE_MAX,
@@ -564,12 +700,16 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         demo,
         carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
         campaign: { modes: C.MODES, bonuses: C.BONUSES, aiShare: C.AI_SHARE },
+        ledger: { sources: L.SOURCE_NAMES, shares: T.get().ledger.shares, match: T.get().ledger.match, perMerit: T.get().ledger.perMerit },
+        accounts: { signIn: signInRequired ? 'required' : 'optional', charactersMax: T.get().accounts.charactersMax, sideLock: T.get().sideLock.on },
+        tunables: T.get(),
         director: { ms: D.DIRECTOR_MS, scaleMax: D.SCALE_MAX, patrolPower: D.PATROL_POWER, armadaCap: D.ARMADA_CAP, activeMs: D.ACTIVE_MS },
       };
       // A Builder gets their own home planet the first time they connect.
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
       if (demo && home) G.demoTopUp(G.econ(galaxy, home));
-      send(ws, { type: 'welcome', id: me.id, name: me.name, home, admin: me.admin, state: stateFor(me), catalog });
+      const acct = me.account ? { ...A.view(galaxy, me.account, now()), token: signed.token } : null;
+      send(ws, { type: 'welcome', id: me.id, name: me.name, home, admin: me.admin, account: acct, receipts: L.receipts(galaxy, A.charKey(me.role, me.name)), state: stateFor(me), catalog });
       if (home) {
         broadcastState(ws); // the new Builder already has it
         save();
@@ -651,10 +791,31 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'fill_contract':
         result = G.fillContract(galaxy, me.name, msg.contract, msg.qty);
         break;
-      case 'donate':
+      case 'donate': {
+        // To a front: the planet given, else the first in the Builder's system whose campaign
+        // their faction is in. The goods count for it in the ledger, and the account takes the
+        // faction's side there.
+        const faction = galaxy.bases?.[me.name]?.faction ?? null;
+        const planet = donationFront(faction, msg.planet);
+        if (msg.planet && !planet) {
+          result = { ok: false, reason: "your faction isn't in a campaign on that planet" };
+          break;
+        }
+        const side = planet ? sideCheck(me, planet, faction) : { ok: true };
+        if (!side.ok) {
+          result = side;
+          break;
+        }
         result = G.donate(galaxy, me.name, msg.item, msg.qty);
-        if (result.ok) O.donated(galaxy, galaxy.bases?.[me.name]?.faction ?? null, me.name, msg.qty * (G.MERIT_VALUE[msg.item] || 0), now());
+        if (!result.ok) break;
+        const merit = msg.qty * (G.MERIT_VALUE[msg.item] || 0);
+        O.donated(galaxy, faction, me.name, merit, now());
+        if (planet) {
+          takeSide(me, planet, faction);
+          supply('builder', me.name, planet, faction, 'builder', merit * T.get().ledger.perMerit);
+        }
         break;
+      }
       case 'intel_supply': {
         // Intelligence to High Command: an enemy faction's running order, revealed.
         const e = galaxy.bases?.[me.name];
@@ -728,6 +889,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'admin_capture':
         result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
         break;
+      case 'admin_dashboard':
+        return send(ws, { type: 'dashboard', ...dashboard() });
       case 'place_piece':
         result = G.placePiece(galaxy, msg.planet, msg.piece, msg.x, msg.y);
         break;
@@ -786,11 +949,18 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         return;
       // --- Sector battles ---
       case 'battle_start':
-      case 'battle_join':
+      case 'battle_join': {
         if (tooFast(me, 'battle', BATTLE_JOINS_PER_S)) return;
-        result = msg.type === 'battle_start' ? battles.start(me, pilotFaction(me), msg.planet, msg.sector, where(me)) : battles.join(me, pilotFaction(me), msg.battle, where(me));
+        // One side per front per account: checked for the battle's planet, taken once in.
+        const planet = msg.type === 'battle_start' ? String(msg.planet || '') : battles.list().find((b) => b.id === msg.battle)?.planet;
+        const faction = pilotFaction(me);
+        const side = planet && faction ? sideCheck(me, planet, faction) : { ok: true };
+        if (!side.ok) return send(ws, { type: 'error', reason: side.reason });
+        result = msg.type === 'battle_start' ? battles.start(me, faction, msg.planet, msg.sector, where(me)) : battles.join(me, faction, msg.battle, where(me));
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
+        else if (planet && faction) takeSide(me, planet, faction);
         return;
+      }
       case 'campaign_queue':
         if (tooFast(me, 'battle', BATTLE_JOINS_PER_S)) return;
         result = matchmaking.join(me, msg.planet, msg.mode);
@@ -912,7 +1082,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     });
   });
 
-  const ticker = setInterval(() => {
+  const ticker = setInterval(TM.timed('galaxy', () => {
     try {
       if (G.tick(galaxy, now())) changed();
       if (C.tick(galaxy, now())) changed();
@@ -920,8 +1090,20 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     } catch (err) {
       console.error('error in the galaxy tick:', err);
     }
-  }, tickMs);
-  const raidTicker = setInterval(raidTick, RAID_TICK_MS);
+  }), tickMs);
+  const raidTicker = setInterval(TM.timed('raids', raidTick), RAID_TICK_MS);
+  // The rule numbers, reloaded when their file changes: everyone's catalog gets them again.
+  const unwatch = tunablesFile
+    ? T.watch(tunablesFile, (r) => {
+        if (!r.ok) {
+          TM.alert('tunables', `${path.basename(tunablesFile)} was refused, the numbers in use stay: ${r.errors.join('; ')}`);
+          return;
+        }
+        TM.event('tunables_reloaded', { file: path.basename(tunablesFile) });
+        broadcast({ type: 'tunables', tunables: T.get() });
+        changed();
+      })
+    : () => {};
 
   return {
     wss,
@@ -939,6 +1121,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     close() {
       clearInterval(ticker);
       clearInterval(raidTicker);
+      unwatch();
       battles.close();
       defenses.close();
       facilities.close();
@@ -965,10 +1148,15 @@ if (require.main === module) {
   const battleSpeed = Number(process.env.BATTLE_SPEED) > 0 ? Number(process.env.BATTLE_SPEED) : 1;
   // QUEUE_WAIT: seconds a lone faction waits in a matchmaking queue before fighting AI (for tests).
   const queueWait = Number(process.env.QUEUE_WAIT) > 0 ? Number(process.env.QUEUE_WAIT) * 1000 : null;
-  const { wss } = startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed, queueWait });
+  // SIGN_IN=optional lets guests play; the demo always does.
+  const signIn = demo || process.env.SIGN_IN === 'optional' ? 'optional' : 'required';
+  const tunablesFile = process.env.TUNABLES_FILE || T.FILE;
+  const telemetry = process.env.TELEMETRY_FILE || path.join(__dirname, 'telemetry.jsonl');
+  TM.configure({ file: telemetry === 'off' ? null : telemetry });
+  const { wss } = startServer({ port, saveFile, demo, demoWar: demo, buildSpeed, adminKey, battleSpeed, queueWait, signIn, tunablesFile });
   wss.on('listening', () => {
     console.log(
-      `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}`
+      `Galaxy server listening on ws://0.0.0.0:${port}${demo ? ' (demo mode: bases start rich, the demo war is on)' : ''}${battleSpeed !== 1 ? ` (battles at ${battleSpeed}x)` : ''}${adminKey ? ' (admin key set)' : ''}${signIn === 'optional' ? ' (guests may play without signing in)' : ''}`
     );
     // The addresses to type on a phone on the same Wi-Fi.
     for (const list of Object.values(os.networkInterfaces())) {

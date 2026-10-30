@@ -232,6 +232,47 @@ static func fleets_at(system_id: String) -> Array:
 
 
 ## The systems that can be fought over: every one that isn't a faction's capital.
+## A front's war supply this campaign (the server's ledger.ts), as everyone may see it:
+## {"factions": {faction: {"total", "sources", "capped", "perHour"}}, "history", "multipliers"}.
+static func front_supply(planet_id: String) -> Dictionary:
+	var f = war().get("ledger", {}).get("fronts", {}).get(planet_id)
+	return f if f is Dictionary else {}
+
+
+## A faction's underdog multiplier on war supply (1 when the server doesn't weigh it).
+static func supply_multiplier(faction: String) -> float:
+	return float(war().get("ledger", {}).get("multipliers", {}).get(faction, 1.0))
+
+
+## One line per faction with war supply on a front: its total and where it came from, and what the
+## arena and Frontier shares kept out. Empty when nobody has any yet.
+static func supply_lines(planet_id: String) -> Array:
+	var names: Dictionary = Net.catalog.get("ledger", {}).get("sources", {})
+	var out := []
+	var factions_in: Dictionary = front_supply(planet_id).get("factions", {})
+	for f in faction_ids():
+		if not factions_in.has(f):
+			continue
+		var s: Dictionary = factions_in[f]
+		var parts := []
+		for src in ["builder", "battle", "arena", "frontier"]:
+			var n := float(s.get("sources", {}).get(src, 0))
+			if n > 0:
+				parts.append("%s %s" % [str(names.get(src, src)), _num(n)])
+		var capped := 0.0
+		for src in s.get("capped", {}):
+			capped += float(s.capped[src])
+		var line := "%s %s (%s)" % [faction_name(f), _num(float(s.get("total", 0))), ", ".join(parts) if not parts.is_empty() else "nothing yet"]
+		if capped > 0:
+			line += ", %s over the source shares" % _num(capped)
+		out.append(line)
+	return out
+
+
+static func _num(x: float) -> String:
+	return str(int(x)) if is_equal_approx(x, roundf(x)) else "%.1f" % x
+
+
 static func contested_systems() -> Array:
 	return war().get("systems", []).filter(func(s): return s.get("capitalOf") == null)
 

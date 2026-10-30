@@ -10,6 +10,8 @@ call npm install --silent
 start "Galaxy server" node server.js
 popd
 timeout /t 1 >nul
-start "" "%GODOT%" --path game -- --mode=builder --name=Akane
-start "" "%GODOT%" --path game -- --mode=explorer --name="Pilot A"
-start "" "%GODOT%" --path game -- --mode=explorer --name="Pilot B"
+rem Each window signs in to an account of its own (opened the first time), so side locks never tie
+rem the two pilots together.
+start "" "%GODOT%" --path game -- --mode=builder --name=Akane --account=Akane --password=local-play
+start "" "%GODOT%" --path game -- --mode=explorer --name="Pilot A" --account="Pilot A" --password=local-play
+start "" "%GODOT%" --path game -- --mode=explorer --name="Pilot B" --account="Pilot B" --password=local-play

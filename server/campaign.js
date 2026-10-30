@@ -15,6 +15,7 @@
 
 const F = require('./factions');
 const SUP = require('./supremacy');
+const T = require('./tunables.ts');
 const W = require('./war');
 
 const DAY = 24 * 3600_000;
@@ -23,10 +24,9 @@ const DEMO_CYCLE_MS = 30 * 60_000; // the demo war's campaigns...
 const DEMO_FINAL_MS = 5 * 60_000; // ...and their final push
 const FINAL_MS = DAY; // the final push: wins count double
 const ZONE = 'America/New_York';
-const AI_SHARE = 0.5; // a win against AI only scores this much
 
-// Game modes. `points`: about 1 per 2.5 minutes of a typical match. `alwaysAi`: fought
-// against AI troops only, so a win always scores half.
+// Game modes. `points`: about 1 per 2.5 minutes of a typical match (tunables campaign.modes, kept
+// up to date here). `alwaysAi`: fought against AI troops only, so a win always scores half.
 const MODES = {
   sector: { name: 'Sector Battles', kind: 'RTS conquest', points: 10, minutes: 25, sides: 8, open: true },
   supremacy: { name: 'Supremacy', kind: 'FPS control points, then a ship assault', points: 8, minutes: 20, sides: 16, open: true },
@@ -34,6 +34,9 @@ const MODES = {
   facility: { name: 'Facility Battles', kind: 'FPS team against team', points: 4, minutes: 10, sides: 8, open: true },
   defense: { name: 'Sector Defense', kind: 'FPS co-op waves against AI', points: 6, minutes: 15, sides: 4, open: true, alwaysAi: true },
 };
+T.onReload((t) => {
+  for (const m of Object.keys(MODES)) MODES[m].points = t.campaign.modes[m].points;
+});
 
 // Each planet's built-in bonus for whoever holds it, in one mode.
 const BONUSES = {
@@ -149,9 +152,11 @@ function tick(g, now = Date.now()) {
   return changed;
 }
 
-// What a won match scores: the mode's points, half against AI only, double in the final push.
+// What a won match scores: the mode's points, half against AI only (tunables campaign.aiShare),
+// double in the final push (campaign.finalMultiplier).
 function worth(c, mode, vsAi, now) {
-  return MODES[mode].points * (vsAi || MODES[mode].alwaysAi ? AI_SHARE : 1) * (now >= c.finalAt ? 2 : 1);
+  const t = T.get().campaign;
+  return MODES[mode].points * (vsAi || MODES[mode].alwaysAi ? t.aiShare : 1) * (now >= c.finalAt ? t.finalMultiplier : 1);
 }
 
 // A match on a planet ended: its winner scores for the campaign (if it's in it). Returns the points.
@@ -159,7 +164,7 @@ function worth(c, mode, vsAi, now) {
 function score(g, planetId, mode, winner, vsAi, now = Date.now(), extra = 0) {
   const c = g.war.campaigns?.[planetId];
   if (!c || !winner || !c.entrants.includes(winner) || now >= c.endsAt) return 0;
-  const pts = worth(c, mode, vsAi, now) + extra * (now >= c.finalAt ? 2 : 1);
+  const pts = worth(c, mode, vsAi, now) + extra * (now >= c.finalAt ? T.get().campaign.finalMultiplier : 1);
   c.points[winner] += pts;
   c.wins[winner] += 1;
   c.matches += 1;
@@ -180,7 +185,9 @@ const FILL_MS = 1000;
 // facility.js createFacilities(), `supremacies` supremacy.js createSupremacies(), `spaces` space.js
 // createSpaces();
 // `where(me)` says where a pilot is (the planet their carrier is over); `factionOf(me)` their side.
-function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, supremacies = null, spaces = null, where, factionOf, send, changed, wait = null }) {
+// `sides`: the side locks of accounts.ts, as { check(me, planet, faction), take(me, planet, faction) }:
+// checked when a pilot queues and again as they go in, taken as they go in.
+function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, supremacies = null, spaces = null, where, factionOf, send, changed, wait = null, sides = null }) {
   const queues = new Map(); // planet id -> [{ me, faction, mode, since }]
 
   function waitMs() {
@@ -212,6 +219,8 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     if (!MODES[mode]) return fail('no such game mode');
     if (!MODES[mode].open) return fail(`${MODES[mode].name} isn't in the game yet`);
     if (!c.entrants.includes(faction)) return fail(`${F.the(faction)} isn't in the campaign for ${wp.name}: it needs ${Math.round(W.CARRIER_SHARE * 100)}% of the orbit when the week starts`);
+    const side = sides ? sides.check(me, wp.id, faction) : { ok: true };
+    if (!side.ok) return side;
     if (where(me).over !== wp.id) return fail(`bring your carrier into ${F.the(faction)}'s naval zone over ${wp.name} to queue`);
     if (me.battle || me.defense || me.facility || me.supremacy || me.spaceMatch) return fail("you're in a match already");
     if (mode === 'defense' && !defenses) return fail('Sector Defense is off on this server');
@@ -243,9 +252,17 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     return { ok: true };
   }
 
-  // Into a match: out of the queue, into the battle on their side (or the defense squad).
+  // Into a match: out of the queue, into the battle on their side (or the defense squad). An
+  // account that took another side on this front meanwhile (with another character) stays out.
   function place(e, b, side) {
     leave(e.me, true);
+    const lock = sides ? sides.check(e.me, b.planet, e.faction) : { ok: true };
+    if (!lock.ok) {
+      tell(e.me);
+      send(e.me, { type: 'error', reason: lock.reason });
+      return null;
+    }
+    sides?.take(e.me, b.planet, e.faction);
     const r = side === 'squad' ? defenses.enlist(e.me, b) : e.mode === 'facility' ? facilities.enlist(e.me, b, side) : e.mode === 'supremacy' ? supremacies.enlist(e.me, b, side) : e.mode === 'space' ? spaces.enlist(e.me, b, side) : battles.enlistCampaign(e.me, b, side, e.faction);
     tell(e.me);
     return r;
@@ -389,7 +406,9 @@ module.exports = {
   BONUSES,
   DEMO_CYCLE_MS,
   DEMO_FINAL_MS,
-  AI_SHARE,
+  get AI_SHARE() {
+    return T.get().campaign.aiShare;
+  },
   QUEUE_WAIT_MS,
   DEMO_QUEUE_WAIT_MS,
   bonusOf,

@@ -24,6 +24,7 @@
 const FC = require('./facility');
 const F = require('./factions');
 const N = require('./navy');
+const TM = require('./telemetry.ts');
 const W = require('./war');
 
 const TEAM_MAX = 16; // a side, AI troopers filling the empty slots
@@ -794,7 +795,7 @@ function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts 
       for (const [name, c] of conns.get(f.id)) send(c, stateFor(f, fr, name));
     }
   }
-  const ticker = setInterval(tickAll, FC.TICK_MS);
+  const ticker = setInterval(TM.timed('supremacy', tickAll), FC.TICK_MS);
 
   function running(planet) {
     return [...matches.values()].filter((f) => !f.result && f.planet === planet);
