@@ -83,7 +83,7 @@ const PILOT_ONLY = {
   battle_start: 'only pilots fight sector battles', battle_join: 'only pilots fight sector battles', battle_leave: 'only pilots fight sector battles',
   battle_drop: 'only pilots fight sector battles', battle_order: 'only pilots fight sector battles', battle_produce: 'only pilots fight sector battles', battle_upgrade: 'only pilots fight sector battles', battle_resign: 'only pilots fight sector battles',
   battle_possess: 'only pilots fight sector battles', battle_drive: 'only pilots fight sector battles', battle_release: 'only pilots fight sector battles',
-  campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches',
+  campaign_queue: 'only pilots queue for matches', campaign_unqueue: 'only pilots queue for matches', campaign_sites: 'only pilots queue for matches',
   defense_move: 'only pilots fight', defense_fire: 'only pilots fight', defense_leave: 'only pilots fight',
   facility_move: 'only pilots fight', facility_fire: 'only pilots fight', facility_reload: 'only pilots fight', facility_switch: 'only pilots fight',
   facility_throw: 'only pilots fight', facility_stim: 'only pilots fight', facility_use: 'only pilots fight', facility_streak: 'only pilots fight',
@@ -985,11 +985,16 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       }
       case 'campaign_queue':
         if (tooFast(me, 'battle', BATTLE_JOINS_PER_S)) return;
-        result = matchmaking.join(me, msg.planet, msg.mode);
+        result = matchmaking.join(me, msg.planet, msg.mode, msg.site ?? null);
         if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
       case 'campaign_unqueue':
         matchmaking.leave(me);
+        return;
+      case 'campaign_sites':
+        if (tooFast(me, 'sites', 2)) return;
+        result = matchmaking.watch(me, msg.planet);
+        if (!result.ok) send(ws, { type: 'error', reason: result.reason });
         return;
       case 'defense_move':
       case 'defense_fire':

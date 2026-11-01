@@ -187,6 +187,26 @@ function score(g, planetId, mode, winner, vsAi, now = Date.now(), extra = 0, nam
 
 // --- Matchmaking ----------------------------------------------------------------------------
 
+// Match sites: there are no fixed sectors to fight over. Matches pop up at random places on a
+// contested planet while pilots of its campaign sit at a holo table over it (campaign_sites, sent
+// every few seconds while the screen is open), Helldivers-style: each site is one game mode at a
+// spot on the globe, with a battlefield of its own (its seed). A pilot drops in by queueing for the
+// site; matchmaking starts its match there (or puts them in the one already running), and the site
+// stays on the globe until the match ends. Sites nobody takes go away after a while.
+const SITES_MAX = 5; // open sites (no match yet) on a planet at once
+const SITES_FIRST = 2; // popped up at once when the first pilot sits down at an empty globe
+const SITE_SPAWN_MS = [40_000, 100_000]; // a new site pops up this often (at random within)...
+const DEMO_SITE_SPAWN_MS = [8_000, 20_000]; // ...or this often in the demo war
+const SITE_LIFE_MS = [6 * 60_000, 12 * 60_000]; // an untaken site lasts this long...
+const DEMO_SITE_LIFE_MS = [2 * 60_000, 4 * 60_000]; // ...or this long in the demo war
+const WATCH_MS = 15_000; // a planet counts as watched this long after a pilot's last campaign_sites
+const SITE_KEEP_MS = 10_000; // a site whose match ended stays this long (the end shows on the globe)
+const SITE_WEIGHT = { sector: 3, supremacy: 1, space: 1, facility: 1, defense: 1 }; // how often each mode pops up
+const PLACES = [
+  ['Ash', 'Cinder', 'Iron', 'Glass', 'Salt', 'Red', 'Grey', 'Hollow', 'Broken', 'Quiet', 'Far', 'Black', 'Pale', 'High', 'Low', 'Dry', 'Cold', 'Storm'],
+  ['Ridge', 'Basin', 'Flats', 'Mesa', 'Gorge', 'Plateau', 'Crater', 'Delta', 'Steppe', 'Shelf', 'Rift', 'Dunes', 'Hollows', 'Reach', 'Fields', 'Spur', 'Narrows', 'Barrens'],
+];
+
 const QUEUE_WAIT_MS = 60_000; // a lone faction's pilots wait this long for opponents, then fight AI...
 const DEMO_QUEUE_WAIT_MS = 10_000; // ...or this long in the demo war
 const FILL_MS = 1000;
@@ -201,11 +221,128 @@ const FILL_MS = 1000;
 // `where(me)` says where a pilot is (the planet their carrier is over); `factionOf(me)` their side.
 // `sides`: the side locks of accounts.ts, as { check(me, planet, faction), take(me, planet, faction) }:
 // checked when a pilot queues and again as they go in, taken as they go in.
-function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, supremacies = null, spaces = null, where, factionOf, send, changed, wait = null, sides = null }) {
-  const queues = new Map(); // planet id -> [{ me, faction, mode, since }]
+function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, facilities = null, supremacies = null, spaces = null, where, factionOf, send, changed, wait = null, sides = null, random = Math.random }) {
+  const queues = new Map(); // planet id -> [{ me, faction, mode, since, site }]
+  const sites = new Map(); // planet id -> [{ id, mode, name, lat, lon, seed, born, until, match: { id } | null, ended }]
+  const watched = new Map(); // planet id -> when a pilot last looked at its globe
+  const nextSite = new Map(); // planet id -> when the next site pops up
+  let siteIds = 1;
 
   function waitMs() {
     return wait ?? (W.isDemo() ? DEMO_QUEUE_WAIT_MS : QUEUE_WAIT_MS);
+  }
+
+  const between = ([lo, hi]) => lo + random() * (hi - lo);
+  const demo = () => W.isDemo();
+
+  // The modes a site can be: those open, with their module on this server.
+  function siteModes() {
+    const on = { sector: true, defense: !!defenses, facility: !!facilities, supremacy: !!supremacies, space: !!spaces };
+    return Object.keys(MODES).filter((m) => MODES[m].open && on[m]);
+  }
+
+  // A new site on `planetId`: a mode (by SITE_WEIGHT), a spot on the globe away from the others, a
+  // name and a battlefield seed.
+  function popSite(planetId, t) {
+    const list = sites.get(planetId) || [];
+    const modes = siteModes();
+    let roll = random() * modes.reduce((a, m) => a + (SITE_WEIGHT[m] || 1), 0);
+    const mode = modes.find((m) => (roll -= SITE_WEIGHT[m] || 1) < 0) || modes[0];
+    let lat = 0;
+    let lon = 0;
+    for (let tries = 0; tries < 30; tries++) {
+      lat = Math.asin(random() * 1.6 - 0.8) * (180 / Math.PI); // not too near the poles
+      lon = random() * 360 - 180;
+      if (list.every((x) => arc(x, { lat, lon }) > 25)) break;
+    }
+    const name = `${PLACES[0][Math.floor(random() * PLACES[0].length)]} ${PLACES[1][Math.floor(random() * PLACES[1].length)]}`;
+    const site = { id: `s${siteIds++}`, planet: planetId, mode, name, lat: Math.round(lat * 10) / 10, lon: Math.round(lon * 10) / 10, seed: W.hash(`${planetId}/${name}/${t}/${siteIds}`), born: t, until: t + between(demo() ? DEMO_SITE_LIFE_MS : SITE_LIFE_MS), match: null, ended: null };
+    list.push(site);
+    sites.set(planetId, list);
+    return site;
+  }
+
+  // Degrees of arc between two spots on a globe.
+  function arc(a, b) {
+    const r = Math.PI / 180;
+    const c = Math.sin(a.lat * r) * Math.sin(b.lat * r) + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.cos((a.lon - b.lon) * r);
+    return Math.acos(Math.max(-1, Math.min(1, c))) / r;
+  }
+
+  // Whether the match a site started is still on.
+  function running(site) {
+    if (!site.match) return false;
+    if (site.mode === 'defense') return !!defenses?.running(site.planet).some((m) => m.id === site.match.id);
+    return versus[site.mode].running(site.planet).some((m) => m.id === site.match.id);
+  }
+
+  // Every FILL_MS: sites pop up on watched planets, untaken ones expire, ended ones go.
+  function tendSites(g, t) {
+    for (const [planetId, list] of [...sites]) {
+      const keep = list.filter((x) => {
+        if (x.match) {
+          if (!x.ended && !running(x)) x.ended = t;
+          return !x.ended || t - x.ended < SITE_KEEP_MS;
+        }
+        const queued = (queues.get(planetId) || []).some((e) => e.site === x.id);
+        return queued || t < x.until;
+      });
+      if (keep.length) sites.set(planetId, keep);
+      else sites.delete(planetId);
+    }
+    for (const [planetId, at] of [...watched]) {
+      if (t - at > WATCH_MS || !g.war.campaigns?.[planetId]) {
+        watched.delete(planetId);
+        continue;
+      }
+      const open = (sites.get(planetId) || []).filter((x) => !x.match);
+      if (open.length >= SITES_MAX) continue;
+      if (t < (nextSite.get(planetId) ?? 0)) continue;
+      popSite(planetId, t);
+      nextSite.set(planetId, t + between(demo() ? DEMO_SITE_SPAWN_MS : SITE_SPAWN_MS));
+    }
+  }
+
+  // campaign_sites: a pilot at a holo table over the planet looks at its globe. Keeps the planet
+  // watched (so sites pop up there), and answers with them.
+  function watch(me, planetId) {
+    const g = galaxy();
+    const wp = W.planet(g, String(planetId));
+    const c = wp && g.war.campaigns?.[wp.id];
+    if (!c) return fail('no campaign on that planet');
+    if (where(me).over !== wp.id) return fail(`bring your carrier over ${wp.name} to see its battles`);
+    const t = now();
+    watched.set(wp.id, t);
+    if (!(sites.get(wp.id) || []).some((x) => !x.match)) {
+      for (let i = 0; i < SITES_FIRST; i++) popSite(wp.id, t);
+      nextSite.set(wp.id, t + between(demo() ? DEMO_SITE_SPAWN_MS : SITE_SPAWN_MS));
+    }
+    send(me, { type: 'campaign_sites', planet: wp.id, sites: sitesOf(wp.id), now: t });
+    return { ok: true };
+  }
+
+  // What a pilot sees of a planet's sites: each one's mode, place, how long it's open, its match's
+  // sides and pilots (once it has one) and who's queued for it.
+  function sitesOf(planetId) {
+    return (sites.get(planetId) || []).map((x) => {
+      const out = { id: x.id, mode: x.mode, name: x.name, lat: x.lat, lon: x.lon, until: x.match ? null : x.until, ended: !!x.ended, queued: {} };
+      for (const e of queues.get(planetId) || []) if (e.site === x.id) out.queued[e.faction] = (out.queued[e.faction] || 0) + 1;
+      if (x.match) out.match = matchView(x);
+      return out;
+    });
+  }
+
+  function matchView(site) {
+    if (site.mode === 'defense') {
+      const m = defenses?.running(site.planet).find((d) => d.id === site.match.id);
+      return { id: site.match.id, sides: m ? { a: m.faction, d: m.enemy ?? null } : site.match.sides };
+    }
+    const m = versus[site.mode].running(site.planet).find((d) => d.id === site.match.id);
+    return { id: site.match.id, sides: m ? versus[site.mode].sides(m) : site.match.sides };
+  }
+
+  function siteOf(planetId, id) {
+    return (sites.get(planetId) || []).find((x) => x.id === id) || null;
   }
 
   function entryOf(me) {
@@ -218,18 +355,26 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
 
   function tell(me) {
     const on = entryOf(me);
-    send(me, on ? { type: 'campaign_queued', planet: on.planet, mode: on.e.mode, since: on.e.since } : { type: 'campaign_queued', planet: null });
+    send(me, on ? { type: 'campaign_queued', planet: on.planet, mode: on.e.mode, since: on.e.since, site: on.e.site } : { type: 'campaign_queued', planet: null });
   }
 
   // campaign_queue: a pilot aboard a carrier over the planet, of a faction in its campaign, waits
   // for one of its open modes. One queue at a time.
-  function join(me, planetId, mode) {
+  function join(me, planetId, mode, siteId = null) {
     const g = galaxy();
     const faction = factionOf(me);
     if (!faction) return fail('choose a faction first');
     const wp = W.planet(g, String(planetId));
     const c = wp && g.war.campaigns?.[wp.id];
     if (!c) return fail('no campaign on that planet');
+    let site = null;
+    if (siteId != null) {
+      site = siteOf(wp.id, String(siteId));
+      if (!site || site.ended) return fail('that battle is over: pick another on the globe');
+      mode = site.mode;
+      const s = site.match && matchView(site).sides;
+      if (s && s.a !== faction && s.d !== faction) return fail(`that battle is between ${F.the(s.a)} and ${s.d ? F.the(s.d) : 'the militia'}`);
+    }
     if (!MODES[mode]) return fail('no such game mode');
     if (!MODES[mode].open) return fail(`${MODES[mode].name} isn't in the game yet`);
     if (!c.entrants.includes(faction)) return fail(`${F.the(faction)} isn't in the campaign for ${wp.name}: it needs ${Math.round(W.CARRIER_SHARE * 100)}% of the orbit when the week starts`);
@@ -243,7 +388,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     if (mode === 'space' && !spaces) return fail('Space Battles is off on this server');
     leave(me, true);
     if (!queues.has(wp.id)) queues.set(wp.id, []);
-    queues.get(wp.id).push({ me, faction, mode, since: now() });
+    queues.get(wp.id).push({ me, faction, mode, since: now(), site: site ? site.id : null });
     tell(me);
     changed();
     fill();
@@ -289,7 +434,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       running: (planet) => battles.campaignMatches(planet),
       sides: (m) => ({ a: m.attacker, d: m.defender }),
       room: (m, side) => battles.room(m, side),
-      start: (wp, attacker, defender) => battles.startCampaign(wp, attacker, defender),
+      start: (wp, attacker, defender, c, site) => battles.startCampaign(wp, attacker, defender, site),
       log: 'A Sector Battle',
     },
     facility: {
@@ -316,25 +461,36 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
   };
 
   // Sector Defense on a planet: backfill a squad of the same faction with room, else start a squad
-  // of up to four once four are queued or the first has waited long enough.
+  // of up to four once four are queued or the first has waited long enough. Pilots queued for a
+  // site go to its squad, or start one there.
   function fillDefense(g, wp, c, t) {
     const queued = (queues.get(wp.id) || []).filter((e) => e.mode === 'defense').sort((x, y) => x.since - y.since);
     for (const e of queued) {
-      const d = defenses.running(wp.id).find((m) => m.faction === e.faction && m.phase === 'break' && defenses.room(m));
+      const site = e.site && siteOf(wp.id, e.site);
+      const d = site?.match
+        ? defenses.running(wp.id).find((m) => m.id === site.match.id && m.faction === e.faction && m.phase === 'break' && defenses.room(m))
+        : !e.site && defenses.running(wp.id).find((m) => m.faction === e.faction && m.phase === 'break' && defenses.room(m));
       if (d) place(e, d, 'squad');
     }
     const by = new Map();
     for (const e of (queues.get(wp.id) || []).filter((x) => x.mode === 'defense').sort((x, y) => x.since - y.since)) {
-      if (!by.has(e.faction)) by.set(e.faction, []);
-      by.get(e.faction).push(e);
+      const site = e.site && siteOf(wp.id, e.site);
+      if (site?.match) continue; // waiting for room in the squad there
+      const key = `${e.site || ''}|${e.faction}`;
+      if (!by.has(key)) by.set(key, []);
+      by.get(key).push(e);
     }
-    for (const [faction, list] of by) {
+    for (const list of by.values()) {
+      const faction = list[0].faction;
+      const site = list[0].site && siteOf(wp.id, list[0].site);
+      if (site?.match) continue; // another faction's squad took the site first
       if (list.length < MODES.defense.sides && t - list[0].since < waitMs()) continue;
       // The enemy: the holder's troops, or (for the holder's own squads) another faction's in the campaign.
       const enemy = wp.owner && wp.owner !== faction ? wp.owner : c.entrants.find((f) => f !== faction) ?? null;
-      const d = defenses.start(wp.id, wp.name, faction, enemy, { fortress: c.bonus === 'fortress' && faction === wp.owner });
+      const d = defenses.start(wp.id, site ? `${wp.name}, ${site.name}` : wp.name, faction, enemy, { fortress: c.bonus === 'fortress' && faction === wp.owner });
+      if (site) site.match = { id: d.id, sides: { a: faction, d: enemy } };
       for (const e of list.slice(0, MODES.defense.sides)) place(e, d, 'squad');
-      W.warLog(g, `A ${F.FACTIONS[faction].name} squad is holding a sector of ${wp.name} against ${enemy ? F.the(enemy) : 'the militia'}`, t);
+      W.warLog(g, `A ${F.FACTIONS[faction].name} squad is holding ${site ? site.name : 'a sector'} on ${wp.name} against ${enemy ? F.the(enemy) : 'the militia'}`, t);
       changed();
     }
   }
@@ -351,24 +507,38 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       if (c && wp && defenses) fillDefense(g, wp, c, t);
       if (c && wp) for (const mode of Object.keys(versus)) fillVersus(g, wp, c, t, mode);
     }
+    tendSites(g, t);
   }
 
-  // Sector Battles and Facility Battles on a planet: backfill a running match with room on a queued
-  // pilot's side, else start one when two factions are queued (the holder defending if it's one of
-  // them), or when one has waited long enough to fight the AI.
+  // The team-against-team modes on a planet: backfill a running match with room on a queued pilot's
+  // side, else start one when two factions are queued (the holder defending if it's one of them),
+  // or when one has waited long enough to fight the AI. Pilots queued for a site are matched only
+  // with each other, and their match is fought there.
   function fillVersus(g, wp, c, t, mode) {
     const v = versus[mode];
     const queued = (queues.get(wp.id) || []).filter((e) => e.mode === mode);
     if (!queued.length) return;
     for (const e of queued) {
+      const site = e.site && siteOf(wp.id, e.site);
       const b = v.running(wp.id).find((m) => {
+        if (site ? !site.match || m.id !== site.match.id : e.site) return false;
         const s = v.sides(m);
         return (s.a === e.faction || s.d === e.faction) && v.room(m, s.a === e.faction ? 'a' : 'd');
       });
       if (b) place(e, b, v.sides(b).a === e.faction ? 'a' : 'd');
     }
-    const left = (queues.get(wp.id) || []).filter((e) => e.mode === mode);
-    if (!left.length) return;
+    const groups = new Map(); // site id ('' for none) -> its queued pilots
+    for (const e of (queues.get(wp.id) || []).filter((x) => x.mode === mode)) {
+      const key = e.site || '';
+      if (e.site && siteOf(wp.id, e.site)?.match) continue; // waiting for room in the match there
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    }
+    for (const [key, left] of groups) startVersus(g, wp, c, t, mode, left, key ? siteOf(wp.id, key) : null);
+  }
+
+  function startVersus(g, wp, c, t, mode, left, site) {
+    const v = versus[mode];
     // By faction, longest waiting first.
     const by = new Map();
     for (const e of left.sort((x, y) => x.since - y.since)) {
@@ -387,10 +557,11 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       attacker = factions[0];
       defender = wp.owner && wp.owner !== attacker ? wp.owner : c.entrants.find((f) => f !== attacker) ?? null;
     } else return;
-    const b = v.start(wp, attacker, defender, c);
+    const b = v.start(wp, attacker, defender, c, site);
+    if (site) site.match = { id: b.id, sides: { a: attacker, d: defender } };
     for (const e of (by.get(attacker) || []).slice(0, MODES[mode].sides)) place(e, b, 'a');
     for (const e of (by.get(defender) || []).slice(0, MODES[mode].sides)) place(e, b, 'd');
-    W.warLog(g, `${v.log} on ${wp.name}: ${F.FACTIONS[attacker].name} against ${defender ? F.the(defender) : 'the militia'}`, t);
+    W.warLog(g, `${v.log} on ${wp.name}${site ? ` at ${site.name}` : ''}: ${F.FACTIONS[attacker].name} against ${defender ? F.the(defender) : 'the militia'}`, t);
     changed();
   }
   const filler = setInterval(fill, FILL_MS);
@@ -412,7 +583,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     clearInterval(filler);
   }
 
-  return { join, leave, fill, list, close, queues };
+  return { join, leave, fill, list, close, queues, watch, sitesOf, sites };
 }
 
 module.exports = {
@@ -426,6 +597,9 @@ module.exports = {
   },
   QUEUE_WAIT_MS,
   DEMO_QUEUE_WAIT_MS,
+  SITES_MAX,
+  SITES_FIRST,
+  WATCH_MS,
   bonusOf,
   supremacyBonusOf,
   zoneOffset,

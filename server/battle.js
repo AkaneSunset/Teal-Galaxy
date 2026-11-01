@@ -242,8 +242,8 @@ function layout(seed, outposts = []) {
 // A new battle over `sector` of war planet `wp`. `attacker` is a faction; `defender` the sector's
 // owner, or null for an unclaimed sector's militia; `outposts` the defender's outposts there
 // ({name}); `k` the AI's income factor (aiRate). `now` and `speed` set when its time is up.
-function newBattle({ id = 'b1', wp, sector, attacker, defender = null, outposts = [], k = 1, now = Date.now(), speed = 1 }) {
-  const seed = seedFor(wp.id, sector.id);
+function newBattle({ id = 'b1', wp, sector, attacker, defender = null, outposts = [], k = 1, now = Date.now(), speed = 1, seed = null }) {
+  seed ??= seedFor(wp.id, sector.id);
   const map = layout(seed, outposts);
   const b = {
     id,
@@ -1559,19 +1559,21 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
   function list() {
     return [...battles.values()]
       .filter((b) => !b.result)
-      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt, campaign: b.campaign || undefined }));
+      .map((b) => ({ id: b.id, planet: b.planet, sector: b.sector, sectorName: b.sectorName, attacker: b.attacker, defender: b.defender, pilots: present(b).map((p) => ({ name: p.name, side: p.side })), endsAt: b.endsAt, campaign: b.campaign || undefined, site: b.site }));
   }
 
   // --- Campaign matches (campaign.js) ---
 
-  // A new match on planet `wp` between `attacker` and `defender` (null: the militia), on one of its
-  // sectors' maps in turn. Matchmaking puts the pilots in.
-  function startCampaign(wp, attacker, defender) {
+  // A new match on planet `wp` between `attacker` and `defender` (null: the militia). At a match
+  // site (campaign.js) it's fought on the site's own battlefield and named for it; otherwise on one
+  // of the planet's sectors' maps in turn. Matchmaking puts the pilots in.
+  function startCampaign(wp, attacker, defender, site = null) {
     const n = nextId++;
     const sector = wp.sectors[n % wp.sectors.length];
-    const b = newBattle({ id: `b${n}`, wp, sector, attacker, defender, k: aiRate(galaxy(), attacker, defender), now: now(), speed });
+    const b = newBattle({ id: `b${n}`, wp, sector, attacker, defender, k: aiRate(galaxy(), attacker, defender), now: now(), speed, seed: site?.seed ?? null });
     b.campaign = true;
-    b.sectorName = `${wp.name} match ${n}`;
+    b.sectorName = site ? site.name : `${wp.name} match ${n}`;
+    if (site) b.site = site.id;
     battles.set(b.id, b);
     conns.set(b.id, new Map());
     return b;

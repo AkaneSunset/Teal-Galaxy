@@ -170,3 +170,68 @@ test('side locks: checked when a pilot queues and as they go in, taken as they g
   assert.ok(mm.join({ ...h.pilot('Guest', 'compact', 'cinder'), account: null }, 'cinder', 'sector').ok, 'other players are free');
   W.setDemo(false);
 });
+
+test('match sites: they pop up while pilots watch a planet, matches are fought at them, and they go', () => {
+  const h = harness();
+  const ash = h.pilot('Ash', 'ashen', 'cinder');
+  assert.match(h.mm.watch(h.pilot('Far', 'ashen', null), 'cinder').reason, /carrier over Cinder/);
+  assert.match(h.mm.watch(ash, 'bastion').reason, /no campaign/);
+  // Sitting down at an empty globe: two sites at once, each a mode at a spot with a name.
+  assert.ok(h.mm.watch(ash, 'cinder').ok);
+  let sites = h.mm.sitesOf('cinder');
+  assert.strictEqual(sites.length, C.SITES_FIRST);
+  for (const s of sites) {
+    assert.ok(C.MODES[s.mode] && s.name && Math.abs(s.lat) <= 90 && Math.abs(s.lon) <= 180 && s.until > h.now(), JSON.stringify(s));
+  }
+  assert.ok(h.sent.some(([n, m]) => n === 'Ash' && m.type === 'campaign_sites' && m.sites.length === C.SITES_FIRST));
+  // More pop up while someone watches, up to the cap.
+  for (let i = 0; i < 60; i++) {
+    h.advance(5_000);
+    h.mm.watch(ash, 'cinder');
+    h.mm.fill();
+  }
+  sites = h.mm.sitesOf('cinder');
+  assert.ok(sites.length >= 3 && sites.filter((s) => !s.match).length <= C.SITES_MAX, `${sites.length} sites`);
+  // Nobody watching: untaken sites expire and none pop up.
+  h.advance(C.WATCH_MS + 5 * 60_000);
+  h.mm.fill();
+  assert.strictEqual(h.mm.sitesOf('cinder').length, 0);
+  // A Sector Battles site: Ash drops in alone and, after the wait, fights the holder's AI there,
+  // on the site's own battlefield.
+  h.mm.watch(ash, 'cinder');
+  let site = h.mm.sites.get('cinder').find((s) => s.mode === 'sector');
+  for (let i = 0; !site && i < 40; i++) {
+    h.mm.sites.delete('cinder');
+    h.mm.watch(ash, 'cinder');
+    site = h.mm.sites.get('cinder').find((s) => s.mode === 'sector');
+  }
+  assert.ok(site, 'a Sector Battles site popped up');
+  assert.ok(h.mm.join(ash, 'cinder', 'facility', site.id).ok, "the site's mode wins over the one asked for");
+  assert.strictEqual(h.mm.queues.get('cinder')[0].mode, 'sector');
+  assert.deepStrictEqual(h.mm.sitesOf('cinder').find((s) => s.id === site.id).queued, { ashen: 1 });
+  h.advance(11_000);
+  h.mm.fill();
+  const [b] = h.battles.campaignMatches('cinder');
+  assert.deepStrictEqual([b.attacker, b.defender, ash.battle, b.seed, b.sectorName, b.site], ['ashen', 'compact', b.id, site.seed, site.name, site.id]);
+  const view = h.mm.sitesOf('cinder').find((s) => s.id === site.id);
+  assert.deepStrictEqual(view.match, { id: b.id, sides: { a: 'ashen', d: 'compact' } });
+  // A Compact pilot joins it on the defending side; a Luminar one can't: it isn't their fight.
+  const cmp = h.pilot('Cmp', 'compact', 'cinder');
+  assert.ok(h.mm.join(cmp, 'cinder', 'sector', site.id).ok);
+  assert.strictEqual(cmp.battle, b.id);
+  assert.match(h.mm.join(h.pilot('Lum', 'luminar', 'cinder'), 'cinder', 'sector', site.id).reason, /between the Ashen Collective and the Terran Compact/);
+  // A queue without a site still makes a match of its own elsewhere on the planet.
+  const ash2 = h.pilot('Ash2', 'ashen', 'cinder');
+  h.mm.join(ash2, 'cinder', 'sector');
+  assert.strictEqual(ash2.battle, b.id, 'a pilot queued for no site in particular backfills a running match');
+  // The match ends (every Command Node falls): the site shows it ended, then goes.
+  for (const u of b.units.values()) if (u.type === 'node') u.hp = 0;
+  h.battles.tick();
+  h.mm.fill();
+  assert.ok(h.mm.sitesOf('cinder').find((s) => s.id === site.id).ended);
+  h.advance(11_000);
+  h.mm.fill();
+  assert.ok(!h.mm.sitesOf('cinder').some((s) => s.id === site.id));
+  assert.match(h.mm.join(h.pilot('Late', 'ashen', 'cinder'), 'cinder', 'sector', site.id).reason, /that battle is over/);
+  W.setDemo(false);
+});
