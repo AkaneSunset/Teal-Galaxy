@@ -247,7 +247,8 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
     const list = sites.get(planetId) || [];
     const modes = siteModes();
     let roll = random() * modes.reduce((a, m) => a + (SITE_WEIGHT[m] || 1), 0);
-    const mode = modes.find((m) => (roll -= SITE_WEIGHT[m] || 1) < 0) || modes[0];
+    // There's always a Sector Battle open somewhere; the other modes come at random.
+    const mode = !list.some((x) => x.mode === 'sector' && !x.match) ? 'sector' : modes.find((m) => (roll -= SITE_WEIGHT[m] || 1) < 0) || modes[0];
     let lat = 0;
     let lon = 0;
     for (let tries = 0; tries < 30; tries++) {
@@ -553,9 +554,10 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       defender = factions.includes(wp.owner) ? wp.owner : factions[1];
       attacker = factions.find((f) => f !== defender);
     } else if (t - by.get(factions[0])[0].since >= waitMs()) {
-      // Nobody to fight: the AI of the holder (or of another faction in the campaign) defends.
+      // Nobody to fight: the AI of the holder defends (or of another faction in the campaign). A
+      // Sector Battle on a world nobody holds is fought against its militia.
       attacker = factions[0];
-      defender = wp.owner && wp.owner !== attacker ? wp.owner : c.entrants.find((f) => f !== attacker) ?? null;
+      defender = mode === 'sector' && !wp.owner ? null : wp.owner && wp.owner !== attacker ? wp.owner : c.entrants.find((f) => f !== attacker) ?? null;
     } else return;
     const b = v.start(wp, attacker, defender, c, site);
     if (site) site.match = { id: b.id, sides: { a: attacker, d: defender } };

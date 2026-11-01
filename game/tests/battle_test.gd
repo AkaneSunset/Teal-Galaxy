@@ -6,11 +6,11 @@ extends Node
 ## "Battle Tester" joins the Ashen Collective and flies its fleet carrier into Cinder's orbit (the
 ## Terran Compact holds Cinder; the demo war gives every faction 25% of every system). It presses G
 ## to leave its seat, walks from the Bridge down the corridor to the Command Deck's holo table and
-## presses F there: the Sector Battles screen for Cinder opens, and Attack sector puts it in the RTS
-## view. It calls in tanks by drop pod, attack-moves them at the Command Node (A, then a left click
+## presses F there: the Sector Battles screen for Cinder opens on its globe, and Drop in at a Sector
+## Battle there puts it in the RTS view (against the Compact's AI, after the wait). It calls in tanks by drop pod, attack-moves them at the Command Node (A, then a left click
 ## on it), takes control of one (P) and drives it (D held), gives it back, and keeps the attack
 ## going (an engineer on the mass points, tanks and artillery called in) until the Command Node
-## falls: "Sector taken", the war map shows the sector Ashen, and the view closes by itself, leaving
+## falls: the match is won, the Ashen Collective scores campaign points on Cinder, and the view closes by itself, leaving
 ## the pilot on its feet at the holo table on the Command Deck. The Compact's AI must have fought
 ## back (fielded units, destroyed some of ours).
 ## Keys and clicks are sent as input events, as a player's would be.
@@ -174,20 +174,29 @@ func _steps() -> void:
 			if _menu == null:
 				_finish(false, "F at the holo table should open the Sector Battles screen")
 				return
-			_sector = str(_menu._selected)
-			if _sector == "" or not _menu._attack.visible or _menu._attack.disabled:
-				_finish(false, "the Sector Battles screen should offer an attack on a sector of Cinder: '%s' (%s)" % [_sector, _menu._status.text])
+			_go("globe", 0.5)
+		"globe":
+			# Battles pop up on Cinder's globe: there's always a Sector Battle open somewhere.
+			var open: Array = BattleMenu.sites_of(PLANET).filter(func(x): return str(x.mode) == "sector" and not x.has("match"))
+			if open.is_empty():
+				if _step_clock > 10.0:
+					_finish(false, "a Sector Battle should be open on Cinder's globe (%s)" % [BattleMenu.sites_of(PLANET)])
+				return
+			_sector = str(open[0].id)
+			_menu.select_site(_sector)
+			if not _menu._drop.visible or _menu._drop.disabled:
+				_finish(false, "Drop in should be on for %s (%s)" % [_sector, _menu._detail.text])
 				return
 			_shot("09-sector-battles-cinder")
-			_menu._attack.pressed.emit()
+			_menu._drop.pressed.emit()
 			_go("joining")
 		"joining":
 			for c in get_tree().root.get_children():
 				if c is BattleView and not c.is_queued_for_deletion():
 					_view = c
 			if _view == null or _view.units.is_empty():
-				if _step_clock > 8.0:
-					_finish(false, "no battle after Attack sector (%s)" % (_menu._status.text if is_instance_valid(_menu) else "menu closed"))
+				if _step_clock > 20.0:
+					_finish(false, "no battle after Drop in (%s)" % (_menu._status.text if is_instance_valid(_menu) else "menu closed"))
 				return
 			_centre_mouse()
 			if _shown(_explorer._station):
@@ -410,16 +419,14 @@ func _fight() -> void:
 
 func _check_end() -> void:
 	if str(_end.get("side", "")) != "a":
-		_finish(false, "the battle should end with the sector taken: " + str(_end))
+		_finish(false, "the battle should end won: " + str(_end))
 		return
 	if _step != "ended":
 		_go("ended")
 		_shot_later("14-rts-battle-end", 1.0)
-	var wp := WarInfo.planet(PLANET)
-	var sec: Array = wp.sectors.filter(func(s): return s.id == _sector)
-	if str(sec[0].get("owner", "")) != FACTION:
+	if int(BattleMenu.campaign(PLANET).get("points", {}).get(FACTION, 0)) <= 0:
 		if _step_clock > 5.0:
-			_finish(false, "the war map should show %s taken by the Ashen Collective" % _sector)
+			_finish(false, "the win should score the Ashen Collective campaign points on Cinder")
 		return
 	if BattleView.active or is_instance_valid(_view):
 		if _step_clock > 10.0:
@@ -441,7 +448,7 @@ func _check_home() -> void:
 		_finish(false, "the defender's AI should fight back: it fielded %d units and destroyed %d of ours" % [_enemy_seen.size(), _lost])
 		return
 	_shot("15-back-at-the-holo-table")
-	_result = "left the seat, walked to the holo table, attacked %s, dropped tanks, attack-moved, drove a tank, took the sector (%s); the AI fielded %d units and destroyed %d of ours; %d shots, %d snapshots; back on the Command Deck" % [
+	_result = "left the seat, walked to the holo table, dropped in at %s, dropped tanks, attack-moved, drove a tank, won (%s); the AI fielded %d units and destroyed %d of ours; %d shots, %d snapshots; back on the Command Deck" % [
 		_sector, _end.get("text", ""), _enemy_seen.size(), _lost, _shots_fired, _states] + "; the War terminal opens Sector Battles too"
 	_go("war open", 1.0)
 

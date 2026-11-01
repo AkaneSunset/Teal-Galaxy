@@ -199,13 +199,8 @@ test('match sites: they pop up while pilots watch a planet, matches are fought a
   // A Sector Battles site: Ash drops in alone and, after the wait, fights the holder's AI there,
   // on the site's own battlefield.
   h.mm.watch(ash, 'cinder');
-  let site = h.mm.sites.get('cinder').find((s) => s.mode === 'sector');
-  for (let i = 0; !site && i < 40; i++) {
-    h.mm.sites.delete('cinder');
-    h.mm.watch(ash, 'cinder');
-    site = h.mm.sites.get('cinder').find((s) => s.mode === 'sector');
-  }
-  assert.ok(site, 'a Sector Battles site popped up');
+  const site = h.mm.sites.get('cinder').find((s) => s.mode === 'sector');
+  assert.ok(site, 'there is always a Sector Battle open somewhere');
   assert.ok(h.mm.join(ash, 'cinder', 'facility', site.id).ok, "the site's mode wins over the one asked for");
   assert.strictEqual(h.mm.queues.get('cinder')[0].mode, 'sector');
   assert.deepStrictEqual(h.mm.sitesOf('cinder').find((s) => s.id === site.id).queued, { ashen: 1 });

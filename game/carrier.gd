@@ -52,7 +52,8 @@ var _lift_bottom: Marker3D
 var _boards := {} # name -> Label3D
 var _holo: Node3D
 var _holo_markers: Node3D
-var _holo_for := "-" # the planet the hologram shows
+var _holo_for := "-" # the planet the hologram shows (and its battles)
+var _sites_in := 0.0 # when to next ask for the battles on the planet below
 var _chat_lines: Array[String] = []
 var _refresh_in := 0.0
 var _airlock_wait := 0.0
@@ -728,6 +729,12 @@ static func _has_static(path: String, method: String) -> bool:
 func _tick(delta: float) -> void:
 	if _holo:
 		_holo.rotate_y(0.15 * delta)
+	# Aboard over a contested world, the holo table watches it: battles pop up there (campaign_sites).
+	_sites_in -= delta
+	if _sites_in <= 0.0:
+		_sites_in = 3.0
+		if over != "" and _battle_menu == null and not BattleMenu_campaign(over).is_empty():
+			Net.send({"type": "campaign_sites", "planet": over})
 	_refresh_in -= delta
 	if _refresh_in <= 0.0:
 		_refresh_in = 1.0
@@ -800,13 +807,15 @@ func _refresh_boards() -> void:
 	_boards.war_log.text = "\n".join(lines) if not lines.is_empty() else "No battles reported yet."
 	var wp := WarInfo.planet(over) if over != "" else {}
 	if wp.is_empty():
-		_boards.below.text = "Open space.\nNo contested world below.\n\nFly to a contested world's\norbital station to fight\nfor its sectors."
+		_boards.below.text = "Open space.\nNo contested world below.\n\nFly to a contested world's\norbital station to fight\nfor it."
 	else:
 		var lock := WarInfo.lock_left(wp)
-		_boards.below.text = "%s\nHeld by %s\n%d of %d sectors theirs\n%s%s\n\nHolo table: Sector Battles" % [wp.name.to_upper(), WarInfo.faction_name(wp.owner),
-			WarInfo.held(wp, wp.owner), wp.sectors.size(), WarInfo.contention(wp).capitalize(), ("\nLocked " + lock) if lock != "" else ""]
-	if _holo_for != over:
-		_holo_for = over
+		var on := _sites(str(wp.id)).filter(func(x): return not x.get("ended", false))
+		_boards.below.text = "%s\nHeld by %s\n%d battle%s on the globe\n%s%s\n\nHolo table: Sector Battles" % [wp.name.to_upper(), WarInfo.faction_name(wp.owner),
+			on.size(), "" if on.size() == 1 else "s", WarInfo.contention(wp).capitalize(), ("\nLocked " + lock) if lock != "" else ""]
+	var key := over + "|" + _sites_key(over)
+	if _holo_for != key:
+		_holo_for = key
 		_build_holo(wp)
 	_boards.berth.text = berth_text.to_upper() if berth_text != "" else ("IN OPEN SPACE · HOLDING POSITION" if mine else "%s'S CARRIER" % owner_name.to_upper())
 	_boards.helm.text = "DOCKED" if docked_at != "" else "HOLDING"
@@ -822,8 +831,24 @@ func _station_label(id: String) -> String:
 	return System.station_name(str(Net.planet(id).get("name", id.capitalize())))
 
 
-## The hologram over the table: the planet below with its sectors in their owners' colours (the
-## capital sector bigger), or the system's contested worlds when there's no planet below.
+## The planet's campaign, if it has one (the Sector Battles screen's, without loading it).
+static func BattleMenu_campaign(planet: String) -> Dictionary:
+	return Net.state.get("war", {}).get("campaigns", {}).get(planet, {})
+
+
+## The battles popping up on `planet` (battle_menu.gd keeps them), or [].
+func _sites(planet: String) -> Array:
+	if planet == "" or not _has_static(BATTLE_MENU, "sites_of"):
+		return []
+	return load(BATTLE_MENU).sites_of(planet)
+
+
+func _sites_key(planet: String) -> String:
+	return ",".join(_sites(planet).map(func(x): return "%s%s%s" % [x.id, "m" if x.has("match") else "", "e" if x.get("ended", false) else ""]))
+
+
+## The hologram over the table: the planet below, with the battles popping up on it as pins (teal
+## while open, red while fought), or the system's contested worlds when there's no planet below.
 func _build_holo(wp: Dictionary) -> void:
 	for child in _holo_markers.get_children():
 		child.queue_free()
@@ -859,11 +884,26 @@ func _build_holo(wp: Dictionary) -> void:
 	g.mesh = sphere
 	g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF # light, not matter
 	_holo_markers.add_child(g)
-	for sec in wp.get("sectors", []):
-		var lat := deg_to_rad(float(sec.lat))
-		var lon := deg_to_rad(float(sec.lon))
-		var p := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon)) * 1.48
-		_holo_dot(p, WarInfo.faction_color(sec.owner), 0.13 if sec.get("capital", false) else 0.08, 2.0)
+	for x in _sites(str(wp.id)):
+		if x.get("ended", false):
+			continue
+		var lat := deg_to_rad(float(x.lat))
+		var lon := deg_to_rad(float(x.lon))
+		var n := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon))
+		var colour := Color(1.0, 0.45, 0.3) if x.has("match") else Color(0.35, 0.95, 0.88)
+		var tip := _holo_dot(n * 1.78, colour, 0.09, 3.0)
+		var pin := MeshInstance3D.new() # a pin standing out of the globe, Helldivers-style
+		var stem := CylinderMesh.new()
+		stem.top_radius = 0.015
+		stem.bottom_radius = 0.015
+		stem.height = 0.33
+		stem.material = _mat(colour, 2.0)
+		pin.mesh = stem
+		pin.position = n * 1.62
+		pin.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_holo_markers.add_child(pin)
+		pin.look_at_from_position(pin.position, tip + n, Vector3.UP if absf(n.y) < 0.99 else Vector3.RIGHT)
+		pin.rotate_object_local(Vector3.RIGHT, PI / 2.0)
 
 
 func _holo_dot(p: Vector3, colour: Color, radius: float, glow: float) -> Vector3:

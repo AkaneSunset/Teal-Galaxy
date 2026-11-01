@@ -2547,6 +2547,12 @@ func _on_net_message(msg: Dictionary) -> void:
 			var menu = _battle_script("battle_menu")
 			if menu:
 				menu.queued = msg if msg.get("planet") != null else {}
+		"campaign_sites":
+			# The battles popping up on a planet: the Sector Battles screen and the carrier's holo
+			# table both show them.
+			var menu = _battle_script("battle_menu")
+			if menu:
+				menu.sites[str(msg.get("planet", ""))] = {"sites": msg.get("sites", []), "at": Net.now_ms()}
 		"battle_joined":
 			# Matchmaking put us in a match: the RTS view takes over, wherever we are. (The Sector
 			# Battles screen, if it's open, closes itself.)

@@ -305,6 +305,12 @@ campaign, and earn nothing if your side loses the planet. A title is kept for go
 and on your pilot record, and is prestige only: nothing in a fight reads it. The campaign head of the
 Sector Battles screen shows your points toward each of the planet's titles.
 
+**Match sites** (`server/campaign.js`): while a pilot over a planet has its globe open
+(`campaign_sites`, every few seconds; the carrier's holo table asks too), sites pop up there: 2 at once on
+an empty globe, then one every 40 to 100 seconds (8 to 20 in the demo war) up to 5 open, each a mode at a
+spot with a name and a battlefield seed. Queueing with a site matches you only with others queued for it,
+and its match is fought there (a Sector Battle on the site's own map); the site stays until its match ends.
+
 Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
 matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
 in the demo war) and then fights the holder's AI (or another faction's in the campaign). A queued pilot
@@ -882,15 +888,23 @@ the carrier docks next.
 
 ## Sector battles
 
-A sector battle is a real-time battle over one sector of a contested planet, in the spirit of
-Supreme Commander: Forged Alliance, simulated on the server for up to 32 pilots. Open **Sector Battles**
-from the carrier's holo table (or the War terminal's sector view): it shows the planet below, its sectors
-and owners, which ones your side can attack (the same rules as [taking planets](#taking-planets); you
-must be aboard a carrier in that planet's orbit, within 30 km of its orbital station or docked there),
-and the battles running there. **Attack sector** starts one; **Join battle** joins one on your side (the
-defenders' pilots can also join from the planet's station). The defender is the sector's owner, played
-by an AI (plus any of its pilots who join), or a militia if nobody holds it. You lead one attack at a
-time: starting another gives up the last one unless other pilots are still fighting it.
+A sector battle is a real-time battle on a contested planet, in the spirit of Supreme Commander: Forged
+Alliance, simulated on the server for up to 32 pilots. There are no fixed sectors to pick: **battles pop
+up at random places on the planet** while pilots sit at a holo table over it, Helldivers-style. Open
+**Sector Battles** from the carrier's holo table (or the War terminal): aboard a carrier in a contested
+planet's orbit (within 30 km of its orbital station, or docked there), it shows the planet as a **globe**
+you can spin (drag), with a marker for every battle on it, each the picture of its game mode (there's
+always a Sector Battle open somewhere; Supremacy, Space Battles, Facility Battles and Sector Defense pop up
+too). Open ones pulse teal and close after a few minutes if nobody takes them (2 to 4 in the demo war);
+ones being fought pulse red. The same pins stand out of the planet on the holo table. Pick one, on the
+globe or in the list beside it, and **Drop in**: alone, you fight the holder's AI there after a short wait
+(a militia on a world nobody holds); pilots of your faction who drop in meanwhile come with you, and an
+enemy faction's pilots who drop in make it a battle against them. **Join battle** on one being fought takes
+you into it on your side. Each battle is fought on a battlefield of its own, rolled for that spot. The
+quick-queue buttons put you in any match of a mode on the planet.
+
+Round the globe is the planet's **control bar**: each faction's share of the [campaign](#planet-campaigns)
+points so far, live. Every battle won moves it; whoever leads when the week ends takes the planet.
 
 The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
 4000 energy; your carrier gives 2 mass and 10 energy a second. Call units in by drop pod from the panel

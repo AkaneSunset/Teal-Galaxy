@@ -3,15 +3,16 @@ extends Node
 ##   cd server && SAVE_FILE=/tmp/rts.json DEMO=1 BATTLE_SPEED=10 npm start   (delete /tmp/rts.json first)
 ##   godot --headless --path game res://tests/rts_test.tscn
 ## The pilot "RTS Tester" (Terran Compact) goes aboard its own carrier (ship:RTS Tester), says it
-## is over Scar (a contested world of Marrow Reach that nobody holds: a militia defends it), opens
-## the Sector Battles screen for Scar and attacks a sector. In the RTS view it calls in tanks by
+## is over Scar (a contested world of Marrow Reach that nobody holds), opens the Sector Battles
+## screen for Scar, waits for a Sector Battles site to pop up on its globe and drops in there: alone,
+## it fights another faction's AI after the wait. In the RTS view it calls in tanks by
 ## drop pod, attack-moves them at the Command Node, takes control of one and drives it, checks the
 ## snapshots move the units, leaves the battle and joins it again from the Sector Battles screen
 ## (its units and mass still there), and keeps calling in units (the first engineer drags out a row
 ## of Power Generators; then an engineer takes mass points,
 ## builds a factory, then Power Generators) until the Command Node falls. Meanwhile, through the HUD,
-## it upgrades the factory to tier 2 and has it make a Tank Mk II: the battle ends with the sector taken and the war map shows it
-## the Compact's. Then the view closes by itself.
+## it upgrades the factory to tier 2 and has it make a Tank Mk II: the battle ends won, scoring the
+## Compact campaign points on Scar. Then the view closes by itself.
 ## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way, and
 ## `-- --server=ws://127.0.0.1:9000` for a server on another port. Prints PASS or FAIL and quits.
 
@@ -134,23 +135,26 @@ func _steps() -> void:
 			_menu = BattleMenu.open(self, PLANET)
 			_go("menu open", 1.0)
 		"menu open":
-			var wp: Dictionary = Net.state.war.planets.filter(func(p): return p.id == PLANET)[0]
-			_sector = str(_menu._selected)
-			if _sector == "" or BattleMenu.problem("compact", wp, wp.sectors.filter(func(s): return s.id == _sector)[0]) != "":
-				_finish(false, "the Sector Battles screen should pick a sector the Compact can attack on Scar (demo war): got '%s'" % _sector)
+			# Battles pop up on Scar's globe while we sit at it: wait for a Sector Battles one.
+			var open: Array = BattleMenu.sites_of(PLANET).filter(func(s): return str(s.mode) == "sector" and not s.has("match"))
+			if open.is_empty():
+				if _step_clock > 60.0:
+					_finish(false, "a Sector Battles site should pop up on Scar's globe (sites: %s)" % [BattleMenu.sites_of(PLANET)])
 				return
-			if not _menu._attack.visible or _menu._attack.disabled:
-				_finish(false, "Attack sector should be on for " + _sector)
+			_sector = str(open[0].id)
+			_menu.select_site(_sector)
+			if not _menu._drop.visible or _menu._drop.disabled or _menu._drop.text != "Drop in":
+				_finish(false, "Drop in should be on for %s (%s)" % [_sector, _menu._detail.text])
 				return
-			_shot("rts-01-sector-battles-screen")
-			_go("attack", 0.5)
+			_go("attack", 1.5)
 		"attack":
-			_menu._attack.pressed.emit()
+			_shot("rts-01-sector-battles-screen")
+			_menu._drop.pressed.emit()
 			_go("joining")
 		"joining":
 			if not BattleView.active or not load("res://battle/battle_view.gd").get("active"):
-				if _step_clock > 8.0:
-					_finish(false, "no battle_joined after Attack sector (status: %s)" % _menu._status.text if is_instance_valid(_menu) else "no battle view")
+				if _step_clock > 20.0:
+					_finish(false, "no battle_joined after Drop in (status: %s)" % _menu._status.text if is_instance_valid(_menu) else "no battle view")
 				return
 			for c in get_tree().root.get_children():
 				if c is BattleView:
@@ -271,7 +275,7 @@ func _steps() -> void:
 			if BattleView.active or is_instance_valid(_view):
 				_finish(false, "Leave battle should close the battle view")
 				return
-			var listed: Array = Net.state.get("battles", []).filter(func(b): return str(b.get("sector", "")) == _sector)
+			var listed: Array = Net.state.get("battles", []).filter(func(b): return str(b.get("site", "")) == _sector)
 			if listed.is_empty() or not listed[0].get("pilots", []).is_empty():
 				if _step_clock > 4.0:
 					_finish(false, "the battle should still run, with nobody in it, after Leave battle: %s" % [listed])
@@ -279,14 +283,18 @@ func _steps() -> void:
 			_menu = BattleMenu.open(self, PLANET)
 			_go("rejoin", 0.5)
 		"rejoin":
-			_menu.select_sector(_sector)
-			if not _menu._join.visible or _menu._join.disabled:
+			if _menu.site(_sector).is_empty():
+				if _step_clock > 6.0:
+					_finish(false, "the globe should show the battle at " + _sector)
+				return
+			_menu.select_site(_sector)
+			if not _menu._drop.visible or _menu._drop.disabled or _menu._drop.text != "Join battle":
 				_finish(false, "Join battle should be on for the running battle on " + _sector)
 				return
 			_shot("rts-06-sector-battles-running")
 			_go("join", 0.6)
 		"join":
-			_menu._join.pressed.emit()
+			_menu._drop.pressed.emit()
 			_view = null
 			_go("rejoining")
 		"rejoining":
@@ -481,16 +489,15 @@ func _check_end() -> void:
 	if OS.get_environment("RTS_DEBUG") != "":
 		print("check_end %.1f valid=%s active=%s" % [_step_clock, is_instance_valid(_view), BattleView.active])
 	if str(_end.get("side", "")) != "a":
-		_finish(false, "the battle should end with the sector taken: " + str(_end))
+		_finish(false, "the battle should end won: " + str(_end))
 		return
 	if _step != "ended":
 		_go("ended")
 		_shot_later("rts-05-battle-end", 1.0)
-	var wp: Array = Net.state.war.planets.filter(func(p): return p.id == PLANET)
-	var sec: Array = wp[0].sectors.filter(func(s): return s.id == _sector)
-	if str(sec[0].get("owner", "")) != "compact":
+	var points := int(BattleMenu.campaign(PLANET).get("points", {}).get("compact", 0))
+	if points <= 0:
 		if _step_clock > 5.0:
-			_finish(false, "the war map should show %s taken by the Compact" % _sector)
+			_finish(false, "the win should score the Compact campaign points on Scar")
 		return
 	if _step_clock < 8.0:
 		return
@@ -500,7 +507,7 @@ func _check_end() -> void:
 	if _factory_stage != 4:
 		_finish(false, "the factory should have been built, upgraded to tier 2 and made a Tank Mk II (got to stage %d)" % _factory_stage)
 		return
-	_finish(true, "%d units drawn in budget; attacked %s from the carrier, dropped units, attack-moved, drove a tank, left and rejoined, built a factory, upgraded it to tier 2 and made a Tank Mk II, took the sector (%s); %d snapshots, slowest frame %.0f ms" % [PERF_UNITS, _sector, _end.get("text", ""), _states, _slowest * 1000.0])
+	_finish(true, "%d units drawn in budget; attacked %s from the carrier, dropped units, attack-moved, drove a tank, left and rejoined, built a factory, upgraded it to tier 2 and made a Tank Mk II, won the battle (%s); %d snapshots, slowest frame %.0f ms" % [PERF_UNITS, _sector, _end.get("text", ""), _states, _slowest * 1000.0])
 
 
 func is_instance_valid_unit(u: Units.Unit) -> bool:
