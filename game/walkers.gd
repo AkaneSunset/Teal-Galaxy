@@ -117,6 +117,11 @@ func _remove(id: int) -> void:
 
 
 func _colour(faction) -> Color:
+	return colour_of(faction)
+
+
+## A faction's armour colour, or a neutral grey with no faction.
+static func colour_of(faction) -> Color:
 	var hex := str(Net.catalog.get("factions", {}).get(str(faction), {}).get("color", "")) if faction != null else ""
 	return Color.html(hex) if Color.html_is_valid(hex) else Color(0.55, 0.6, 0.66)
 
@@ -149,8 +154,14 @@ func _animate(f: Dictionary, delta: float) -> void:
 		stride = 0.55 if speed > 5.5 else 0.4
 	else:
 		f.phase = lerpf(f.phase, roundf(f.phase / PI) * PI, minf(1.0, delta * 8.0))
-	var swing := sin(f.phase) * stride
-	body.position.y = (-0.42 if sitting else absf(sin(f.phase)) * stride * 0.08)
+	pose_limbs(body, f.phase, stride, sitting)
+
+
+## Puts a figure's limbs (figure()'s "Body") at a point of the walk cycle: `phase` runs the cycle,
+## `stride` is 0 standing, about 0.4 walking and 0.55 running. Place.gd poses your own figure with it.
+static func pose_limbs(body: Node3D, phase: float, stride: float, sitting: bool) -> void:
+	var swing := sin(phase) * stride
+	body.position.y = (-0.42 if sitting else absf(sin(phase)) * stride * 0.08)
 	for i in 2:
 		var side := 1.0 if i == 0 else -1.0
 		var thigh: Node3D = body.get_node("Thigh%d" % i)
@@ -162,7 +173,7 @@ func _animate(f: Dictionary, delta: float) -> void:
 			arm.rotation.x = 0.5
 		else:
 			thigh.rotation.x = swing * side
-			shin.rotation.x = -maxf(0.0, -sin(f.phase) * side) * stride * 1.4
+			shin.rotation.x = -maxf(0.0, -sin(phase) * side) * stride * 1.4
 			arm.rotation.x = -swing * side * 0.8
 
 

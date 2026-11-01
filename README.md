@@ -785,6 +785,15 @@ and Esc pauses. A Builder's base on the surface (`game/surface.gd`) works the sa
 console in front of a finished Carrier Dock for its market.
 `game/tests/station_interior_shots.tscn` saves a picture of every room and of a base.
 
+**Third person on foot.** Stations, carriers and Builders' bases are walked in third person by default:
+the camera sits over your right shoulder and you see your own pilot, the same figure the others see of
+you, walking, running and sitting. The camera pulls in rather than go through a wall behind you (right
+up against your back it hides your figure). V (gamepad: right stick click, rebindable as *On foot: first /
+third person view*) switches to first person and back, as does the checkbox on the pause screen and in
+Settings; the choice is saved. Raids and the on-foot battles stay first person.
+`game/tests/third_person_shots.tscn` checks it aboard a carrier, in a High Port and on a base, and saves
+pictures of each.
+
 ## Flying (Explorer)
 
 Teal Prime is built at roughly real scale: Aster is 200 light seconds from the star, and a

@@ -74,6 +74,8 @@ const ACTIONS := [
 	["foot_weapon_next", "On foot: switch weapon", ["mouse", MOUSE_BUTTON_WHEEL_DOWN], ["button", JOY_BUTTON_DPAD_RIGHT]],
 	["foot_weapon_prev", "On foot: switch weapon (back)", ["mouse", MOUSE_BUTTON_WHEEL_UP], null],
 	["foot_inventory", "On foot: inventory", [KEY_TAB], ["button", JOY_BUTTON_BACK]],
+	# Stations, carriers and bases are third person by default; this swaps to first person and back.
+	["foot_camera", "On foot: first / third person view", [KEY_V], ["button", JOY_BUTTON_RIGHT_STICK]],
 ]
 
 # Names on a standard gamepad. A HOTAS shows up as its own buttons and axes, named by number past these.
@@ -86,6 +88,7 @@ var drift_default := false
 var drift_hold := false # drift only while the drift control is held, instead of toggling
 var invert_mouse := false
 var mouse_sensitivity := 1.0
+var foot_third_person := true # walking around stations, carriers and bases: over the shoulder, or first person
 var hud_colour := 0
 var enabled := true # off while typing in chat or using a menu
 
@@ -246,6 +249,7 @@ func save_settings() -> void:
 	cfg.set_value("settings", "drift_hold", drift_hold)
 	cfg.set_value("settings", "invert_mouse", invert_mouse)
 	cfg.set_value("settings", "mouse_sensitivity", mouse_sensitivity)
+	cfg.set_value("settings", "foot_third_person", foot_third_person)
 	cfg.set_value("settings", "hud_colour", hud_colour)
 	cfg.set_value("settings", "admin_keys", Net.admin_keys) # Net reads them back itself
 	for a in ACTIONS:
@@ -274,6 +278,7 @@ func load_settings() -> void:
 	drift_hold = cfg.get_value("settings", "drift_hold", drift_hold)
 	invert_mouse = cfg.get_value("settings", "invert_mouse", invert_mouse)
 	mouse_sensitivity = cfg.get_value("settings", "mouse_sensitivity", mouse_sensitivity)
+	foot_third_person = cfg.get_value("settings", "foot_third_person", foot_third_person)
 	hud_colour = clampi(cfg.get_value("settings", "hud_colour", hud_colour), 0, HUD_COLOURS.size() - 1)
 	for a in ACTIONS:
 		var specs: Array = cfg.get_value("bindings", a[0], [])
