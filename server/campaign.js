@@ -16,6 +16,7 @@
 const F = require('./factions');
 const SUP = require('./supremacy');
 const T = require('./tunables.ts');
+const TI = require('./titles.ts');
 const W = require('./war');
 
 const DAY = 24 * 3600_000;
@@ -38,21 +39,31 @@ T.onReload((t) => {
   for (const m of Object.keys(MODES)) MODES[m].points = t.campaign.modes[m].points;
 });
 
-// Each planet's built-in bonus for whoever holds it, in one mode.
+// Holder bonuses are flavorful and rare: only a storied world, one in each war-map system, has
+// one, with an effect in its campaign mode (BONUSES) and one in Supremacy (supremacy.js BONUSES).
+// Every other planet's holder gets none.
+const STORIED = {
+  morrow: { bonus: 'mining', supremacy: 'credits' }, // Teal Prime: deep mines, and the war chest they fill
+  rift: { bonus: 'fortress', supremacy: 'boarding' }, // Marrow Reach: bunkers, and the drills to storm them
+  eddy: { bonus: 'shipyard', supremacy: 'streaks' }, // the Drift: orbital yards, and the guns they lend
+};
 const BONUSES = {
   mining: { name: 'Mining world', mode: 'sector', text: "The holder's commanders start Sector Battles with 15% more mass", mass: 1.15 },
   shipyard: { name: 'Shipyard world', mode: 'space', text: "The holder's fighters have 10% more hull in Space Battles" },
   fortress: { name: 'Fortress world', mode: 'defense', text: 'The holder gets an extra respawn wave in Sector Defense and Facility Battles' },
 };
-const BONUS_IDS = Object.keys(BONUSES);
 
 function fail(reason) {
   return { ok: false, reason };
 }
 
-// The planet's bonus: the same planet always has the same one.
+// The planet's holder bonus (null for all but the storied worlds), and its Supremacy bonus.
 function bonusOf(planetId) {
-  return BONUS_IDS[W.hash(`bonus/${planetId}`) % BONUS_IDS.length];
+  return STORIED[planetId]?.bonus ?? null;
+}
+
+function supremacyBonusOf(planetId) {
+  return STORIED[planetId]?.supremacy ?? null;
 }
 
 // Milliseconds US Eastern time is ahead of UTC at `t` (negative: -4 or -5 hours).
@@ -135,6 +146,7 @@ function resolve(g, c, now) {
     W.warLog(g, `${F.FACTIONS[winner].name} won the campaign for ${name}${lost ? `, taking it from ${F.the(lost)}` : ''} (${best} points)`, now);
   } else if (winner) W.warLog(g, `${F.FACTIONS[winner].name} held ${name} through its campaign`, now);
   else W.warLog(g, `Nobody won the campaign for ${name}`, now);
+  for (const a of TI.award(g, c.planet, winner)) W.warLog(g, `${a.name} earned the title ${a.title}: ${a.points} points won for ${name} in ${MODES[a.mode].name}`, now);
   return winner;
 }
 
@@ -161,13 +173,15 @@ function worth(c, mode, vsAi, now) {
 
 // A match on a planet ended: its winner scores for the campaign (if it's in it). Returns the points.
 // `extra`: points on top of the mode's (Sector Defense's bonus round), doubled in the final push too.
-function score(g, planetId, mode, winner, vsAi, now = Date.now(), extra = 0) {
+// `names`: the winning side's pilots, each credited the points toward the mode's title (titles.ts).
+function score(g, planetId, mode, winner, vsAi, now = Date.now(), extra = 0, names = []) {
   const c = g.war.campaigns?.[planetId];
   if (!c || !winner || !c.entrants.includes(winner) || now >= c.endsAt) return 0;
   const pts = worth(c, mode, vsAi, now) + extra * (now >= c.finalAt ? T.get().campaign.finalMultiplier : 1);
   c.points[winner] += pts;
   c.wins[winner] += 1;
   c.matches += 1;
+  TI.credit(g, { planet: planetId, mode, faction: winner, names, points: pts });
   return pts;
 }
 
@@ -289,7 +303,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
       running: (planet) => (supremacies ? supremacies.running(planet) : []),
       sides: (m) => m.factions,
       room: (m, side) => supremacies.room(m, side),
-      start: (wp, attacker, defender) => supremacies.start(wp.id, wp.name, attacker, defender, { holder: wp.owner, bonus: SUP.bonusOf(wp.id) }),
+      start: (wp, attacker, defender) => supremacies.start(wp.id, wp.name, attacker, defender, { holder: wp.owner, bonus: supremacyBonusOf(wp.id) }),
       log: 'A Supremacy battle',
     },
     space: {
@@ -404,6 +418,7 @@ function createMatchmaking({ galaxy, now = Date.now, battles, defenses = null, f
 module.exports = {
   MODES,
   BONUSES,
+  STORIED,
   DEMO_CYCLE_MS,
   DEMO_FINAL_MS,
   get AI_SHARE() {
@@ -412,6 +427,7 @@ module.exports = {
   QUEUE_WAIT_MS,
   DEMO_QUEUE_WAIT_MS,
   bonusOf,
+  supremacyBonusOf,
   zoneOffset,
   weekStart,
   entrants,

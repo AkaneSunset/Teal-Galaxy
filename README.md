@@ -289,10 +289,21 @@ in it. Pilots of those factions queue for a game mode from the **Sector Battles*
 holo table, or the War terminal), aboard a carrier over the planet. Every match their faction wins scores
 **campaign points** by how long the mode takes (Sector Battles 10; a win against AI only scores half), and
 when the week ends the faction with the most points takes the planet and all its sectors. A tie, or no
-points, leaves it with its holder. Each planet also has a **bonus** for its holder: a mining world's
-commanders start Sector Battles with 15% more mass, a fortress world's holder gets an extra wave of lives
-in Sector Defense and of reinforcements in Facility Battles, and a shipyard world's holder flies with 10%
-more hull in Space Battles.
+points, leaves it with its holder. Holder **bonuses** are flavorful and rare: only one storied world in
+each system has one. Morrow is a mining world (its holder's commanders start Sector Battles with 15% more
+mass), Rift a fortress world (an extra wave of lives in Sector Defense and of reinforcements in Facility
+Battles) and Eddy a shipyard world (10% more hull in Space Battles), each with a Supremacy bonus too.
+Every other planet's holder gets none.
+
+**Titles** are what helping win a planet earns (`server/titles.ts`). Every campaign match a pilot's side
+wins credits them the points it scored, by mode. When the campaign ends, each pilot of the faction that
+took or held the planet with **500 points or more in one mode** (tunables `titles.points`) earns that
+mode's title for it: Warlord (Sector Battles), Lion (Supremacy), Ghost (Space Battles), Champion
+(Facility Battles) or Bulwark (Sector Defense) of the planet, so 500 points won for Cinder in Space
+Battles makes you **Ghost of Cinder**. Points count for one side only, start from nothing with each
+campaign, and earn nothing if your side loses the planet. A title is kept for good, goes in the war log
+and on your pilot record, and is prestige only: nothing in a fight reads it. The campaign head of the
+Sector Battles screen shows your points toward each of the planet's titles.
 
 Matchmaking (`server/campaign.js`): when two factions are queued for a planet's Sector Battles they're
 matched at once, the holder defending if it's one of them; a faction queued alone waits 60 seconds (10
@@ -513,8 +524,8 @@ After each round the fight goes back to the ground with the bars reset, and the 
   weapons from front-supply drops.
 - **Elite troopers**: kills (10), fodder kills (2) and captures (25) earn battle credits. With 150, ask
   to come back as an elite trooper (in the class menu, L): 150 health, more shield, 30% more damage.
-- **Planet bonus** for the holder, one per planet: 60 more seconds to attack aboard, battle credits 50%
-  faster, or kill streaks (Sensor Array, Supply Drop, Orbital Barrage).
+- **Planet bonus** for the holder of a storied world: 60 more seconds to attack aboard (Rift), battle
+  credits 50% faster (Morrow), or kill streaks: Sensor Array, Supply Drop, Orbital Barrage (Eddy).
 - Losing your navy ship in Supremacy is only for the match: its Builder keeps the real ship.
 
 ### Space Battles

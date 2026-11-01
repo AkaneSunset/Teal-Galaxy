@@ -201,7 +201,6 @@ test("planet bonuses: the holder's extra boarding time, faster credits, or kill 
   }
   assert.deepStrictEqual(sh.earned, ['sensor', 'drop', 'barrage']);
   assert.deepStrictEqual(sa.earned, [], 'no streaks for the other side');
-  assert.ok(['boarding', 'credits', 'streaks'].includes(S.bonusOf('cinder')));
 });
 
 test("the ship is the faction's navy ship over the planet: its biggest warship there, or its own capital ship", () => {
@@ -233,7 +232,7 @@ test('matchmaking: a lone faction plays the holder\'s AI after the wait; the win
   assert.deepStrictEqual([a.supremacy, f.factions.a, f.factions.d], [f.id, 'ashen', 'compact']);
   const j = sent.find(([n, m]) => n === 'A' && m.type === 'supremacy_joined')[1];
   assert.ok(j.maps.ground.points.length >= 3 && j.maps['ship-d'].name);
-  assert.ok(j.bonus && j.bonus.name);
+  assert.strictEqual(j.bonus, null, 'Cinder is no storied world: its holder gets no bonus');
   f.result = 'a';
   supremacies.tick();
   assert.strictEqual(g.war.campaigns.cinder.points.ashen, 4);

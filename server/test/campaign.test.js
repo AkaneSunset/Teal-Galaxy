@@ -29,7 +29,9 @@ test('campaigns: who enters, points by mode (half against AI, double in the fina
   assert.ok(c, 'every contested planet has a campaign');
   assert.ok(!g.war.campaigns.bastion, 'capital worlds have none');
   assert.deepStrictEqual(c.entrants.slice().sort(), ['ashen', 'coma', 'compact', 'luminar']);
-  assert.ok(C.BONUSES[c.bonus]);
+  assert.strictEqual(c.bonus, null, 'holder bonuses are rare: Cinder has none');
+  assert.deepStrictEqual(['morrow', 'rift', 'eddy'].map((p) => g.war.campaigns[p].bonus), ['mining', 'fortress', 'shipyard'], 'one storied world in each system');
+  assert.deepStrictEqual(Object.keys(C.STORIED).map(C.supremacyBonusOf), ['credits', 'boarding', 'streaks']);
   assert.strictEqual(c.holder, 'compact');
   assert.strictEqual(C.score(g, 'cinder', 'sector', 'ashen', false, t + 1000), 10);
   assert.strictEqual(C.score(g, 'cinder', 'sector', 'ashen', true, t + 2000), 5, 'half against AI');

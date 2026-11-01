@@ -47,6 +47,7 @@ const N = require('./navy');
 const S = require('./sites');
 const SP = require('./spaces');
 const T = require('./tunables.ts');
+const TI = require('./titles.ts');
 const TM = require('./telemetry.ts');
 const W = require('./war');
 
@@ -169,11 +170,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
     const orders = O.viewFor(galaxy, faction, now());
     const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
-    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, accounts: undefined, owners: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -281,13 +282,23 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     for (const p of who) if (p.faction) supply('explorer', p.name, planet, p.faction, source, (p.won ? m.win : m.loss) * k);
   }
 
+  // A campaign match's winner scores (campaign.js), and each of `names` (the winning side's pilots)
+  // is credited the points toward the mode's title for the planet (titles.ts); their apps get their
+  // progress. Returns the points.
+  function scored(planet, mode, winner, vsAi, extra, names) {
+    const pts = C.score(galaxy, planet, mode, winner, vsAi, now(), extra, names);
+    if (pts > 0) for (const name of new Set(names)) for (const c of appsOf('explorer', name)) send(c.ws, { type: 'titles', progress: TI.progress(galaxy, name) });
+    return pts;
+  }
+
   const battles = B.createBattles({
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onCampaignEnd: (b, winner, vsAi) => {
       const side = winner === b.attacker ? 'a' : 'd';
-      won(b.planet, 'sector', winner, side === 'a' ? b.defender : b.attacker, [...b.pilots.values()].filter((p) => p.side === side).map((p) => p.name));
+      const names = [...b.pilots.values()].filter((p) => p.side === side).map((p) => p.name);
+      won(b.planet, 'sector', winner, side === 'a' ? b.defender : b.attacker, names);
       supplyMatch(b.planet, 'sector', [...b.pilots.values()].map((p) => ({ name: p.name, faction: p.side === 'a' ? b.attacker : b.defender, won: p.side === side })), vsAi);
-      return C.score(galaxy, b.planet, 'sector', winner, vsAi, now());
+      return scored(b.planet, 'sector', winner, vsAi, 0, names);
     },
   });
   // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
@@ -295,9 +306,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onEnd: (d, winner) => {
       const squad = d.result === 'won';
-      won(d.planet, 'defense', winner, squad ? d.enemy : d.faction, squad ? [...d.pilots.values()].map((p) => p.name) : []);
+      const names = squad ? [...d.pilots.values()].map((p) => p.name) : [];
+      won(d.planet, 'defense', winner, squad ? d.enemy : d.faction, names);
       supplyMatch(d.planet, 'defense', [...d.pilots.values()].map((p) => ({ name: p.name, faction: d.faction, won: squad })), true);
-      return C.score(galaxy, d.planet, 'defense', winner, true, now(), squad ? DF.bonusPoints(d) : 0);
+      return scored(d.planet, 'defense', winner, true, squad ? DF.bonusPoints(d) : 0, names);
     },
   });
   // Facility Battles (FPS team against team, AI filling empty slots), scored the same way. Pilots'
@@ -306,9 +318,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     onEnd: (f, winner, vsAi) => {
-      won(f.planet, 'facility', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && b.side === f.result).map((b) => b.name));
+      const names = [...f.bodies.values()].filter((b) => !b.ai && b.side === f.result).map((b) => b.name);
+      won(f.planet, 'facility', winner, f.factions[f.result === 'a' ? 'd' : 'a'], names);
       supplyMatch(f.planet, 'facility', [...f.bodies.values()].filter((b) => !b.ai).map((b) => ({ name: b.name, faction: f.factions[b.side], won: b.side === f.result })), vsAi);
-      return C.score(galaxy, f.planet, 'facility', winner, vsAi, now());
+      return scored(f.planet, 'facility', winner, vsAi, 0, names);
     },
   });
   // Supremacy (FPS control points, then boarding the enemy's ship over the planet), scored the same
@@ -318,9 +331,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
     onEnd: (f, winner, vsAi) => {
-      won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name));
+      const names = [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name);
+      won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], names);
       supplyMatch(f.planet, 'supremacy', [...f.bodies.values()].filter((b) => !b.ai && !b.fodder).map((b) => ({ name: b.name, faction: f.factions[b.side], won: b.side === f.result })), vsAi);
-      return C.score(galaxy, f.planet, 'supremacy', winner, vsAi, now());
+      return scored(f.planet, 'supremacy', winner, vsAi, 0, names);
     },
   });
   // Space Battles (starfighters over the planet): a win scores for the campaign and adds 1% to the
@@ -328,9 +342,10 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   const spaceBattles = SB.createSpaces({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onEnd: (f, winner, vsAi) => {
-      won(f.planet, 'space', winner, f.factions[f.result === 'a' ? 'd' : 'a'], [...f.craft.values()].filter((c) => !c.ai && c.side === f.result).map((c) => c.name));
+      const names = [...f.craft.values()].filter((c) => !c.ai && c.side === f.result).map((c) => c.name);
+      won(f.planet, 'space', winner, f.factions[f.result === 'a' ? 'd' : 'a'], names);
       supplyMatch(f.planet, 'space', [...f.craft.values()].filter((c) => !c.ai).map((c) => ({ name: c.name, faction: f.factions[c.side], won: c.side === f.result })), vsAi);
-      const pts = C.score(galaxy, f.planet, 'space', winner, vsAi, now());
+      const pts = scored(f.planet, 'space', winner, vsAi, 0, names);
       const wp = W.planet(galaxy, f.planet);
       const c = galaxy.war.campaigns?.[f.planet];
       if (wp && c) W.spaceWin(galaxy, wp.system, winner, c.endsAt, SB.SPACE_WIN_SHARE, now());
@@ -709,7 +724,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       const home = me.role === 'builder' ? G.claimBase(galaxy, me.name).id : null;
       if (demo && home) G.demoTopUp(G.econ(galaxy, home));
       const acct = me.account ? { ...A.view(galaxy, me.account, now()), token: signed.token } : null;
-      send(ws, { type: 'welcome', id: me.id, name: me.name, home, admin: me.admin, account: acct, receipts: L.receipts(galaxy, A.charKey(me.role, me.name)), state: stateFor(me), catalog });
+      send(ws, { type: 'welcome', id: me.id, name: me.name, home, admin: me.admin, account: acct, receipts: L.receipts(galaxy, A.charKey(me.role, me.name)), titles: me.role === 'explorer' ? TI.progress(galaxy, me.name) : [], state: stateFor(me), catalog });
       if (home) {
         broadcastState(ws); // the new Builder already has it
         save();

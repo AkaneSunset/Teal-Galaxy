@@ -55,6 +55,9 @@ const SCHEMA: Spec = {
   sideLock: {
     on: bool(), // one side per front per account, until the campaign there ends
   },
+  titles: {
+    points: num(1, 1_000_000), // a pilot's points won in one mode for a planet in one campaign to earn its title
+  },
   coma: {
     // The Coma director's safety floor (director.js guard): a faction holding under sectorFloor of
     // the contested sectors the player factions hold, or that has lost weeklyLoss of its sectors or orbital control since the
@@ -91,6 +94,7 @@ interface Tunables {
   };
   accounts: { charactersMax: number; nameMax: number; passwordMin: number; attemptsPerMinute: number };
   sideLock: { on: boolean };
+  titles: { points: number };
   coma: { guard: { sectorFloor: number; weeklyLoss: number; level: number } };
   telemetry: { windowMs: number; tickBudgetMs: number; alertsKept: number; eventsKept: number };
   sector: { pilots: number; aiUnits: number; fallbackUnits: number; tickMs: number; p99BudgetMs: number };

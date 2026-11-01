@@ -271,6 +271,15 @@ static func campaign(planet: String) -> Dictionary:
 	return Net.state.get("war", {}).get("campaigns", {}).get(planet, {})
 
 
+## This pilot's points toward each of `planet`'s titles this campaign: "Ghost of Cinder 120/500".
+static func title_lines(planet: String) -> Array:
+	var out := []
+	for t in Net.titles:
+		if t is Dictionary and str(t.get("planet", "")) == planet:
+			out.append("%s %d/%d" % [str(t.get("title", "")), int(t.get("points", 0)), int(t.get("need", 0))])
+	return out
+
+
 static func time_text(ms: float) -> String:
 	var s := maxi(0, int(ms / 1000.0))
 	if s >= 86400:
@@ -292,8 +301,9 @@ func _refresh_campaign(wp: Dictionary) -> void:
 	for f in entrants:
 		parts.append("%s %d" % [WarInfo.faction_name(f), int(c.points.get(f, 0))])
 	var bonus: Dictionary = cat.get("bonuses", {}).get(str(c.get("bonus", "")), {})
+	var bonus_line := "Planet bonus, %s: %s" % [str(bonus.get("name", "")), str(bonus.get("text", ""))] if not bonus.is_empty() else "Planet bonus: none here (only a storied world in each system has one)"
 	_camp_head.text = "Campaign for %s: %s
-Planet bonus, %s: %s" % [wp.get("name", ""), "   ·   ".join(parts) if not parts.is_empty() else "no factions in it", str(bonus.get("name", "")), str(bonus.get("text", ""))]
+%s" % [wp.get("name", ""), "   ·   ".join(parts) if not parts.is_empty() else "no factions in it", bonus_line]
 	# The front's war supply (the ledger): by faction and source, and your side's multiplier.
 	var supply := WarInfo.supply_lines(str(wp.get("id", "")))
 	var shares: Dictionary = Net.catalog.get("ledger", {}).get("shares", {})
@@ -301,6 +311,10 @@ Planet bonus, %s: %s" % [wp.get("name", ""), "   ·   ".join(parts) if not parts
 	_camp_head.text += "\nWar supply this campaign: %s  (%s)" % ["   ·   ".join(supply) if not supply.is_empty() else "none yet", share_note]
 	if mine != "" and not is_equal_approx(WarInfo.supply_multiplier(mine), 1.0):
 		_camp_head.text += "\n%s's war supply counts x%.2f (underdog multiplier)" % [WarInfo.faction_name(mine), WarInfo.supply_multiplier(mine)]
+	# Your points toward this planet's titles, by mode (titles.ts).
+	var titles := title_lines(str(wp.get("id", "")))
+	var need := int(Net.catalog.get("tunables", {}).get("titles", {}).get("points", 500))
+	_camp_head.text += "\nYour titles here: %s" % ("   ·   ".join(titles) if not titles.is_empty() else "win %d points in one mode for the side that takes or holds %s to earn that mode's title" % [need, wp.get("name", "")])
 	# The mode buttons: queue for one, or leave the queue you're in.
 	var key := "%s/%s/%s/%s" % [wp.id, mine, queued.get("planet", ""), queued.get("mode", "")]
 	if key != _modes_key:

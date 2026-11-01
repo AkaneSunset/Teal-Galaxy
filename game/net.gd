@@ -40,6 +40,9 @@ var password := ""
 var _token := ""
 ## The account as the server sent it with the welcome: {"name", "characters", "locks"}, or {}.
 var account_info: Dictionary = {}
+## This pilot's points toward titles in the campaigns running now (titles.ts), from the welcome and
+## after each campaign match they win: [{"planet", "mode", "points", "title", "need"}].
+var titles: Array = []
 
 const INBOUND_BUFFER := 4 * 1024 * 1024 # bytes: room for the largest state message
 ## Where Settings live (controls.gd writes them); the admin keys are read from here.
@@ -192,6 +195,7 @@ func _handle(msg: Dictionary) -> void:
 			_welcomed = true
 			refused = ""
 			catalog = msg.get("catalog", {})
+			titles = msg.titles if msg.get("titles") is Array else []
 			state = msg.state
 			state_changed.emit(state)
 		"state":
@@ -213,6 +217,9 @@ func _handle(msg: Dictionary) -> void:
 		"war_receipt":
 			if msg.get("receipt") is Dictionary:
 				war_receipt.emit(msg.receipt)
+		"titles":
+			if msg.get("progress") is Array:
+				titles = msg.progress
 		"tunables":
 			# The server reloaded its rule numbers.
 			if msg.get("tunables") is Dictionary:

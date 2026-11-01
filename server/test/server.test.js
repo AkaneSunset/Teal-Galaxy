@@ -135,7 +135,8 @@ test('the faction war over the wire: factions, outposts, fleets, the dock, contr
     rin.send({ type: 'hello', role: 'builder', name: 'Rin' });
     await rin.next((m) => m.type === 'welcome');
     pilotA.send({ type: 'hello', role: 'explorer', name: 'Pilot A' });
-    await pilotA.next((m) => m.type === 'welcome');
+    const welcomeA = await pilotA.next((m) => m.type === 'welcome');
+    assert.deepStrictEqual(welcomeA.titles, [], 'a pilot\'s points toward titles: none yet');
     pilotB.send({ type: 'hello', role: 'explorer', name: 'Pilot B' });
     await pilotB.next((m) => m.type === 'welcome');
     for (const name of ['Akane', 'Rin']) G.setCommandLevel(server.galaxy, G.claimBase(server.galaxy, name).id, 5); // everything open
@@ -148,6 +149,7 @@ test('the faction war over the wire: factions, outposts, fleets, the dock, contr
     assert.deepStrictEqual(cat.director, { ms: 300_000, scaleMax: 2, patrolPower: 30, armadaCap: 600, activeMs: 24 * 3600_000 });
     assert.strictEqual(welcome.admin, false, 'no ADMIN_KEY: nobody is an admin');
     assert.strictEqual(welcome.state.director, undefined);
+    assert.strictEqual(welcome.state.titles, undefined, 'everyone\'s points toward titles stay on the server');
     assert.deepStrictEqual(cat.ranks.map((r) => r.name), ['Recruit', 'Supplier', 'Quartermaster', 'Provisioner', 'War Industrialist']);
     assert.deepStrictEqual(cat.outposts, { max: 5, perSector: 3 });
     assert.deepStrictEqual(cat.war, { lockMs: 7 * 24 * 3600_000, carrierShare: 0.25, battleMs: 120_000, upkeepMs: 600_000, upkeep: { corvette: 1, frigate: 2, destroyer: 4 }, fuelCredits: 20, planetShare: 0.75, sectorPilots: 32 });

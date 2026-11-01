@@ -25,7 +25,6 @@ const FC = require('./facility');
 const F = require('./factions');
 const N = require('./navy');
 const TM = require('./telemetry.ts');
-const W = require('./war');
 
 const TEAM_MAX = 16; // a side, AI troopers filling the empty slots
 const FODDER = 10; // fodder bots a side on the ground...
@@ -50,17 +49,12 @@ const ELITE_COST = 150; // battle credits for an elite trooper
 const CREDITS = { kill: 10, fodder: 2, capture: 25 };
 const ELITE = { hp: 150, shield: 50, damage: 1.3, speed: 1.05 };
 
-// One of these per planet, for its holder.
+// A storied world's holder gets one of these (campaign.js STORIED); other planets none.
 const BONUSES = {
   boarding: { name: 'Boarding drills', text: 'The holder gets 60 more seconds to attack aboard', seconds: BONUS_BOARDING_S },
   credits: { name: 'War chest', text: "The holder's troops earn battle credits (for elite troopers) 50% faster", credits: 1.5 },
   streaks: { name: 'Orbital support', text: "The holder's troops earn kill streaks: Sensor Array, Supply Drop and Orbital Barrage", streaks: ['sensor', 'drop', 'barrage'] },
 };
-const BONUS_IDS = Object.keys(BONUSES);
-
-function bonusOf(planetId) {
-  return BONUS_IDS[W.hash(`supremacy/${planetId}`) % BONUS_IDS.length];
-}
 
 function fail(reason) {
   return { ok: false, reason };
@@ -836,7 +830,6 @@ module.exports = {
   BONUSES,
   GROUND,
   SHIPS,
-  bonusOf,
   groundMap,
   shipLayout,
   shipName,

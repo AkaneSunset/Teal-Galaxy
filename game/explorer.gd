@@ -140,6 +140,8 @@ var _war_panel: Control
 var _jump_panel: Control # the carrier's galaxy map (GALAXY MAP terminal): FTL jumps
 var _orders_panel: Control # your faction's orders (HIGH COMMAND terminal, or the War terminal's Orders)
 var _orders_seen := "" # the orders you've been told of
+## How many titles this pilot held at the last state (-1: none seen yet), to say when one is earned.
+var _titles_seen := -1
 var _jump := {} # a jump under way: {"system", "planet", "owner", "left", "total", "arrived"}
 var _jump_veil: ColorRect
 var _jump_text: Label
@@ -1966,6 +1968,15 @@ func _tell_new_orders(side: String) -> void:
 	_say("New orders from %s: \"%s\". See HIGH COMMAND on your carrier, or the War terminal." % [o.issuer, o.title])
 
 
+## A campaign this pilot helped win gave them a title (titles.ts): say so.
+func _tell_new_titles() -> void:
+	var held: Array = Net.state.get("pilots", {}).get(Net.my_name, {}).get("titles", [])
+	if _titles_seen >= 0 and held.size() > _titles_seen:
+		for t in held.slice(_titles_seen):
+			_say("You earned the title %s for helping win its campaign." % t)
+	_titles_seen = held.size()
+
+
 # --- FTL jumps (fleet carriers only) ---------------------------------------------
 
 ## The GALAXY MAP terminal aboard your fleet carrier: where to jump it.
@@ -2383,6 +2394,7 @@ func _on_state(_state: Dictionary) -> void:
 	if _war_panel.visible:
 		_war_panel.refresh()
 	_tell_new_orders(side)
+	_tell_new_titles()
 	if _trade.visible:
 		_trade.refresh()
 	if _docked != "" and _raid == null and _station and _dock_panel.visible:

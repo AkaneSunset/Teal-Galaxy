@@ -31,6 +31,7 @@
   "sideLock": {
     "on": true
   },
+  "titles": { "points": 500 },
   "coma": {
     "guard": { "sectorFloor": 0.1, "weeklyLoss": 0.3, "level": 0.15 }
   },
