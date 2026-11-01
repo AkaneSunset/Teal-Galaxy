@@ -2,7 +2,9 @@ extends Control
 ## The fleet carrier's galaxy map (the GALAXY MAP terminal on its Command Deck): every system of the
 ## war map with its lanes, and where the carrier is. Pick a system to see its planets (who holds
 ## each, its campaign), then jump the carrier there, to the system or straight into a planet's orbit,
-## as in Helldivers 2. Only a fleet carrier can jump; the server checks (carrier_jump).
+## as in Helldivers 2. A jump reaches only so many lanes (WarInfo.jump_lanes); systems past that are
+## dimmed, and the carrier gets there a jump at a time. Only a fleet carrier can jump; the server
+## checks (carrier_jump).
 
 const WarInfo := preload("res://war_info.gd")
 
@@ -43,7 +45,7 @@ func _ready() -> void:
 	head.add_theme_font_size_override("font_size", 30)
 	left.add_child(head)
 	var sub := Label.new()
-	sub.text = "Pick a system, then where in it to jump the carrier. Only a fleet carrier can make the jump."
+	sub.text = "Pick a system, then where in it to jump the carrier. Only a fleet carrier can make the jump, and only so far."
 	sub.add_theme_color_override("font_color", Color(0.7, 0.78, 0.85))
 	left.add_child(sub)
 	_map = Control.new()
@@ -107,9 +109,12 @@ func select(system_id: String) -> void:
 	var cap = s.get("capitalOf")
 	var planets := WarInfo.planets_in(system_id)
 	_info.text = ("Capital system of %s." % WarInfo.faction_name(cap) if cap != null else "Contested system.") + "  %d planet%s." % [planets.size(), "" if planets.size() == 1 else "s"]
+	var reach := in_range(system_id)
+	if not reach:
+		_info.text += "\nOut of range: %d lanes away, and the jump drive reaches %d. Jump to a system on the way first." % [WarInfo.lane_jumps(here_system, system_id), WarInfo.jump_lanes()]
 	for c in _list.get_children():
 		c.free()
-	if system_id != here_system:
+	if system_id != here_system and reach:
 		var b := Button.new()
 		b.text = "Jump to the %s system" % str(s.get("name", system_id))
 		b.custom_minimum_size = Vector2(0, 40)
@@ -127,11 +132,17 @@ func select(system_id: String) -> void:
 		var b := Button.new()
 		var here := system_id == here_system and str(wp.id) == here_planet
 		b.text = "In orbit of %s" % str(wp.name) if here else "Jump into orbit of %s" % str(wp.name)
-		b.disabled = here
+		b.disabled = here or not reach
 		b.custom_minimum_size = Vector2(0, 36)
 		b.pressed.connect(func(): jump_requested.emit(system_id, str(wp.id)))
 		box.add_child(b)
 	_map.queue_redraw()
+
+
+## Whether the carrier's jump drive reaches `system_id` from where it is.
+func in_range(system_id: String) -> bool:
+	var lanes := WarInfo.lane_jumps(here_system, system_id)
+	return lanes >= 0 and lanes <= WarInfo.jump_lanes()
 
 
 func _layout() -> Dictionary:
@@ -158,7 +169,7 @@ func _draw_map() -> void:
 		var p: Vector2 = at[id]
 		var cap = s.get("capitalOf")
 		var col := WarInfo.faction_color(cap) if cap != null else Color(0.85, 0.85, 0.75)
-		_map.draw_circle(p, 18.0, Color(col, 0.85))
+		_map.draw_circle(p, 18.0, Color(col, 0.85 if in_range(id) else 0.25))
 		if id == selected:
 			_map.draw_arc(p, 26.0, 0, TAU, 48, Color(1.0, 0.85, 0.4), 3.0)
 		if id == here_system:

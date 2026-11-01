@@ -113,7 +113,7 @@ test('the welcome says whether the demo war is on: carriers for everyone', async
   }
 });
 
-test('a fleet carrier jumps from its galaxy map to any system or planet, and only a fleet carrier', async () => {
+test('a fleet carrier jumps from its galaxy map to a system or planet within its range, and only a fleet carrier', async () => {
   // An app's connection: every message kept, waited for by type.
   const connect = async (port, name) => {
     const ws = new WebSocket(`ws://localhost:${port}`);
@@ -132,7 +132,8 @@ test('a fleet carrier jumps from its galaxy map to any system or planet, and onl
     await next((m) => m.type === 'welcome');
     return { send: (m) => ws.send(JSON.stringify(m)), next, close: () => ws.close() };
   };
-  let server = startServer({ port: 9152, tickMs: 60000, demoWar: true });
+  let t = Date.now();
+  let server = startServer({ port: 9152, tickMs: 60000, demoWar: true, now: () => t });
   try {
     const a = await connect(9152, 'Pilot A');
     const b = await connect(9152, 'Pilot B');
@@ -148,6 +149,18 @@ test('a fleet carrier jumps from its galaxy map to any system or planet, and onl
     assert.deepStrictEqual([note.owner, note.system, note.planet, note.seconds], ['Pilot A', 'marrow', 'scar', 5]);
     a.send({ type: 'carrier_jump', system: 'drift' });
     assert.match((await a.next((m) => m.type === 'error')).reason, /already jumping/);
+    // The Drift is four lanes from Marrow Reach, past a carrier's two: it stops in Teal Prime on the way.
+    t += 6000;
+    a.send({ type: 'carrier_jump', system: 'drift' });
+    assert.match((await a.next((m) => m.type === 'error')).reason, /^The Drift is 4 lanes away, past the jump drive's range of 2: jump to a system on the way first$/);
+    a.send({ type: 'carrier_jump', planet: 'rift' });
+    assert.strictEqual((await a.next((m) => m.type === 'carrier_jump')).planet, 'rift', 'anywhere in the same system');
+    t += 6000;
+    a.send({ type: 'carrier_jump', system: 'teal-prime' });
+    await a.next((m) => m.type === 'carrier_jump');
+    t += 6000;
+    a.send({ type: 'carrier_jump', planet: 'eddy' });
+    assert.strictEqual((await a.next((m) => m.type === 'carrier_jump')).system, 'drift');
     // Out the far end, the others see which system the carrier is in.
     a.send({ type: 'ship', pos: [1, 2, 3], rot: [0, 0, 0], over: 'scar', system: 'marrow' });
     const seen = await b.next((m) => m.type === 'ship' && m.name === 'Pilot A');

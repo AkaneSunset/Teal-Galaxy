@@ -4,10 +4,11 @@ extends Node
 ##   cd server && SAVE_FILE=/tmp/jump.json DEMO=1 npm start   (delete /tmp/jump.json first)
 ##   godot --headless --path game res://tests/jump_test.tscn
 ## "Jump Tester" (Luminar Accord), aboard its carrier in Teal Prime, uses the GALAXY MAP terminal on
-## the Command Deck: picks Marrow Reach and jumps into Scar's orbit. After the spool-up the carrier is
-## there: Marrow Reach's star and planets in the sky, Scar Orbital off the bow, Teal Prime's stations
-## gone, and the server has it over Scar (it queues for Scar's campaign from there). Then it jumps
-## back to the Teal Prime system and Aster High Port is back.
+## the Command Deck: picks Marrow Reach (two lanes away, as far as a jump reaches) and jumps into
+## Scar's orbit. After the spool-up the carrier is there: Marrow Reach's star and planets in the sky,
+## Scar Orbital off the bow, Teal Prime's stations gone, and the server has it over Scar (it queues
+## for Scar's campaign from there). The Drift, four lanes on, is out of range. Then it jumps back to
+## the Teal Prime system and Aster High Port is back.
 ## `-- --server=ws://127.0.0.1:9000` for a server on another port, and `-- --shots=/some/dir` with a
 ## display to save screenshots. Prints PASS or FAIL and quits.
 
@@ -147,6 +148,12 @@ func _steps() -> void:
 				return
 			Net.send({"type": "campaign_unqueue"})
 			_explorer._on_service("jump")
+			# The Drift is four lanes from Marrow Reach, past the jump drive's two.
+			_panel.select("drift")
+			var eddy := _buttons(_panel, "Jump into orbit of Eddy")
+			if not _buttons(_panel, "Jump to the").is_empty() or eddy.size() != 1 or not eddy[0].disabled or not _panel._info.text.contains("Out of range: 4 lanes away"):
+				_finish(false, "the Drift should be out of the jump drive's range from Marrow Reach")
+				return
 			_panel.select("teal-prime")
 			_buttons(_panel, "Jump to the Teal Prime system")[0].pressed.emit()
 			_go("home")
@@ -155,7 +162,7 @@ func _steps() -> void:
 				if _step_clock > 15.0:
 					_finish(false, "the jump home should bring back Teal Prime and Aster High Port")
 				return
-			_finish(true, "from the GALAXY MAP aboard the carrier, jumped into Scar's orbit in Marrow Reach (its star, planets and orbital station there, Teal Prime's gone), queued for Scar's campaign from its orbit, and jumped home to Teal Prime")
+			_finish(true, "from the GALAXY MAP aboard the carrier, jumped into Scar's orbit in Marrow Reach (its star, planets and orbital station there, Teal Prime's gone), queued for Scar's campaign from its orbit, found the Drift out of the jump drive's range from there, and jumped home to Teal Prime")
 
 
 func _shot(name: String) -> void:

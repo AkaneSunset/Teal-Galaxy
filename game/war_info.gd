@@ -83,6 +83,26 @@ static func planet(id: String) -> Dictionary:
 	return {}
 
 
+## How many lanes apart two systems are (through any system), or -1 if no lanes join them.
+static func lane_jumps(from: String, to: String) -> int:
+	var seen := {from: 0}
+	var queue := [from]
+	while not queue.is_empty():
+		var id: String = queue.pop_front()
+		if id == to:
+			return int(seen[id])
+		for next in system(id).get("lanes", []):
+			if not seen.has(str(next)):
+				seen[str(next)] = int(seen[id]) + 1
+				queue.append(str(next))
+	return -1
+
+
+## The farthest a fleet carrier jumps at once, in lanes (tunables carrier.jumpLanes).
+static func jump_lanes() -> int:
+	return int(Net.catalog.get("tunables", {}).get("carrier", {}).get("jumpLanes", 2))
+
+
 static func planets_in(system_id: String) -> Array:
 	return war().get("planets", []).filter(func(p): return p.system == system_id)
 

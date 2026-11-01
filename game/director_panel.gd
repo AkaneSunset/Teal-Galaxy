@@ -289,7 +289,7 @@ func refresh() -> void:
 		_scale.set_value_no_signal(float(d.get("scale", 1)))
 		_scale_value.text = "x%.2f" % float(d.get("scale", 1))
 	var guarded := []
-	var level := float(Net.catalog.get("tunables", {}).get("coma", {}).get("guard", {}).get("level", 0.15))
+	var floor_level := float(Net.catalog.get("tunables", {}).get("coma", {}).get("guard", {}).get("level", 0.15))
 	for f in _rows:
 		var r: Dictionary = _rows[f]
 		r.strength.text = _pct(d.get("strength", {}).get(f, 0))
@@ -299,8 +299,6 @@ func refresh() -> void:
 		if why != null:
 			r.use.text += " (floor)"
 			guarded.append("%s: %s." % [WarInfo.faction_name(f), str(why)])
-	_guard.text = "" if guarded.is_empty() else "Safety floor: the Coma keeps to %d%% of its pressure (intensity times the scale) on these factions, whatever is set here.\n%s" % [roundi(level * 100.0), "\n".join(guarded)]
-	_guard.visible = not guarded.is_empty()
 		var fixed = d.get("overrides", {}).get(f)
 		r.fixed.set_pressed_no_signal(fixed == null)
 		if _dragging != f:
@@ -308,6 +306,8 @@ func refresh() -> void:
 			r.level.set_value_no_signal(level)
 			r.level_text.text = "%d%%" % roundi(level * 100.0) if fixed != null else "auto"
 		r.level.modulate.a = 1.0 if fixed != null else 0.5 # dim while it only shows the automatic level
+	_guard.text = "" if guarded.is_empty() else "Safety floor: the Coma keeps to %d%% of its pressure (intensity times the scale) on these factions, whatever is set here.\n%s" % [roundi(floor_level * 100.0), "\n".join(guarded)]
+	_guard.visible = not guarded.is_empty()
 	for sid in _systems:
 		_refresh_system(d, sid)
 	_tick()

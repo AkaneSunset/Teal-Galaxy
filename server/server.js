@@ -363,7 +363,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // Where a pilot is, for the battle rules: the planet the carrier they're aboard is over (its
   // owner flying in that orbit, or docked at that planet's station), and the station they're at.
   // An FTL jump, from the galaxy map aboard your own fleet carrier (the only ship that has the
-  // drive): to another system, or straight into a planet's orbit, after JUMP_S seconds spooling up.
+  // drive): to another system within its range (tunables carrier.jumpLanes), or straight into a
+  // planet's orbit there, after JUMP_S seconds spooling up.
   // Anyone aboard rides along. Out of any queue, and released from a berth, first.
   function carrierJump(me, msg) {
     if (!W.isDemo()) return { ok: false, reason: 'only fleet carriers can jump, and pilots here fly ships with no FTL drive' };
@@ -375,6 +376,12 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (!sys) return { ok: false, reason: 'no such system' };
     const t = now();
     if ((me.jumpUntil || 0) > t) return { ok: false, reason: 'the carrier is already jumping' };
+    // The jump drive's range, in lanes from the system the carrier is in (orbital gates, in the
+    // Frontier's player systems, will reach farther).
+    const lanes = W.laneJumps(galaxy, me.system || W.HOME_SYSTEM, sys.id);
+    const range = T.get().carrier.jumpLanes;
+    if (lanes === null) return { ok: false, reason: `no lanes reach ${sys.name}` };
+    if (lanes > range) return { ok: false, reason: `${sys.name} is ${lanes} lanes away, past the jump drive's range of ${range}: jump to a system on the way first` };
     if (me.pad) spaces.undock(me);
     matchmaking.leave(me);
     me.jumpUntil = t + JUMP_S * 1000;

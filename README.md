@@ -853,6 +853,12 @@ range to queue for that planet's campaign. Anyone aboard rides along. Docked, th
 a queue you were in is left. Only the carrier's owner can jump it, only from aboard, and not in the
 middle of a battle (`carrier_jump`; the server checks).
 
+**Jump range.** One jump reaches at most **2 lanes** of the war map from where the carrier is (tunables
+`carrier.jumpLanes`): from Teal Prime that's every system, but from Marrow Reach the Drift is 4 lanes
+off, so the carrier stops on the way. Systems out of range are dimmed on the GALAXY MAP and their jump
+buttons are off. Orbital gates, coming with the Frontier's player systems, will carry a carrier past
+its range.
+
 Teal Prime is the home system as it always was. The war map's other systems (the four faction capitals,
 Marrow Reach and The Drift) are made up when you arrive: a star, and their planets on their orbits,
 the same for everyone, each with its orbital station. Other carriers are only seen in the system they're
