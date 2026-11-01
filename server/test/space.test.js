@@ -195,6 +195,9 @@ test("a win adds 1% to the winner's orbital control of the system until the week
   spaces.tick();
   assert.strictEqual(g.war.campaigns.cinder.points.ashen, 3);
   assert.ok(Math.abs(g.war.orbital[wp.system].ashen - (before + SB.SPACE_WIN_SHARE)) < 1e-9);
+  // Wins add up to 25% at most, so one mode can't push the other factions out.
+  for (let i = 0; i < 40; i++) W.spaceWin(g, wp.system, 'ashen', g.war.campaigns.cinder.endsAt, SB.SPACE_WIN_SHARE, clock);
+  assert.ok(Math.abs(g.war.orbital[wp.system].ashen - Math.min(1, before + W.SPACE_WIN_CAP)) < 1e-9);
   // It runs out with the week.
   W.recompute(g, g.war.campaigns.cinder.endsAt + 1);
   assert.ok(Math.abs(g.war.orbital[wp.system].ashen - before) < 1e-9);

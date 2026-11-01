@@ -734,7 +734,7 @@ function createSpaces({ now = Date.now, speed = 1, send, changed, onEnd = null }
     const vsAi = !humans(f, 'a').length || !humans(f, 'd').length;
     const pts = winner && onEnd ? onEnd(f, winner, vsAi) : 0;
     const how = f.how === 'destroyed' ? `${shipName(f, other(f.result))} destroyed` : f.how === 'time' ? `more damage done in 15 minutes, ${f.damage.a} to ${f.damage.d}` : '';
-    const text = f.how === 'abandoned' ? 'The battle ended: everyone left' : winner ? `${F.FACTIONS[winner].name} won the Space Battle (${how}): +${pts} campaign points on ${f.planetName}, and 1% more orbital control until the week ends` : `A draw: no campaign points`;
+    const text = f.how === 'abandoned' ? 'The battle ended: everyone left' : winner ? `${F.FACTIONS[winner].name} won the Space Battle (${how}): +${pts} campaign points on ${f.planetName}, and 1% more orbital control until the week ends (Space Battles add 25% at most)` : `A draw: no campaign points`;
     const fr = frame(f);
     for (const [name, c] of conns.get(f.id)) {
       send(c, stateFor(f, fr, name));

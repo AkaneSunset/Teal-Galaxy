@@ -17,6 +17,7 @@ const S = require('./sites');
 const LOCK_MS = 7 * 24 * 3600_000; // a planet that changes hands can't be attacked for a week
 const DEMO_LOCK_MS = 5 * 60_000; // ...or for five minutes in the demo war
 const CARRIER_SHARE = 0.25; // orbital control a faction needs before it can attack a system's planets
+const SPACE_WIN_CAP = 0.25; // Space Battle wins add at most this much to a faction's orbital control of a system
 const PLANET_SHARE = 0.75; // sectors that win a planet, with its capital sector
 const SECTOR_PILOTS = 32; // pilots in one sector battle (phase 3)
 const BATTLE_MS = 2 * 60_000; // a round of fleet battle in a system this often
@@ -268,7 +269,8 @@ function power(ships) {
 // A fleet that arrived where another faction is in orbit (`joining`) has no say until it has fought
 // a round there, so a fleet called home before every round never wins any control. In the demo
 // war every faction is shown at least CARRIER_SHARE of a system that isn't a capital (the shares
-// may then add up past 1). Space Battle wins add their share on top, until they run out (spaceWin).
+// may then add up past 1). Space Battle wins add their share on top, until they run out (spaceWin),
+// at most SPACE_WIN_CAP for a faction, so winning that one mode can't push the others out.
 function shares(g, systemId, now = Date.now()) {
   const out = Object.fromEntries(Object.keys(F.FACTIONS).map((f) => [f, 0]));
   let total = 0;
@@ -280,7 +282,9 @@ function shares(g, systemId, now = Date.now()) {
   }
   if (total > 0) for (const f of Object.keys(out)) out[f] /= total;
   if (demo && system(g, systemId) && !system(g, systemId).capitalOf) for (const f of Object.keys(out)) out[f] = Math.max(out[f], CARRIER_SHARE);
-  for (const w of g.war.spaceWins?.[systemId] || []) if (w.until > now && Object.hasOwn(out, w.faction)) out[w.faction] = Math.min(1, out[w.faction] + w.share);
+  const won = {};
+  for (const w of g.war.spaceWins?.[systemId] || []) if (w.until > now && Object.hasOwn(out, w.faction)) won[w.faction] = (won[w.faction] || 0) + w.share;
+  for (const [f, s] of Object.entries(won)) out[f] = Math.min(1, out[f] + Math.min(SPACE_WIN_CAP, s));
   return out;
 }
 
@@ -559,6 +563,7 @@ module.exports = {
   LOCK_MS,
   DEMO_LOCK_MS,
   CARRIER_SHARE,
+  SPACE_WIN_CAP,
   PLANET_SHARE,
   SECTOR_PILOTS,
   BATTLE_MS,

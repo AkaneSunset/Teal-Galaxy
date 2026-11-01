@@ -524,7 +524,9 @@ capital ship lost here is lost for the battle only. Destroy the enemy capital sh
 generators** first (its subsystems can't be hurt while one stands), then its **engines, bridge and
 reactor**. If neither falls in 15 minutes, the side that did more damage to the other's capital ship and
 frigates wins. A win scores 6 campaign points (half against an all-AI side) and adds **1% to the winner's
-orbital control** of the system until the campaign week ends, on top of what its navies hold.
+orbital control** of the system until the campaign week ends, on top of what its navies hold. Space
+Battle wins add **at most 25%** to a faction's orbital control of a system, so a faction can't win that
+one mode over and over and push the others out of orbit.
 
 - **Ship classes**, picked every launch (when you're shot down, pick the next): **Fighter** (fast, good
   against fighters: lasers and 6 lock-on missiles), **Interceptor** (fastest, light guns, 4 missiles),
