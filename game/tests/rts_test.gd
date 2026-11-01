@@ -7,7 +7,8 @@ extends Node
 ## the Sector Battles screen for Scar and attacks a sector. In the RTS view it calls in tanks by
 ## drop pod, attack-moves them at the Command Node, takes control of one and drives it, checks the
 ## snapshots move the units, leaves the battle and joins it again from the Sector Battles screen
-## (its units and mass still there), and keeps calling in units (an engineer takes mass points,
+## (its units and mass still there), and keeps calling in units (the first engineer drags out a row
+## of Power Generators; then an engineer takes mass points,
 ## builds a factory, then Power Generators) until the Command Node falls. Meanwhile, through the HUD,
 ## it upgrades the factory to tier 2 and has it make a Tank Mk II: the battle ends with the sector taken and the war map shows it
 ## the Compact's. Then the view closes by itself.
@@ -36,6 +37,8 @@ var _moved_from := {} # id -> where it was when the attack-move went out
 var _end: Dictionary = {}
 var _drop_at := 0.0
 var _extractors := 0
+var _row_stage := 0 # the drag-a-row check: 0 not yet ... 5 done
+var _row_engineer := -1
 var _generators := 0 # Power Generators the engineer was told to build
 var _factory_stage := 0 # 0 none yet, 1 being built, 2 upgrading to tier 2, 3 making a Tank Mk II, 4 done
 var _factory := -1
@@ -366,6 +369,8 @@ func _fight() -> void:
 	if _clock - _drop_at < 0.5:
 		return
 	_drop_at = _clock
+	if _row_step():
+		return
 	var all_engineers := _mine("engineer").filter(func(u): return not u.dropping())
 	_factory_steps(all_engineers)
 	# Three engineers, as a player would: every extractor needs five generators built first.
@@ -502,6 +507,65 @@ func is_instance_valid_unit(u: Units.Unit) -> bool:
 	return _view.units.has(u.id)
 
 
+## The first engineer down lays out a row of Power Generators by dragging, as a player would: the
+## build button, a left press beside the landing zone, the mouse dragged along and let go. Each
+## spot of the row becomes a queued build order. True while it's at it.
+func _row_step() -> bool:
+	var lz: Dictionary = _view.info.get("lz", {"x": 800, "z": 170})
+	var back := -1.0 if float(lz.z) < 800.0 else 1.0
+	var from := Vector2(float(lz.x) - 40.0, float(lz.z) - back * 70.0)
+	var to := from + Vector2(58.0, 0.0)
+	var screen := func(p: Vector2) -> Vector2: return _view.camera.unproject_position(Vector3(p.x, _view.terrain.height(p.x, p.y), p.y))
+	match _row_stage:
+		0:
+			var idle := _mine("engineer").filter(func(u): return not u.dropping() and u.orders.is_empty())
+			if idle.is_empty():
+				return false
+			_row_engineer = idle[0].id
+			_view.select([_row_engineer])
+			_view.look_at_ground(from + Vector2(29.0, 0.0))
+			_view._focus = _view._focus_to # straight there: the drag is in screen terms
+			_view.arm("build:generator")
+			_row_stage = 1
+		1:
+			if DisplayServer.get_name() == "headless": # no screen to drag on: the same order, straight
+				_view.place_row("generator", from, to)
+				_row_stage = 4
+				return true
+			var press := InputEventMouseButton.new()
+			press.button_index = MOUSE_BUTTON_LEFT
+			press.pressed = true
+			press.position = screen.call(from)
+			press.global_position = press.position
+			Input.parse_input_event(press)
+			Input.warp_mouse(screen.call(to))
+			_row_stage = 2
+		2:
+			_shot("rts-02b-dragging-a-row-of-generators")
+			_row_stage = 3
+		3:
+			var release := InputEventMouseButton.new()
+			release.button_index = MOUSE_BUTTON_LEFT
+			release.pressed = false
+			release.position = screen.call(to)
+			release.global_position = release.position
+			Input.parse_input_event(release)
+			_row_stage = 4
+		4:
+			var u: Units.Unit = _view.units.get(_row_engineer)
+			var builds: int = u.orders.filter(func(o): return o.order == "build").size() if u else 0
+			if builds < 4:
+				_finish(false, "dragging a row of Power Generators over 58 m should queue 4 or 5 of them (got %d)" % builds)
+				return true
+			print("dragged out a row of %d Power Generators" % builds)
+			_generators += builds
+			_row_stage = 5
+			return false
+		_:
+			return false
+	return true
+
+
 func _find(type: String) -> Units.Unit:
 	for u: Units.Unit in _view.units.values():
 		if u.type == type:
@@ -538,6 +602,7 @@ func _finish(ok: bool, what: String) -> void:
 	get_tree().quit(0 if ok else 1)
 
 
-## Visible buttons under `root` whose text contains `text`.
+## Visible buttons under `root` whose text contains `text`, or (an icon button) whose tooltip's
+## first line names it.
 func _buttons(root: Node, text: String) -> Array:
-	return root.find_children("*", "Button", true, false).filter(func(b): return b.is_visible_in_tree() and b.text.contains(text))
+	return root.find_children("*", "Button", true, false).filter(func(b): return b.is_visible_in_tree() and (b.text.contains(text) or b.tooltip_text.get_slice("\n", 0).contains(text)))

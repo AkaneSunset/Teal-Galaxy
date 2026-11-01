@@ -894,7 +894,7 @@ time: starting another gives up the last one unless other pilots are still fight
 
 The RTS view takes over the screen. Everything costs **mass and energy**. You start with 400 mass and
 4000 energy; your carrier gives 2 mass and 10 energy a second. Call units in by drop pod from the panel
-on the right (the ▾ button folds it away); they land in your landing zone 6 seconds later. The carrier
+(*Drop pods*) on the right (the ▾ button folds it away); they land in your landing zone 6 seconds later. The carrier
 drops **tier 1 units only, at full price**.
 
 **Your ACU.** Every attacking commander lands an **Armoured Command Unit**: a walker tougher than a handful
@@ -941,7 +941,7 @@ back at the holo table.
 | Attack-move | **A**, then left click |
 | Stop | **S** |
 | Queue orders | Hold Shift (queued waypoints are drawn as lines) |
-| Build (engineers) | The build buttons, then left click (extractors snap to mass points); or right click a free mass point |
+| Build (engineers) | The build buttons (pictures of each building, price under it, name and details on hover), then left click (extractors snap to mass points), or hold and drag for a row of the same building side by side; or right click a free mass point |
 | Produce (a factory selected) | The produce buttons |
 | Groups | Ctrl+1-9 sets a group, 1-9 recalls it (twice: look at it) |
 | Camera | WASD, the arrow keys or the screen's edges to pan; the wheel to zoom from 25 m to the whole map (units turn into strategic icons past 500 m); Q / E or middle drag to turn; Space looks at your units, H at your landing zone; click the minimap to look there |

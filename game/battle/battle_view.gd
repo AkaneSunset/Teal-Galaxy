@@ -87,6 +87,8 @@ var _sun: DirectionalLight3D
 var _env: Environment
 var _ghost: MeshInstance3D
 var _ghost_mat: StandardMaterial3D
+var _row_ghosts: Array[MeshInstance3D] = [] # more ghosts while a row of buildings is dragged out
+var build_from = null # where a build drag started (ground x, z), or null
 var _reticle: MeshInstance3D
 var _mass_marks := {} # mass point id -> Node3D (its light column)
 var _minimap_tex: Texture2D
@@ -1028,7 +1030,9 @@ func armed_text() -> String:
 		return "Attack-move: left click where (right click cancels)"
 	if armed.begins_with("build:"):
 		var s := armed.substr(6)
-		return "Build %s: left click to place (Shift: more)" % str(catalog.get(s, {}).get("name", s))
+		if s == "extractor":
+			return "Build Mass Extractor: left click a mass point (Shift: more)"
+		return "Build %s: left click to place, or drag for a row (Shift: more)" % str(catalog.get(s, {}).get("name", s))
 	return ""
 
 
@@ -1065,21 +1069,104 @@ func _site(structure: String, p: Vector2):
 	return p
 
 
+const ROW_MAX := 20 # the most buildings one drag lays out
+
+
+## The sites of a row of `structure` dragged from `from` to `to` (ground x, z), side by side:
+## [[spot, fits], ...], starting at `from`.
+func build_row(structure: String, from: Vector2, to: Vector2) -> Array:
+	var r := float(catalog.get(structure, {}).get("radius", 8))
+	var step := r * 2.0 + 0.5
+	var n := mini(int(from.distance_to(to) / step) + 1, ROW_MAX)
+	var dir := (to - from).normalized() if from.distance_to(to) > 0.01 else Vector2.ZERO
+	var row := []
+	for i in n:
+		var p := from + dir * step * i
+		row.append([p, _site(structure, p) != null])
+	return row
+
+
 func _update_ghost() -> void:
 	if not armed.begins_with("build:") or driving() or ended:
 		_ghost.visible = false
+		_show_row([])
 		return
 	var s := armed.substr(6)
 	var g := _ground_at(mouse)
 	if g.x < 0.0:
 		_ghost.visible = false
+		_show_row([])
 		return
+	if build_from != null:
+		_ghost.visible = false
+		_show_row(build_row(s, build_from, Vector2(g.x, g.z)), s)
+		return
+	_show_row([])
 	var site = _site(s, Vector2(g.x, g.z))
 	var at: Vector2 = site if site != null else Vector2(g.x, g.z)
 	_ghost.mesh = Models.ghost(s)
 	_ghost.position = Vector3(at.x, terrain.height(at.x, at.y), at.y)
 	_ghost_mat.albedo_color = Color(0.4, 1.0, 0.5, 0.35) if site != null else Color(1.0, 0.3, 0.25, 0.35)
 	_ghost.visible = true
+
+
+## Ghosts for a row being dragged out: green where it fits, red where it doesn't.
+func _show_row(row: Array, structure := "") -> void:
+	while _row_ghosts.size() < row.size():
+		var m := MeshInstance3D.new()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.material_override = mat
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(m)
+		_row_ghosts.append(m)
+	for i in _row_ghosts.size():
+		var m := _row_ghosts[i]
+		m.visible = i < row.size()
+		if not m.visible:
+			continue
+		var at: Vector2 = row[i][0]
+		m.mesh = Models.ghost(structure)
+		m.position = Vector3(at.x, terrain.height(at.x, at.y), at.y)
+		(m.material_override as StandardMaterial3D).albedo_color = Color(0.4, 1.0, 0.5, 0.35) if row[i][1] else Color(1.0, 0.3, 0.25, 0.35)
+
+
+## A build drag let go at `screen`: the engineers build every spot of the row that fits, in order.
+func _finish_row(screen: Vector2) -> void:
+	var from: Vector2 = build_from
+	build_from = null
+	_show_row([])
+	var s := armed.substr(6)
+	var g := _ground_at(screen)
+	var to := Vector2(g.x, g.z) if g.x >= 0.0 else from
+	if build_row(s, from, to).size() <= 1:
+		_place_build(screen if g.x >= 0.0 else camera.unproject_position(Vector3(from.x, terrain.height(from.x, from.y), from.y)))
+		return
+	place_row(s, from, to)
+
+
+## The selected engineers build a row of `s` from `from` to `to` (ground x, z): every spot that
+## fits, queued in order.
+func place_row(s: String, from: Vector2, to: Vector2) -> void:
+	var row := build_row(s, from, to)
+	var engineers := _my_selected().filter(func(id): return builder(units[id].type))
+	if engineers.is_empty():
+		_hud.notice("Only engineers and your ACU build")
+		armed = ""
+		return
+	var placed := 0
+	for site in row:
+		if not site[1]:
+			continue
+		order_units(engineers, "build", site[0], placed > 0 or Input.is_key_pressed(KEY_SHIFT), -1, s)
+		placed += 1
+	if placed == 0:
+		_hud.notice("Something is already built there", Color(1.0, 0.5, 0.42))
+		return
+	_hud.feed("%d %s queued" % [placed, _plural(s, placed)], Color(1.0, 0.85, 0.3))
+	if not Input.is_key_pressed(KEY_SHIFT):
+		armed = ""
 
 
 func _place_build(screen: Vector2) -> void:
@@ -1247,6 +1334,12 @@ func _drive_step(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	# A box selection ends wherever the mouse is let go, even over the HUD.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and build_from != null:
+		if armed.begins_with("build:") and not ended:
+			_finish_row(event.position)
+		else:
+			build_from = null
+			_show_row([])
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and box_from != null:
 		var from: Vector2 = box_from
 		box_from = null
@@ -1297,8 +1390,12 @@ func _mouse_button(e: InputEventMouseButton) -> void:
 						order_units(_my_selected(), "amove", Vector2(g.x, g.z), Input.is_key_pressed(KEY_SHIFT))
 					if not Input.is_key_pressed(KEY_SHIFT):
 						armed = ""
-				elif armed.begins_with("build:"):
+				elif armed == "build:extractor":
 					_place_build(e.position)
+				elif armed.begins_with("build:"):
+					var g := _ground_at(e.position) # held and dragged: a row of them
+					if g.x >= 0.0:
+						build_from = Vector2(g.x, g.z)
 				else:
 					box_from = e.position
 		MOUSE_BUTTON_RIGHT:

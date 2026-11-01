@@ -6,11 +6,15 @@ extends Control
 ## Buttons call the battle view (`view`); _process reads it to keep the numbers current.
 
 const Units := preload("res://battle/battle_units.gd")
+const IconButton := preload("res://battle/battle_icon_button.gd")
 
 const TEAL := Color(0.35, 0.95, 0.88)
 const MASS := Color(0.45, 1.0, 0.45)
 const ENERGY := Color(1.0, 0.85, 0.3)
 const PANEL_BG := Color(0.02, 0.05, 0.08, 0.86)
+const MINIMAP_W := 220.0
+const DROP_COLUMNS := 4
+const DROP_W := DROP_COLUMNS * 60.0 + (DROP_COLUMNS - 1) * 6.0 + 24.0 # the call-in panel's width
 const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "gunship"]
 
 var view: Node # battle_view.gd
@@ -31,8 +35,9 @@ var _notice: Label
 var _notice_t := 0.0
 var _selection: Label
 var _orders: HBoxContainer
-var _build: HBoxContainer
+var _build: HFlowContainer
 var _produce: HFlowContainer
+var _produce_label: Label
 var _command: PanelContainer
 var _drop_buttons := {} # type -> Button
 var _count_buttons: Array[Button] = []
@@ -61,15 +66,14 @@ func _ready() -> void:
 	var top := _panel(Control.PRESET_CENTER_TOP)
 	top.offset_top = 8
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 22)
+	row.add_theme_constant_override("separation", 14)
 	top.add_child(row)
-	_title = _label(row, "", 17, TEAL)
 	var mass_box := VBoxContainer.new()
 	mass_box.add_theme_constant_override("separation", 0)
 	row.add_child(mass_box)
-	_mass = _label(mass_box, "", 17, MASS)
+	_mass = _label(mass_box, "", 16, MASS)
 	_mass_bar = ProgressBar.new()
-	_mass_bar.custom_minimum_size = Vector2(150, 5)
+	_mass_bar.custom_minimum_size = Vector2(130, 5)
 	_mass_bar.show_percentage = false
 	_mass_bar.max_value = 5000
 	var fill := StyleBoxFlat.new()
@@ -82,9 +86,9 @@ func _ready() -> void:
 	var energy_box := VBoxContainer.new()
 	energy_box.add_theme_constant_override("separation", 0)
 	row.add_child(energy_box)
-	_energy = _label(energy_box, "", 17, ENERGY)
+	_energy = _label(energy_box, "", 16, ENERGY)
 	_energy_bar = ProgressBar.new()
-	_energy_bar.custom_minimum_size = Vector2(150, 5)
+	_energy_bar.custom_minimum_size = Vector2(130, 5)
 	_energy_bar.show_percentage = false
 	_energy_bar.max_value = 25000
 	var efill := StyleBoxFlat.new()
@@ -94,8 +98,8 @@ func _ready() -> void:
 	ebg.bg_color = Color(0.15, 0.13, 0.08)
 	_energy_bar.add_theme_stylebox_override("background", ebg)
 	energy_box.add_child(_energy_bar)
-	_units = _label(row, "", 17, Color(0.85, 0.9, 0.95))
-	_clock = _label(row, "", 17, Color(0.85, 0.9, 0.95))
+	_units = _label(row, "", 16, Color(0.85, 0.9, 0.95))
+	_clock = _label(row, "", 16, Color(0.85, 0.9, 0.95))
 	var leave := Button.new()
 	leave.text = "Leave battle"
 	leave.pressed.connect(func(): view.leave())
@@ -109,18 +113,25 @@ func _ready() -> void:
 	_panels.append(top)
 
 	# Pilots by side (top left) and the feed (top right).
+	# The sector's name heads the pilots panel, which keeps the top bar narrow.
 	var pilots := _panel(Control.PRESET_TOP_LEFT)
 	pilots.offset_left = 10
 	pilots.offset_top = 10
-	_pilots = _label(pilots, "", 14, Color(0.85, 0.9, 0.95))
-	_pilots.custom_minimum_size = Vector2(190, 0)
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 4)
+	pilots.add_child(pv)
+	_title = _label(pv, "", 15, TEAL)
+	_title.custom_minimum_size = Vector2(200, 0)
+	_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pilots = _label(pv, "", 14, Color(0.85, 0.9, 0.95))
+	_pilots.custom_minimum_size = Vector2(200, 0)
 	_panels.append(pilots)
 	_feed = VBoxContainer.new()
 	_feed.add_theme_constant_override("separation", 2)
 	_feed.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	_feed.offset_left = -420
 	_feed.offset_right = -12
-	_feed.offset_top = 64
+	_feed.offset_top = 100
 	_feed.alignment = BoxContainer.ALIGNMENT_BEGIN
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_feed)
@@ -131,30 +142,40 @@ func _ready() -> void:
 	mini.offset_bottom = -10
 	_minimap = Minimap.new()
 	_minimap.view = view
-	_minimap.custom_minimum_size = Vector2(230, 230)
+	_minimap.custom_minimum_size = Vector2(MINIMAP_W, MINIMAP_W)
 	mini.add_child(_minimap)
 	mini.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_panels.append(mini)
 
 	# The command panel (bottom middle): what's selected, its orders and buttons.
-	_command = _panel(Control.PRESET_CENTER_BOTTOM)
+	# It spans the room between the minimap and the call-in panel, and its buttons wrap rather than
+	# run off the screen.
+	_command = _panel(Control.PRESET_BOTTOM_WIDE)
+	_command.offset_left = MINIMAP_W + 24
+	_command.offset_right = -(DROP_W + 24)
 	_command.offset_bottom = -10
+	_command.offset_top = -10
 	_command.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	var cmd := VBoxContainer.new()
 	cmd.add_theme_constant_override("separation", 6)
 	_command.add_child(cmd)
 	_selection = _label(cmd, "", 14, Color(0.85, 0.9, 0.95))
-	_selection.custom_minimum_size = Vector2(520, 0)
+	_selection.custom_minimum_size = Vector2(200, 0)
 	_selection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_orders = HBoxContainer.new()
 	cmd.add_child(_orders)
 	_button(_orders, "Attack-move (A)", func(): view.arm("amove"))
 	_button(_orders, "Stop (S)", func(): view.order_stop())
 	_take = _button(_orders, "Take control (P)", func(): view.take_control())
-	_build = HBoxContainer.new()
+	_build = HFlowContainer.new()
+	_build.add_theme_constant_override("h_separation", 6)
+	_build.add_theme_constant_override("v_separation", 6)
 	cmd.add_child(_build)
+	_produce_label = _label(cmd, "", 14, Color(0.8, 0.85, 0.9))
+	_produce_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_produce = HFlowContainer.new()
-	_produce.custom_minimum_size = Vector2(520, 0)
+	_produce.add_theme_constant_override("h_separation", 6)
+	_produce.add_theme_constant_override("v_separation", 6)
 	cmd.add_child(_produce)
 	_panels.append(_command)
 
@@ -174,14 +195,17 @@ func _ready() -> void:
 	fold.focus_mode = Control.FOCUS_NONE
 	dh.add_child(fold)
 	fold.tooltip_text = "Fold the call-in panel away"
-	_label(dh, "Call in by drop pod (tier 1, full price)", 15, TEAL).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var dl := _label(dh, "Drop pods", 15, TEAL)
+	dl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dl.mouse_filter = Control.MOUSE_FILTER_PASS
+	dl.tooltip_text = "Call units in by drop pod from your carrier: tier 1 only, at full price. They land in your landing zone 6 seconds later."
 	for n in [1, 5, 10]:
 		var b := _button(dh, "x%d" % n, _set_count.bind(n))
 		b.toggle_mode = true
 		b.button_pressed = n == 1
 		_count_buttons.append(b)
 	var grid := GridContainer.new()
-	grid.columns = 2
+	grid.columns = DROP_COLUMNS
 	grid.add_theme_constant_override("h_separation", 6)
 	grid.add_theme_constant_override("v_separation", 6)
 	dv.add_child(grid)
@@ -192,9 +216,9 @@ func _ready() -> void:
 		fold.text = "▾" if grid.visible else "▸"
 		fold.tooltip_text = "Fold the call-in panel away" if grid.visible else "Open the call-in panel")
 	for t in view.economy.get("droppable", DROPPABLE):
-		var b := _button(grid, "", func(): view.call_in(t, drop_count))
-		b.custom_minimum_size = Vector2(150, 30)
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		var b := IconButton.new(t)
+		b.pressed.connect(func(): view.call_in(t, drop_count))
+		grid.add_child(b)
 		_drop_buttons[t] = b
 	drop.set_meta("drop", true)
 	_panels.append(drop)
@@ -226,9 +250,10 @@ func _ready() -> void:
 
 	_help = Label.new()
 	_help.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	_help.offset_top = 56
-	_help.offset_left = -500
-	_help.offset_right = 500
+	_help.offset_top = 58
+	_help.offset_left = -330
+	_help.offset_right = 330
+	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_help.add_theme_font_size_override("font_size", 12)
 	_help.add_theme_color_override("font_color", Color(0.7, 0.78, 0.82, 0.8))
@@ -303,10 +328,13 @@ func _process(delta: float) -> void:
 	for t in _drop_buttons:
 		var cost := int(cat.get(t, {}).get("cost", 0)) * drop_count
 		var energy := int(cat.get(t, {}).get("energy", 0)) * drop_count
-		var b: Button = _drop_buttons[t]
-		b.text = "%s  %s" % [str(cat.get(t, {}).get("name", t)), price(cost, energy)]
-		b.disabled = view.mass + 0.01 < cost or view.energy + 0.01 < energy or view.ended
-		b.tooltip_text = _unit_tip(t)
+		var b: IconButton = _drop_buttons[t]
+		b.set_price(cost, energy)
+		var off: bool = view.mass + 0.01 < cost or view.energy + 0.01 < energy or view.ended
+		if b.disabled != off:
+			b.disabled = off
+			b.queue_redraw()
+		b.tooltip_text = "%s%s  %s\n%s" % [str(cat.get(t, {}).get("name", t)), " x%d" % drop_count if drop_count > 1 else "", price(cost, energy), _unit_tip(t)]
 	var driving: bool = view.driving()
 	# The resign vote: how many of your side's commanders still in the fight have voted.
 	var voters: Array = view.pilots.filter(func(p): return str(p.get("side", "")) == view.my_side and not p.get("out", false))
@@ -414,13 +442,17 @@ func _update_command() -> void:
 			c.free()
 		_build.set_meta("key", builds_key)
 		if want_build:
-			_label(_build, "Build:", 14, Color(0.8, 0.85, 0.9))
 			for s in view.catalog.get(builds_key, {}).get("builds", []):
 				var c: Dictionary = view.catalog.get(s, {})
-				var b := _button(_build, "%s %s" % [str(c.get("name", s)), price(float(c.get("cost", 0)), float(c.get("energy", 0)))], func(): view.arm("build:" + s))
-				b.tooltip_text = _unit_tip(s)
+				var b := IconButton.new(s)
+				b.set_price(int(c.get("cost", 0)), int(c.get("energy", 0)))
+				b.pressed.connect(func(): view.arm("build:" + s))
+				b.tooltip_text = "%s  %s\n%s%s" % [str(c.get("name", s)), price(float(c.get("cost", 0)), float(c.get("energy", 0))), _unit_tip(s),
+					"" if s == "extractor" else "\nClick to place one, or drag for a row."]
+				_build.add_child(b)
 	var want_produce := factory >= 0
 	_produce.visible = want_produce
+	_produce_label.visible = want_produce
 	if not want_produce:
 		_produce_key = ""
 		return
@@ -437,17 +469,21 @@ func _update_command() -> void:
 			c.free()
 		var share := float(view.economy.get("factoryDiscount", 0.5))
 		if fc.has("produces"):
-			_label(_produce, "Tier %d %s, half price:" % [tier, str(fc.get("name", "factory")).to_lower()], 14, Color(0.8, 0.85, 0.9))
+			_produce_label.text = "Tier %d %s, half price" % [tier, str(fc.get("name", "factory")).to_lower()]
 		elif ftype == "extractor":
-			_label(_produce, "Tier %d Mass Extractor: %s mass a second, uses %s energy a second" % [tier, str(fc.mass[tier]), str(fc.drain[tier])], 14, Color(0.8, 0.85, 0.9))
+			_produce_label.text = "Tier %d Mass Extractor: %s mass a second, uses %s energy a second" % [tier, str(fc.mass[tier]), str(fc.drain[tier])]
 		elif ftype == "generator":
-			_label(_produce, "Tier %d Power Generator: %s energy a second" % [tier, str(fc.powers[tier])], 14, Color(0.8, 0.85, 0.9))
+			_produce_label.text = "Tier %d Power Generator: %s energy a second" % [tier, str(fc.powers[tier])]
 		for t in fc.get("produces", []):
 			var c: Dictionary = view.catalog.get(t, {})
 			if int(c.get("tier", 1)) > tier:
 				continue
-			var b := _button(_produce, "%s %s" % [str(c.get("name", t)), price(float(c.get("cost", 0)) * share, float(c.get("energy", 0)) * share)], func(): view.produce(t, drop_count))
-			b.tooltip_text = _unit_tip(t)
+			var b := IconButton.new(t)
+			b.custom_minimum_size = Vector2(54, 68)
+			b.set_price(roundi(float(c.get("cost", 0)) * share), roundi(float(c.get("energy", 0)) * share))
+			b.pressed.connect(func(): view.produce(t, drop_count))
+			b.tooltip_text = "%s  %s\n%s" % [str(c.get("name", t)), price(float(c.get("cost", 0)) * share, float(c.get("energy", 0)) * share), _unit_tip(t)]
+			_produce.add_child(b)
 		_upgrade_label = null
 		var tiers := int(fc.get("tiers", 3))
 		if f.upgrade != null:
