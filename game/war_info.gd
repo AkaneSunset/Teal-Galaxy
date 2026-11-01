@@ -255,7 +255,7 @@ static func supply_lines(planet_id: String) -> Array:
 			continue
 		var s: Dictionary = factions_in[f]
 		var parts := []
-		for src in ["builder", "battle", "arena", "frontier"]:
+		for src in ["builder", "battle", "arena", "frontier", "orders"]:
 			var n := float(s.get("sources", {}).get(src, 0))
 			if n > 0:
 				parts.append("%s %s" % [str(names.get(src, src)), _num(n)])

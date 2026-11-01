@@ -8,9 +8,14 @@
 // of its players are about) and leans hardest on the strongest: intensity 1 for the strongest,
 // down to 0.15 for the weakest and quietest. In each system it pushes in, it matches the strongest
 // faction there by that faction's intensity, or keeps a patrol where no player fleet is.
+//
+// Under all of it sits a safety floor (guard), which no admin setting lifts: a faction that is
+// nearly gone, or has lost a lot this week, gets little of the Coma's pressure, so an overtuned
+// front can't wipe a faction out over a couple of weeks.
 
 const F = require('./factions');
 const N = require('./navy');
+const T = require('./tunables.ts');
 const W = require('./war');
 
 const DIRECTOR_MS = 5 * 60_000; // the director thinks this often
@@ -24,6 +29,8 @@ const ARMADA_MAX = 400;
 const POSTURES = ['push', 'hold', 'withdraw'];
 const HOME = F.FACTIONS.coma.capital; // armadas form up at Comae, and stand down there
 const PLAYERS = F.PLAYABLE; // the factions the director plays against
+const WEEK_MS = 7 * 24 * 3600_000; // the guard measures losses over weeks of this (from the epoch)...
+const DEMO_WEEK_MS = 3600_000; // ...or of this in the demo war
 
 function fail(reason) {
   return { ok: false, reason };
@@ -51,7 +58,9 @@ function ensureDirector(g, now = Date.now()) {
   d.strength ||= {};
   d.auto ||= {};
   d.intensity ||= {};
+  d.guard ||= {};
   for (const f of PLAYERS) {
+    d.guard[f] ??= null;
     d.overrides[f] ??= null;
     d.strength[f] ??= 0;
     d.auto[f] ??= FLOOR;
@@ -86,7 +95,8 @@ function strengths(g, now) {
 }
 
 // Weighs the factions again: strength, the automatic intensity that follows from it (1 for the
-// strongest, easing to 0.15), and the intensity in use (an admin's override, or the automatic one).
+// strongest, easing to 0.15), and the intensity in use (an admin's override, or the automatic one,
+// held down by the safety floor).
 function assess(g, now = Date.now()) {
   const d = g.director;
   const s = strengths(g, now);
@@ -95,6 +105,48 @@ function assess(g, now = Date.now()) {
     d.strength[f] = round3(s[f]);
     d.auto[f] = round3(top > 0 ? FLOOR + ((1 - FLOOR) * s[f]) / top : FLOOR);
     d.intensity[f] = d.overrides[f] ?? d.auto[f];
+  }
+  guard(g, now);
+}
+
+// --- The safety floor --------------------------------------------------------------------
+
+const pct = (x) => `${Math.round(x * 100)}%`;
+const players = (held) => PLAYERS.reduce((a, f) => a + held[f].count, 0);
+
+// What each player faction holds now: how many of the contested sectors, its share of those the
+// player factions hold between them, and its mean orbital control over the contested systems.
+function holdings(g) {
+  const ground = g.war.planets.filter((p) => !p.capital).flatMap((p) => p.sectors);
+  const orbits = contested(g).map((s) => W.shares(g, s.id));
+  const counts = each((f) => ground.filter((s) => s.owner === f).length);
+  const players = PLAYERS.reduce((a, f) => a + counts[f], 0);
+  return each((f) => ({ count: counts[f], sectors: players ? counts[f] / players : 0, orbit: orbits.length ? round3(orbits.reduce((a, sh) => a + sh[f], 0) / orbits.length) : 0 }));
+}
+
+// The safety floor (tunables coma.guard), under everything an admin sets. A faction is guarded
+// while it holds under guard.sectorFloor of the contested sectors the player factions hold, or has
+// lost guard.weeklyLoss of
+// the sectors or the orbital control it had when the director first looked this week (weeks run
+// WEEK_MS from the epoch, so the same clock always gives the same week). A guarded faction's intensity in use is held down so that the scale times it is at most
+// guard.level: the armadas, and the ground forces through intensityFor, ease off it. Admins'
+// own armadas go where they're sent. d.guard says why each faction is guarded (null: it isn't).
+function guard(g, now) {
+  const d = g.director;
+  const t = T.get().coma.guard;
+  const held = holdings(g);
+  const len = W.isDemo() ? DEMO_WEEK_MS : WEEK_MS;
+  const week = Math.floor(now / len) * len;
+  if (d.week?.at !== week) d.week = { at: week, start: held };
+  for (const f of PLAYERS) {
+    const h = held[f];
+    const s = d.week.start[f] || h;
+    let why = null;
+    if (players(held) > 0 && h.sectors < t.sectorFloor) why = `it holds ${pct(h.sectors)} of the sectors the player factions hold, under the floor of ${pct(t.sectorFloor)}`;
+    else if (s.count > 0 && (s.count - h.count) / s.count >= t.weeklyLoss) why = `it has lost ${s.count - h.count} of its ${s.count} sectors this week`;
+    else if (s.orbit > 0.05 && (s.orbit - h.orbit) / s.orbit >= t.weeklyLoss) why = `it has lost ${pct((s.orbit - h.orbit) / s.orbit)} of its orbital control this week`;
+    d.guard[f] = why;
+    if (why && d.scale > 0) d.intensity[f] = round3(Math.min(d.intensity[f], t.level / d.scale));
   }
 }
 
@@ -300,9 +352,13 @@ module.exports = {
   POSTURES,
   HOME,
   PLAYERS,
+  WEEK_MS,
+  DEMO_WEEK_MS,
   ensureDirector,
   strengths,
   assess,
+  holdings,
+  guard,
   compose,
   armadas,
   armadaPower,

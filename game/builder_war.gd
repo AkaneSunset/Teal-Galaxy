@@ -995,7 +995,10 @@ func _faction_dial(f: String, fixed) -> void:
 		var now_d: Dictionary = Net.state.get("director", {})
 		line.text = "%s: strength %d%%, automatic %d%%, in use %d%%" % [ui._faction_name(f),
 			roundi(float(now_d.get("strength", {}).get(f, 0)) * 100), roundi(float(now_d.get("auto", {}).get(f, 0)) * 100),
-			roundi(float(now_d.get("intensity", {}).get(f, 0)) * 100)])
+			roundi(float(now_d.get("intensity", {}).get(f, 0)) * 100)]
+		var why = now_d.get("guard", {}).get(f)
+		if why != null:
+			line.text += ". Safety floor: the Coma eases off, whatever is set, as %s" % str(why))
 	line.modulate = ui._faction_colour(f).lightened(0.3)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)

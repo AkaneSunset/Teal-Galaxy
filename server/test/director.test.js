@@ -44,7 +44,8 @@ const round3 = (x) => Math.round(x * 1000) / 1000;
 test('a new galaxy has a director: unpaused, scale 1, automatic, pushing in every contested system', () => {
   const g = G.newGalaxy();
   const d = g.director;
-  assert.deepStrictEqual(Object.keys(d), ['paused', 'scale', 'overrides', 'posture', 'strength', 'auto', 'intensity', 'runAt']);
+  assert.deepStrictEqual(Object.keys(d), ['paused', 'scale', 'overrides', 'posture', 'strength', 'auto', 'intensity', 'guard', 'runAt', 'week']);
+  assert.deepStrictEqual(d.guard, { compact: null, ashen: null, luminar: null }, 'nobody needs the safety floor at the start');
   assert.deepStrictEqual([d.paused, d.scale], [false, 1]);
   assert.deepStrictEqual(d.overrides, { compact: null, ashen: null, luminar: null });
   assert.deepStrictEqual(d.posture, { 'teal-prime': 'push', marrow: 'push', drift: 'push' });
@@ -349,4 +350,34 @@ test('admins send and recall armadas by hand', () => {
   assert.strictEqual(g.war.log.at(-1).text, 'The Coma armada heading for Marrow Reach is turning back');
   assert.strictEqual(D.recall(g, r.fleet.id, T0 + 60_000).reason, 'that armada is already on its way home');
   assert.strictEqual(W.recallFleet(g, 'compact', r.fleet.id, T0).reason, 'no such fleet', 'and Builders can\'t recall armadas');
+});
+
+test('the safety floor: a faction losing a lot this week, or nearly gone, gets little pressure, whatever the admins set', () => {
+  const g = galaxy('compact', 'ashen');
+  const d = g.director;
+  const week = Math.floor(T0 / D.WEEK_MS) * D.WEEK_MS;
+  assert.ok(D.set(g, { paused: true, scale: 2, overrides: { ashen: 1, compact: 1 } }, T0).ok);
+  d.paused = false; // turns only when the test runs one
+  assert.deepStrictEqual([d.guard.ashen, D.intensityFor(g, 'ashen'), d.week.at], [null, 2, week]);
+  // The Collective loses a third of its sectors this week: guarded. Coma eases off to the floor's
+  // level (0.15), however high the scale and the override; the others are untouched.
+  const ground = () => g.war.planets.filter((p) => !p.capital).flatMap((p) => p.sectors);
+  const mine = ground().filter((s) => s.owner === 'ashen');
+  for (const s of mine.slice(0, Math.ceil(mine.length / 3))) s.owner = 'coma';
+  D.assess(g, T0 + 1000);
+  assert.strictEqual(d.guard.ashen, `it has lost ${Math.ceil(mine.length / 3)} of its ${mine.length} sectors this week`);
+  near(D.intensityFor(g, 'ashen'), 0.15, 'the guarded faction');
+  assert.strictEqual(D.intensityFor(g, 'compact'), 2);
+  // A new week measures from what it holds then: no longer a loss this week.
+  D.assess(g, week + D.WEEK_MS);
+  assert.deepStrictEqual([d.guard.ashen, D.intensityFor(g, 'ashen')], [null, 2]);
+  // Nearly gone: under 10% of the sectors the player factions hold.
+  for (const s of ground().filter((s) => s.owner === 'ashen').slice(1)) s.owner = 'coma';
+  D.assess(g, week + D.WEEK_MS + 1000);
+  assert.match(d.guard.ashen, /^it holds \d+% of the sectors the player factions hold, under the floor of 10%$/);
+  // The armadas follow: with a Collective fleet over the Drift, the director aims for 0.15 of it.
+  const fl = send(g, 'ashen', 'drift', { frigate: 4 }, week + D.WEEK_MS);
+  fl.status = 'stationed';
+  D.run(g, week + D.WEEK_MS + 2000);
+  assert.ok(D.armadaPower(g, 'drift') <= 0.15 * W.power({ frigate: 4 }) + W.power({ corvette: 1 }) + 1e-9, `${D.armadaPower(g, 'drift')}`);
 });

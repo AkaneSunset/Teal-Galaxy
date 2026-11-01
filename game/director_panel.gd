@@ -29,6 +29,7 @@ var _dragging := "" # the slider being dragged ("scale" or a faction), which sta
 var _status: Label
 var _pending := "" # what to say once the state shows the last armada sent or recalled
 var _grid: GridContainer # the player factions, once the catalog has them
+var _guard: Label # which factions the safety floor holds the Coma off, and why
 var _list: VBoxContainer # the contested systems, once the war map has them
 
 
@@ -85,6 +86,9 @@ func _ready() -> void:
 	_grid.add_theme_constant_override("h_separation", 14)
 	_grid.add_theme_constant_override("v_separation", 8)
 	left.add_child(_grid)
+	_guard = _note("")
+	_guard.modulate = Color(1.0, 0.75, 0.35)
+	left.add_child(_guard)
 	for h in ["", "Strength", "Automatic", "In use", "Override"]:
 		var l := Label.new()
 		l.text = h
@@ -284,11 +288,19 @@ func refresh() -> void:
 	if _dragging != "scale":
 		_scale.set_value_no_signal(float(d.get("scale", 1)))
 		_scale_value.text = "x%.2f" % float(d.get("scale", 1))
+	var guarded := []
+	var level := float(Net.catalog.get("tunables", {}).get("coma", {}).get("guard", {}).get("level", 0.15))
 	for f in _rows:
 		var r: Dictionary = _rows[f]
 		r.strength.text = _pct(d.get("strength", {}).get(f, 0))
 		r.auto.text = _pct(d.get("auto", {}).get(f, 0))
 		r.use.text = _pct(d.get("intensity", {}).get(f, 0))
+		var why = d.get("guard", {}).get(f)
+		if why != null:
+			r.use.text += " (floor)"
+			guarded.append("%s: %s." % [WarInfo.faction_name(f), str(why)])
+	_guard.text = "" if guarded.is_empty() else "Safety floor: the Coma keeps to %d%% of its pressure (intensity times the scale) on these factions, whatever is set here.\n%s" % [roundi(level * 100.0), "\n".join(guarded)]
+	_guard.visible = not guarded.is_empty()
 		var fixed = d.get("overrides", {}).get(f)
 		r.fixed.set_pressed_no_signal(fixed == null)
 		if _dragging != f:

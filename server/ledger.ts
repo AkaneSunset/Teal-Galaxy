@@ -5,6 +5,8 @@
 //   battle    campaign matches: Sector Battles, Supremacy, Space Battles, Sector Defense
 //   arena     Facility Battles
 //   frontier  the Frontier's output (nothing feeds it yet)
+//   orders    a won operation: ledger.operation on each of the faction's fronts as the next
+//             campaign starts (orders.js), once every two weeks at most
 //
 // Each match credits every pilot in it ledger.match.win or .loss (times .aiShare against AI only).
 // There is no daily cap. Two sources may each be only so much of a faction's war supply on a
@@ -12,7 +14,8 @@
 // share isn't credited, and the receipt says so. Every credit is multiplied by the faction's
 // underdog multiplier first (ledger.underdog: 0.8 for the strongest to 1.3 for the weakest, from
 // the Coma director's measure of strength), and it never touches anything but war supply.
-// Faction orders pay credits and War Merit, never war supply.
+// Faction orders pay credits and War Merit; war supply from them is small and rare: a little for
+// a won operation, never for an order on its own.
 //
 // In the galaxy as g.war.ledger: fronts (planet -> this campaign's totals by faction, and the
 // last few campaigns'), and receipts (character -> the last few credits to them; never sent to
@@ -20,9 +23,9 @@
 
 const T = require('./tunables.ts');
 
-const SOURCES = ['builder', 'battle', 'arena', 'frontier'] as const;
+const SOURCES = ['builder', 'battle', 'arena', 'frontier', 'orders'] as const;
 type Source = (typeof SOURCES)[number];
-const SOURCE_NAMES: Record<Source, string> = { builder: 'Builder donations', battle: 'battles', arena: 'the arena', frontier: 'the Frontier' };
+const SOURCE_NAMES: Record<Source, string> = { builder: 'Builder donations', battle: 'battles', arena: 'the arena', frontier: 'the Frontier', orders: 'faction orders' };
 const HOUR = 3600_000;
 
 interface Supply {

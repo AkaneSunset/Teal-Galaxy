@@ -39,6 +39,7 @@ const SCHEMA: Spec = {
   },
   ledger: {
     shares: { arena: num(0, 1), frontier: num(0, 1) }, // the most of a front's war supply each source may be
+    operation: num(0, 1000), // war supply on each front in the next campaign for a faction that wins an operation
     underdog: { min: num(0, 1), max: num(1, 3), slope: num(0, 5) }, // the war-supply multiplier's range, and how fast it moves
     perMerit: num(0, 10), // war supply for each War Merit of goods a Builder donates
     match: { win: num(0, 1000), loss: num(0, 1000), aiShare: num(0, 1) }, // war supply to each pilot in a match
@@ -53,6 +54,12 @@ const SCHEMA: Spec = {
   },
   sideLock: {
     on: bool(), // one side per front per account, until the campaign there ends
+  },
+  coma: {
+    // The Coma director's safety floor (director.js guard): a faction holding under sectorFloor of
+    // the contested sectors the player factions hold, or that has lost weeklyLoss of its sectors or orbital control since the
+    // week began, gets at most `level` of the Coma's pressure, whatever the admins have set.
+    guard: { sectorFloor: num(0, 1), weeklyLoss: num(0, 1), level: num(0, 2) },
   },
   telemetry: {
     windowMs: int(1000, 3_600_000), // tick timings are summed up this often
@@ -75,6 +82,7 @@ interface Tunables {
   orders: { reward: { order: number; member: number; operation: number } };
   ledger: {
     shares: { arena: number; frontier: number };
+    operation: number;
     underdog: { min: number; max: number; slope: number };
     perMerit: number;
     match: { win: number; loss: number; aiShare: number };
@@ -83,6 +91,7 @@ interface Tunables {
   };
   accounts: { charactersMax: number; nameMax: number; passwordMin: number; attemptsPerMinute: number };
   sideLock: { on: boolean };
+  coma: { guard: { sectorFloor: number; weeklyLoss: number; level: number } };
   telemetry: { windowMs: number; tickBudgetMs: number; alertsKept: number; eventsKept: number };
   sector: { pilots: number; aiUnits: number; fallbackUnits: number; tickMs: number; p99BudgetMs: number };
 }

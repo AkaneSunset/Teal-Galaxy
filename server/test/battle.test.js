@@ -990,16 +990,22 @@ test('air factories make air units at tiers; shields soak damage; storage raises
   assert.deepStrictEqual([s.massCap, s.energyCap], [B.MASS_CAP + 1500, B.ENERGY_CAP + 8000]);
 });
 
-test('veterancy: kills earn stars that heal and toughen a unit', () => {
+test('veterancy: the value of the enemies killed earns stars that heal and toughen a unit', () => {
   const b = battle();
   const t = B.spawn(b, 'tank', 'a', 'A', 300, 300);
-  for (let i = 0; i < 3; i++) {
-    const v = B.spawn(b, 'scout', 'd', '', 320, 300);
+  const kill = (type) => {
+    const v = B.spawn(b, type, 'd', '', 320, 300);
     v.lastHit = t.id;
     v.hp = 0;
     run(b, 0.1);
-  }
-  assert.strictEqual(t.vet, 1, 'three tier 1 kills: a star');
+  };
+  for (let i = 0; i < 4; i++) kill('scout');
+  assert.deepStrictEqual([t.kills, t.vet], [100, 0], 'four scouts are worth 25 mass each: no star yet');
+  kill('tank');
+  kill('scout');
+  assert.strictEqual(t.vet, 0, '255 mass of kills');
+  kill('striker');
+  assert.deepStrictEqual([t.kills, t.vet], [310, 1], 'a Striker more takes it past 300: a star');
   assert.ok(Math.abs(t.maxHp - B.CATALOG.tank.hp * 1.1) < 1e-6);
   assert.deepStrictEqual(B.frame(b).units.find((u) => u[0] === t.id)[9], 1);
 });

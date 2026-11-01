@@ -56,10 +56,12 @@ const EXTRACTOR_DRAIN = 5;
 const EXTRACTOR_UPGRADE = { 2: { cost: 300, energy: 1500 }, 3: { cost: 900, energy: 6000 } };
 const GENERATOR_UPGRADE = { 2: { cost: 200, energy: 0 }, 3: { cost: 600, energy: 0 } };
 const STORAGE = { massstorage: { mass: 1500 }, energystorage: { energy: 8000 } };
-// Veterancy: a unit earns a star at each of these kill scores (a kill scores the victim's tier;
-// an ACU 10, a Command Node 5, any other structure 1). Each star restores a quarter of its health
-// and adds a tenth to it, and it mends VET_REGEN hit points a second per star.
-const VET_STARS = [3, 8, 15, 25, 40];
+// Veterancy: a unit earns a star at each of these kill scores, the mass value of the enemies it
+// has killed (what the victim cost, upgrades and all; an ACU, a Command Node and an outpost, which
+// cost nothing, count VET_VALUE). Each star restores a quarter of its health and adds a tenth to
+// it, and it mends VET_REGEN hit points a second per star.
+const VET_STARS = [300, 800, 1500, 2500, 4000];
+const VET_VALUE = { acu: 1000, node: 500, outpost: 300 };
 const VET_REGEN = 1.5;
 const TIERED = ['striker', 'tank', 'artillery', 'aa', 'fighter', 'bomber', 'gunship'];
 const TIER_SCALE = { hp: 1.8, damage: 1.6, speed: 1.15, range: 1.1, radius: 1.25, cost: 2.2, energy: 2.5 }; // per tier above 1
@@ -1066,10 +1068,18 @@ function bury(b) {
   if (!b.result && attackers.length && attackers.every((p) => p.out)) [b.result, b.how] = ['d', 'acus'];
 }
 
-// A kill scores the victim's worth toward the killer's next veterancy star.
+// What a unit is worth to whoever kills it: its mass cost, with any upgrades it had.
+function killValue(u) {
+  const c = CATALOG[u.type];
+  if (VET_VALUE[u.type]) return VET_VALUE[u.type];
+  let v = c.cost;
+  for (let t = 2; t <= (u.tier || 1); t++) v += c.upgrade?.[t]?.cost || 0;
+  return v;
+}
+
+// A kill scores the victim's value toward the killer's next veterancy star.
 function veteran(b, k, victim) {
-  const c = CATALOG[victim.type];
-  k.kills += c.acu ? 10 : victim.type === 'node' ? 5 : isStructure(victim) ? 1 : tierOf(victim.type);
+  k.kills += killValue(victim);
   while (k.vet < VET_STARS.length && k.kills >= VET_STARS[k.vet]) {
     k.vet += 1;
     k.maxHp *= 1.1;

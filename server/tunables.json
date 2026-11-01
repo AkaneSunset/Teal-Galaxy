@@ -15,6 +15,7 @@
   },
   "ledger": {
     "shares": { "arena": 0.15, "frontier": 0.4 },
+    "operation": 25,
     "underdog": { "min": 0.8, "max": 1.3, "slope": 0.5 },
     "perMerit": 0.05,
     "match": { "win": 10, "loss": 4, "aiShare": 0.5 },
@@ -29,6 +30,9 @@
   },
   "sideLock": {
     "on": true
+  },
+  "coma": {
+    "guard": { "sectorFloor": 0.1, "weeklyLoss": 0.3, "level": 0.15 }
   },
   "telemetry": {
     "windowMs": 60000,

@@ -320,7 +320,7 @@ test('admins over the wire: the key, Coma characters, the director and armadas, 
     none.send({ type: 'hello', role: 'explorer', name: 'Pilot B' });
     const welcomes = await Promise.all([admin, wrong, short, none].map((c) => c.next((m) => m.type === 'welcome')));
     assert.deepStrictEqual(welcomes.map((w) => w.admin), [true, false, false, false], 'the right key, a wrong one, a short one, none');
-    assert.deepStrictEqual(Object.keys(welcomes[0].state.director), ['paused', 'scale', 'overrides', 'posture', 'strength', 'auto', 'intensity', 'runAt']);
+    assert.deepStrictEqual(Object.keys(welcomes[0].state.director), ['paused', 'scale', 'overrides', 'posture', 'strength', 'auto', 'intensity', 'guard', 'runAt', 'week']);
     for (const w of welcomes.slice(1)) assert.strictEqual(w.state.director, undefined, 'the director is for admins only');
     assert.strictEqual(server.galaxy.bases.Akane.seenAt, clock, 'seen on hello');
 

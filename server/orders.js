@@ -19,6 +19,7 @@
 
 const C = require('./campaign');
 const F = require('./factions');
+const L = require('./ledger.ts');
 const T = require('./tunables.ts');
 const W = require('./war');
 
@@ -314,13 +315,30 @@ function payFaction(g, faction, credits, pay, why) {
   for (const [name, b] of Object.entries(g.bases || {})) if (b.faction === faction) pay(name, credits, why);
 }
 
-// The operation is over: a faction that won most of its orders earns its reward and a commendation.
+// A faction won an operation: a little war supply (ledger.operation) on each front it's fighting on,
+// the campaigns that start as the operation ends. Returns the war log's words for it ('' for none).
+function operationSupply(g, faction, now) {
+  const names = [];
+  let each = 0;
+  for (const planet of Object.keys(g.war.campaigns || {})) {
+    const r = L.credit(g, { planet, faction, source: 'orders', base: T.get().ledger.operation, factionName: (f) => F.FACTIONS[f]?.name || f }, now);
+    if (!(r?.credited > 0)) continue;
+    each = r.credited; // the same on every front: orders have no share to cap them
+    names.push(W.planet(g, planet)?.name || planet);
+  }
+  return names.length ? ` +${each} war supply on each of its fronts in the campaign starting (${names.join(', ')}).` : '';
+}
+
+// The operation is over: a faction that won most of its orders earns its reward, a commendation,
+// and a little war supply on its fronts.
 function finishOperation(g, op, pay, now) {
   const archive = { id: op.id, name: op.name, startsAt: op.startsAt, endsAt: op.endsAt, factions: {} };
   for (const f of PLAYER_FACTIONS) {
     const rec = op.factions[f];
     rec.status = rec.won >= 2 ? 'won' : 'failed';
+    let supply = '';
     if (rec.status === 'won') {
+      supply = operationSupply(g, f, now);
       payFaction(g, f, REWARD.operation, pay, `${op.name} won`);
       for (const p of [...Object.values(g.pilots || {}), ...Object.values(g.bases || {})]) {
         if (p.faction !== f) continue;
@@ -328,7 +346,7 @@ function finishOperation(g, op, pay, now) {
         p.commendations.push(op.name);
       }
     }
-    log(g, `${VOICES[f].issuer}: ${op.name} ${rec.status === 'won' ? `won, ${rec.won} of 3 orders. +${REWARD.operation} credits and a commendation to every member.` : `ended with ${rec.won} of 3 orders won. No reward this time.`}`, now, f);
+    log(g, `${VOICES[f].issuer}: ${op.name} ${rec.status === 'won' ? `won, ${rec.won} of 3 orders. +${REWARD.operation} credits and a commendation to every member.${supply}` : `ended with ${rec.won} of 3 orders won. No reward this time.`}`, now, f);
     archive.factions[f] = { won: rec.won, status: rec.status, orders: ordersOf(op, f).map((o) => ({ title: o.title, kind: o.kind, status: o.status, outcome: o.outcome, contributors: Object.keys(o.contrib).length })) };
   }
   g.war.orders.archive.unshift(archive);

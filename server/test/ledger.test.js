@@ -26,13 +26,14 @@ test('credits by source, with no daily cap, and receipts for whoever earned them
   assert.strictEqual(r.text, '+10 war supply for the Terran Compact on Cinder from battles');
   const v = L.frontView(g, 'cinder', t + 60);
   assert.strictEqual(v.factions.compact.total, 1010, 'a thousand from one Builder in a day: no cap');
-  assert.deepStrictEqual(v.factions.compact.sources, { builder: 1000, battle: 10, arena: 0, frontier: 0 });
+  assert.deepStrictEqual(v.factions.compact.sources, { builder: 1000, battle: 10, arena: 0, frontier: 0, orders: 0 });
   assert.strictEqual(v.factions.compact.perHour, 1010);
   assert.strictEqual(L.receipts(g, 'builder/Akane').length, 20, 'the last ledger.receiptsKept receipts');
   assert.strictEqual(L.receipts(g, 'explorer/Kite')[0].credited, 10);
   assert.strictEqual(L.frontView(g, 'cinder', t + 60 + 3600_000).factions.compact.perHour, 0, 'the rate is over the last hour');
   assert.strictEqual(L.credit(g, { planet: 'bastion', faction: 'compact', source: 'battle', base: 10 }, t), null, 'no campaign on a capital world');
-  assert.strictEqual(L.credit(g, { planet: 'cinder', faction: 'compact', source: 'orders', base: 10 }, t), null, 'orders never pay war supply');
+  assert.strictEqual(L.credit(g, { planet: 'cinder', faction: 'compact', source: 'orders', base: 10 }, t).credited, 10, 'a won operation pays a little');
+  assert.strictEqual(L.credit(g, { planet: 'cinder', faction: 'compact', source: 'bribes', base: 10 }, t), null, 'nothing else pays war supply');
 });
 
 test('the arena is at most 15% of a faction\'s war supply on a front, the Frontier at most 40%', () => {

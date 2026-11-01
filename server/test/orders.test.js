@@ -5,6 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const C = require('../campaign');
 const G = require('../galaxy');
+const L = require('../ledger.ts');
 const O = require('../orders');
 const W = require('../war');
 
@@ -107,7 +108,7 @@ test("leading and holding read the planet's campaign; at the deadline a won orde
   assert.ok(g.war.log.some((e) => e.text.includes(O.VOICES.ashen.lost)));
 });
 
-test('win two of three and the operation is won: a bigger reward, a commendation, and the archive', () => {
+test('win two of three and the operation is won: a bigger reward, a commendation, a little war supply, and the archive', () => {
   const { g, t, paid, pay } = setup();
   O.tick(g, pay, t);
   const op = g.war.orders.op;
@@ -118,9 +119,16 @@ test('win two of three and the operation is won: a bigger reward, a commendation
       // The Collective wins its first two orders; the others none.
       o.tasks = [{ type: 'wins', need: 1, have: f === 'ashen' && slot < 2 ? 1 : 0, done: f === 'ashen' && slot < 2, label: '' }];
     }
-    O.tick(g, pay, op.startsAt + Math.round(((slot + 1) * O.DEMO_OP_MS) / 3));
+    const at = op.startsAt + Math.round(((slot + 1) * O.DEMO_OP_MS) / 3);
+    if (slot === 2) C.tick(g, at); // the next campaigns start as the operation ends, as on the server
+    O.tick(g, pay, at);
   }
   assert.strictEqual(g.war.orders.op.id === op.id, false, 'a new operation began');
+  // The winners' war supply: ledger.operation on each front of the campaigns starting, and no more.
+  const cinder = L.frontView(g, 'cinder', op.endsAt).factions;
+  assert.ok(Math.abs(cinder.ashen.sources.orders - 25 * L.multiplier(g, 'ashen')) < 0.1, `${cinder.ashen.sources.orders}`);
+  assert.strictEqual(cinder.compact, undefined, 'a failed operation pays none');
+  assert.match(g.war.log.find((e) => e.faction === 'ashen' && /won, 2 of 3/.test(e.text)).text, /\+[\d.]+ war supply on each of its fronts in the campaign starting \(Cinder, /);
   const [arch] = g.war.orders.archive;
   assert.strictEqual(arch.name, op.name);
   assert.deepStrictEqual([arch.factions.ashen.status, arch.factions.ashen.won], ['won', 2]);

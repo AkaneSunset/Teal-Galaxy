@@ -310,7 +310,8 @@ points still decide the planet.
 
 - **Sources:** Builder donations to the front (1 for every 20 War Merit of goods), battles (every pilot
   in a campaign match: 10 for a win and 4 for a loss, half against AI only), the arena (Facility
-  Battles, paid the same way) and the Frontier (to come).
+  Battles, paid the same way), the Frontier (to come) and faction orders: a faction that wins an
+  operation gets 25 on each of its fronts as the next campaign starts, and no order pays any on its own.
 - **No daily cap.** A side can send as much as it likes. But the arena may be **at most 15%** of a
   faction's war supply on a front, and the Frontier at most 40%: whatever would go past that isn't
   credited, and the receipt says so.
@@ -344,7 +345,8 @@ twenty minutes an order). Win two of the three and the operation is won.
   to 12), 60 War Merit and 30 per Builder (up to 10). A faction with no Builders isn't asked for
   donations.
 - **Rewards:** a won order pays 250 credits to everyone who took part and 50 to every member. A won
-  operation pays 750 credits to every member, plus a commendation with the operation's name. A failed
+  operation pays 750 credits to every member, plus a commendation with the operation's name, and a
+  little [war supply](#war-supply-on-the-fronts) on each of the faction's fronts. A failed
   order pays nothing, and High Command puts its own spin on it.
 - **Where to see them:** the **HIGH COMMAND** terminal on a carrier's Command Deck, the War terminal's
   **Orders**, and the Builder app's War screen (**Orders** tab). Each shows the operation, the three
@@ -620,6 +622,14 @@ when it has more than 1.25 times what it needs it calls its smallest armadas hom
 stay under 600 power times the scale; when that limit bites, the systems with the strongest factions
 come first.
 
+**The safety floor.** Under all of that, and under anything an admin sets, the director won't wipe a
+faction out: a player faction is *guarded* while it holds under 10% of the contested sectors the player
+factions hold between them, or has lost 30% of its sectors or of its orbital control since the week
+began. While it's guarded, its intensity in use is held down so that the scale times it is at most 15%,
+so the armadas (and, later, the Coma's ground forces) ease off it. Armadas an admin sends by hand still
+go where they're sent. The Director pages say which factions are guarded and why; the numbers are
+`coma.guard` in the rules file.
+
 **What players see.** Armadas are ships in space: every war map shows them, as a *Coma armada* (a
 diamond on the maps) with its ships, and they fight, hold orbit and count for orbital control like any
 fleet. They need no supplies, and they stand down when they get home to Comae. The war log says what
@@ -892,8 +902,10 @@ than the tier below (per tier: 1.8x hit points, 1.6x damage, 1.15x speed, 1.1x r
 bigger) and dearer. Defences: Turrets, **AA Turrets** and the **Shield Generator** (engineers only), whose
 dome soaks the damage done to everything under it while it has charge (it uses 50 energy a second).
 
-**Veterancy.** Units earn up to five stars (gold pips over the health bar) from kills; each star restores
-a quarter of their health, adds a tenth to it and mends them faster.
+**Veterancy.** Units earn up to five stars (gold pips over the health bar) from the value of the enemies
+they kill, not how many: what each victim cost in mass, upgrades included (an ACU counts 1000, a Command
+Node 500). The stars come at 300, 800, 1500, 2500 and 4000. Each star restores a quarter of the unit's
+health, adds a tenth to it and mends it faster.
 
 **Winning.** The defender gets a **Command Node** (and a drop zone by it) for every attacking commander; a
 defending pilot who joins takes command of one nobody commands. The attackers win when **every Command
