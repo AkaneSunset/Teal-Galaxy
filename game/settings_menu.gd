@@ -58,6 +58,12 @@ func _ready() -> void:
 	invert.button_pressed = controls.invert_mouse
 	invert.toggled.connect(func(on): controls.invert_mouse = on; controls.save_settings())
 	col.add_child(invert)
+	var third := CheckBox.new()
+	third.name = "ThirdPerson"
+	third.text = "Third person on foot in stations, carriers and bases (%s switches)" % controls.binding_text("foot_camera", false)
+	third.button_pressed = controls.foot_third_person
+	third.toggled.connect(func(on): controls.foot_third_person = on; controls.save_settings())
+	col.add_child(third)
 
 	var sens_row := HBoxContainer.new()
 	var sens_label := Label.new()

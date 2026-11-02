@@ -295,7 +295,7 @@ func _lift_doors(pos: Vector3, facing: Vector3, label: String) -> void:
 func _ride_lift(up: bool) -> void:
 	_stand_at(_lift_top if up else _lift_bottom)
 	_pitch = 0.0
-	_camera.rotation.x = 0.0
+	_place_view()
 	_say("Command level: Bridge, Command Deck, Crew Lounge" if up else "Hangar Deck", 2.5)
 
 
