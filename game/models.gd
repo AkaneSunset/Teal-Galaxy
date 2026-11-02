@@ -23,7 +23,7 @@ const RAMPS := {
 }
 
 ## Every model, by name, for the showcase and the exporter.
-const ALL := ["starter_ship", "mining_laser", "ice_canister", "nav_beacon", "loot_crate",
+const ALL := ["starter_ship", "fleet_carrier", "mining_laser", "ice_canister", "nav_beacon", "loot_crate",
 	"keycard", "habitat_dome", "ice_asteroid", "metal_asteroid"]
 
 
@@ -38,6 +38,14 @@ static func material(kind: String) -> StandardMaterial3D:
 		return _materials[kind]
 	var m := StandardMaterial3D.new()
 	m.roughness = 0.5
+	# "paint:<html colour>": a hull painted in a faction's colour (see paint()).
+	if kind.begins_with("paint:"):
+		m.albedo_color = Color.html(kind.substr(6))
+		m.metallic = 0.25
+		m.roughness = 0.45
+		# A faint glow of its own, so the side away from the sun still reads as painted hull.
+		m.emission_enabled = true
+		m.emission = m.albedo_color * 0.22
 	match kind:
 		"teal":
 			m.albedo_color = TEAL
@@ -75,8 +83,27 @@ static func material(kind: String) -> StandardMaterial3D:
 			m.roughness = 0.3
 			m.emission_enabled = true # reads as shiny metal even without reflections
 			m.emission = Color(0.3, 0.32, 0.36)
+		"deck":
+			m.albedo_color = Color(0.26, 0.28, 0.32)
+			m.roughness = 0.8
+			m.emission_enabled = true
+			m.emission = Color(0.05, 0.055, 0.065)
+		"dark":
+			m.albedo_color = Color(0.05, 0.06, 0.08)
+			m.roughness = 0.9
+		"window":
+			m.albedo_color = Color(0.55, 0.9, 1.0)
+			m.emission_enabled = true
+			m.emission = Color(0.45, 0.85, 1.0)
+			m.emission_energy_multiplier = 1.4
 	_materials[kind] = m
 	return m
+
+
+## The material kind for a hull painted `colour` (a faction's), toned down toward steel grey.
+static func paint(colour: Color, light := false) -> String:
+	var c := colour.lerp(STEEL, 0.35)
+	return "paint:" + (c.lightened(0.25) if light else c).to_html(false)
 
 
 # --- Building blocks ---------------------------------------------------------------
@@ -217,6 +244,74 @@ static func starter_ship() -> Node3D:
 		block(n, Vector3(1.0, 0.45, 1.4), "teal_light", Vector3(1.3 * s, 1.5, 5.0), 0.15) # pod cap
 		for z in [-2.2, 0.2]:
 			block(n, Vector3(0.12, 0.35, 0.9), "amber", Vector3(2.15 * s, -0.3, z), 0.04) # side lights
+	return n
+
+
+## Where the pilot sits on a fleet carrier: behind the bridge windows, high on the island. A carrier's
+## position in space (and in the `ship` relay) is this point, so the model is drawn offset by it.
+const CARRIER_BRIDGE := Vector3(22, 46.5, 13.5)
+const CARRIER_LENGTH := 262.0
+
+## A fleet carrier, the demo's ship: a long, heavy hull about 260 m from bow to engines with a flight
+## deck on top, the bridge island to starboard, hangar doors at the stern and on the port side, four
+## engines, gun turrets along its sponsons. Painted in `colour` (its pilot's faction). Origin at the
+## middle of the hull; the bow faces -Z.
+static func fleet_carrier(colour := TEAL) -> Node3D:
+	var n := _root("fleet_carrier")
+	var hull := paint(colour)
+	var light := paint(colour, true)
+	block(n, Vector3(52, 26, 228), hull, Vector3(0, 0, 4), 4.0) # main hull
+	block(n, Vector3(44, 20, 36), light, Vector3(0, -1, -124), 6.0) # bow
+	block(n, Vector3(28, 12, 22), hull, Vector3(0, -3, -146), 5.0) # prow
+	block(n, Vector3(30, 6, 190), "navy", Vector3(0, -15, 0), 2.0) # keel
+	# The flight deck, a little wider than the hull, with its centre line and edge lights.
+	block(n, Vector3(64, 2.4, 236), "deck", Vector3(0, 14, -10), 0.8)
+	for z in range(-118, 100, 22):
+		block(n, Vector3(1.4, 0.3, 12), "amber", Vector3(-6, 15.3, z), 0.1)
+	for x in [-31.5, 31.5]:
+		for z in range(-120, 104, 16):
+			block(n, Vector3(0.8, 0.4, 3.0), "amber", Vector3(x, 15.2, z), 0.1)
+	for i in 4:
+		block(n, Vector3(14, 0.35, 14), "steel", Vector3(-6, 15.2, -80 + i * 40), 0.2) # lifts to the hangar
+	# Sponsons down each side, with turrets.
+	for s in [-1, 1]:
+		block(n, Vector3(10, 12, 160), hull, Vector3(31 * s, -4, 4), 2.0)
+		block(n, Vector3(10.4, 1.2, 156), "navy", Vector3(31 * s, 1.2, 4), 0.4)
+		for z in [-60, -20, 30, 70]:
+			drum(n, 3.2, 2.6, "steel", Vector3(31 * s, 3.4, z), Vector3.ZERO, 10)
+			for b in [-0.8, 0.8]:
+				block(n, Vector3(0.7, 0.7, 9), "navy", Vector3(31 * s + b, 4.2, z - 6), 0.2)
+		for z in range(-70, 90, 12):
+			block(n, Vector3(0.4, 1.4, 4), "window", Vector3(36.2 * s, -3, z), 0.1) # portholes
+	# The port hangar door: where the docking arm meets the ship at a berth.
+	block(n, Vector3(1.2, 10, 30), "dark", Vector3(-36.4, -4, 20), 0.3)
+	block(n, Vector3(1.4, 0.8, 32), "amber", Vector3(-36.5, 1.6, 20), 0.2)
+	# The bridge island to starboard: a tower with the bridge on top, a mast and a radar.
+	block(n, Vector3(14, 32, 58), hull, Vector3(22, 31, 36), 2.5)
+	block(n, Vector3(12, 6, 30), light, Vector3(22, 20, 4), 2.0) # forward flank
+	block(n, Vector3(20, 8, 26), light, Vector3(22, 46.5, 27), 2.0) # the bridge
+	block(n, Vector3(20.4, 2.6, 0.8), "window", Vector3(22, 46.8, 14.2), 0.3) # bridge windows
+	for s in [-1, 1]:
+		block(n, Vector3(0.8, 2.6, 18), "window", Vector3(22 + 10.2 * s, 46.8, 25), 0.3)
+	block(n, Vector3(22, 1.2, 28), "navy", Vector3(22, 51.2, 27), 0.4)
+	drum(n, 1.4, 26, "steel", Vector3(22, 64, 38), Vector3.ZERO, 8) # mast
+	block(n, Vector3(12, 0.8, 3), "steel", Vector3(22, 72, 38), 0.2) # radar
+	ball(n, 1.2, "amber", Vector3(22, 77.5, 38)) # mast light
+	for y in [30, 36]:
+		for z in range(16, 60, 8):
+			block(n, Vector3(0.4, 1.6, 4.4), "window", Vector3(29.2, y, z), 0.1)
+	# The stern: the launch doors, the engine block and four engines.
+	block(n, Vector3(40, 18, 1.2), "dark", Vector3(0, -1, 118.4), 0.3)
+	block(n, Vector3(42, 1.0, 1.4), "amber", Vector3(0, 8.6, 118.6), 0.2)
+	block(n, Vector3(48, 22, 14), "navy", Vector3(0, 0, 126), 3.0)
+	for x in [-14, 14]:
+		for y in [-6, 6]:
+			drum(n, 7.5, 18, hull, Vector3(x, y, 128), Vector3(90, 0, 0), 14)
+			drum(n, 6.0, 2.0, "amber", Vector3(x, y, 137.5), Vector3(90, 0, 0), 14)
+	# Running lights: amber along the sides and bow, so the shape reads at a distance.
+	for s in [-1, 1]:
+		for z in [-140, -100, 110]:
+			block(n, Vector3(1.2, 1.2, 1.2), "amber", Vector3(23 * s, 6, z), 0.2)
 	return n
 
 

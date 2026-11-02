@@ -1,11 +1,16 @@
-// Satellite sites: each facility a Builder owns sits on its own site off their home planet,
-// with a free grid where the Builder lays out defences around the facility core.
+// Outposts (satellite sites): each facility a Builder owns sits on its own site, in a sector of a
+// contested planet their faction holds (war.js), with a free grid where the Builder lays out
+// defences around the facility core.
 // Sites are kept in g.system.planets with kind 'satellite' (one building, slot 0, the facility),
 // so raids and the rest of the game still address a facility as (planet id, slot).
+// An outpost carries `parent` (the planet it's on), `sector`, `faction` and `dormant`; sites from
+// before the war have no sector and sit on their Builder's home planet until it picks a faction.
 
 const GRID = 12; // tiles per side
 const CORE = { w: 4, h: 4 }; // the facility itself, in the middle of the grid
-const MAX_SITES = 3; // satellite sites per Builder
+const MAX_SITES = 5; // outposts per Builder
+const PER_SECTOR = 3; // outposts in one sector, all Builders together
+const NUDGE = 4; // degrees between outposts in one sector, so each stands apart on the hologram
 
 const PIECES = {
   turret: { name: 'Turret', w: 2, h: 2, cost: { metal: 20, alloy: 5 }, attack: 4, hull: 20, seconds: 30 },
@@ -44,32 +49,57 @@ function pieceRect(p) {
   return { x: p.x, y: p.y, w: def.w, h: def.h };
 }
 
-// A new site record for `owner`'s facility (called `facilityName`) off their planet `home`.
-function newSite(g, owner, home, facilityName) {
+// The outposts in one sector, all Builders'.
+function sectorSites(g, sectorId) {
+  return g.system.planets.filter((p) => p.kind === 'satellite' && p.sector === sectorId);
+}
+
+// A new outpost record for `owner`'s facility (called `facilityName`) in `sector` of the war
+// planet `planet`, for `faction`. Says why not if the Builder or the sector is full.
+function newSite(g, owner, planet, sector, faction, facilityName) {
   const ownSites = g.system.planets.filter((p) => p.kind === 'satellite' && p.owner === owner);
-  if (ownSites.length >= MAX_SITES) return fail(`you already have ${MAX_SITES} satellite sites`);
-  const siblings = g.system.planets.filter((p) => p.kind === 'satellite' && p.parent === home.id);
-  const orbit = [0, 1, 2, 3, 4, 5, 6, 7].find((o) => !siblings.some((s) => s.orbit === o));
-  if (orbit === undefined) return fail(`no room left in orbit around ${home.name}`);
+  if (ownSites.length >= MAX_SITES) return fail(`you already have ${MAX_SITES} outposts`);
+  if (sectorSites(g, sector.id).length >= PER_SECTOR) return fail(`${sector.name} already has ${PER_SECTOR} outposts`);
   let n = 1;
-  while (g.system.planets.some((p) => p.id === `${home.id}-site-${n}`)) n++;
-  return {
-    ok: true,
-    site: {
-      id: `${home.id}-site-${n}`,
-      name: `${home.name} ${facilityName}`,
-      kind: 'satellite',
-      owner,
-      parent: home.id,
-      orbit,
-      slots: 1,
-      grid: GRID,
-      pieces: [],
-      obstacles: [],
-      nextPiece: 1,
-      buildings: [],
-    },
+  while (g.system.planets.some((p) => p.id === `${planet.id}-op-${n}`)) n++;
+  const site = {
+    id: `${planet.id}-op-${n}`,
+    kind: 'satellite',
+    owner,
+    faction,
+    slots: 1,
+    grid: GRID,
+    pieces: [],
+    obstacles: [],
+    nextPiece: 1,
+    buildings: [],
+    dormant: false,
   };
+  settle(g, site, planet, sector, facilityName);
+  return { ok: true, site };
+}
+
+// Puts an outpost in `sector` of `planet`: its parent, name and the first free place in the sector.
+function settle(g, site, planet, sector, facilityName) {
+  const others = sectorSites(g, sector.id).filter((p) => p !== site && Array.isArray(p.surface));
+  let i = 0;
+  while (others.some((p) => angleBetween(p.surface, sectorSpot(sector, i)) < 1)) i++;
+  site.surface = sectorSpot(sector, i);
+  site.parent = planet.id;
+  site.sector = sector.id;
+  site.name = `${sector.name} ${facilityName}`;
+  delete site.orbit;
+}
+
+// Where the `index`th outpost of a sector stands: the first at the sector's centre, the next ones
+// on a small ring round it.
+function sectorSpot(sector, index) {
+  if (index <= 0) return [sector.lat, sector.lon];
+  const a = ((index - 1) * 2 * Math.PI) / Math.max(2, PER_SECTOR - 1) + Math.PI / 2;
+  const lat = Math.max(-89, Math.min(89, sector.lat + NUDGE * Math.cos(a)));
+  const lon = sector.lon + (NUDGE * Math.sin(a)) / Math.max(0.2, Math.cos((sector.lat * Math.PI) / 180));
+  const round = (x) => Math.round(x * 10) / 10;
+  return [round(lat), round(((lon % 360) + 360) % 360)];
 }
 
 // --- Where sites sit on the planet ----------------------------------------------------------
@@ -98,13 +128,14 @@ function surfaceSpot(taken) {
   return best;
 }
 
-// Gives every home planet and site that has no place on its planet one, in founding order.
+// Gives every home planet and site from before the war that has no place on its planet one, in
+// founding order. Outposts in a sector have their place from the sector, so this leaves them alone.
 // Safe to call any time (on load, after founding a site): places already given never change.
 function locate(g) {
   for (const home of g.system.planets.filter((p) => p.kind !== 'satellite')) {
     if (!Array.isArray(home.surface)) home.surface = HOME_SPOT.slice();
     for (const site of g.system.planets.filter((p) => p.kind === 'satellite' && p.parent === home.id)) {
-      if (Array.isArray(site.surface)) continue;
+      if (site.sector || Array.isArray(site.surface)) continue;
       const taken = [home.surface, ...g.system.planets
         .filter((p) => p.kind === 'satellite' && p.parent === home.id && Array.isArray(p.surface))
         .map((p) => p.surface)];
@@ -181,16 +212,4 @@ function clear(site, obstacleId, e) {
   return { ok: true, name: def.name, salvage: def.salvage };
 }
 
-// Total attack and hull of a site's defences, for fleet attacks.
-function defence(site, now = Date.now()) {
-  let attack = 0;
-  let hull = 0;
-  for (const p of site.pieces || []) {
-    if (p.readyAt && now < p.readyAt) continue; // still being built
-    attack += PIECES[p.type].attack;
-    hull += PIECES[p.type].hull;
-  }
-  return { attack, hull };
-}
-
-module.exports = { GRID, CORE, MAX_SITES, PIECES, OBSTACLES, coreRect, newSite, scatter, place, remove, clear, defence, locate, angleBetween };
+module.exports = { GRID, CORE, MAX_SITES, PER_SECTOR, PIECES, OBSTACLES, coreRect, sectorSites, newSite, settle, sectorSpot, scatter, place, remove, clear, locate, angleBetween };

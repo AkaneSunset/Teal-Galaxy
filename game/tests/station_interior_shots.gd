@@ -35,6 +35,7 @@ var _planet := "aster"
 var _i := -1
 var _wait := 2.0
 var _flown := false
+var _joined := false # asked to join a faction
 
 
 func _ready() -> void:
@@ -54,6 +55,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_wait -= delta
 	if Net.state.is_empty() or _wait > 0:
+		return
+	# A pilot with no side gets the faction choice over everything, so the Photographer picks one.
+	if _explorer._me().get("faction") == null:
+		if not _joined:
+			_joined = true
+			Net.send({"type": "choose_faction", "faction": "compact"})
 		return
 	if _i == -1:
 		if not _explorer._stations.has(_planet):

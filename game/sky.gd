@@ -35,17 +35,27 @@ func _ready() -> void:
 	add_child(_camera)
 	_camera.make_current()
 
+	_add_bodies()
+	_add_background_stars()
+
+
+## The star and planets of the system the ship is in, the star lighting them.
+func _add_bodies() -> void:
 	for body in System.bodies():
 		_bodies.append({"node": _make_body(body), "pos": body.pos, "radius": body.radius})
-
-	# The star lights the planets.
 	var light := OmniLight3D.new()
 	light.omni_range = 4.0e9
 	light.omni_attenuation = 0.0
 	light.light_energy = 1.4
 	_bodies[0].node.add_child(light)
 
-	_add_background_stars()
+
+## Another system (a fleet carrier's jump): its star and planets in place of these.
+func rebuild() -> void:
+	for b in _bodies:
+		(b.node as Node3D).queue_free()
+	_bodies = []
+	_add_bodies()
 
 
 ## Adds a planet that appeared after the sky was built (a new Builder's home).

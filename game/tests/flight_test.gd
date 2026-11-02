@@ -16,6 +16,7 @@ func _init() -> void:
 	_pips()
 	_phase_shift()
 	_mass_lock()
+	_carrier()
 	print("flight tests: %s" % ("FAIL" if _failed else "PASS"))
 	quit(1 if _failed else 0)
 
@@ -130,3 +131,22 @@ func _mass_lock() -> void:
 	var f := Flight.new()
 	var said := f.step({"phase": true}, {"mass_locked": true, "altitude": 1.0e9}, 0.016)
 	_check(f.mode == Flight.Mode.SUBLIGHT and said[0].begins_with("Mass locked"), "phase-shift refuses near a station")
+
+
+func _carrier() -> void:
+	# The fleet carrier: heavier, so slower to get going and to turn, but still boosts.
+	var f := Flight.new()
+	f.stats = Flight.CARRIER
+	f.throttle = 1.0
+	_fly(f, {}, 4.0)
+	var early := f.speed()
+	_fly(f, {}, 16.0)
+	_check(early < 120.0 and absf(f.speed() - f.top_speed()) < 2.0, "carrier: slow to get going (%.0f m/s after 4 s), then cruises at %.0f m/s" % [early, f.speed()])
+	var small := Flight.new()
+	var start := f.basis
+	_fly(f, {"yaw": 1.0}, 1.0)
+	_fly(small, {"yaw": 1.0}, 1.0)
+	var turned := rad_to_deg(start.z.angle_to(f.basis.z))
+	_check(turned < rad_to_deg(Basis().z.angle_to(small.basis.z)) * 0.6, "carrier turns slower than the small ship (%.1f degrees in 1 s)" % turned)
+	_fly(f, {"boost": true}, 1.5)
+	_check(f.speed() > f.top_speed() + 20.0, "carrier boost still works (%.0f m/s)" % f.speed())

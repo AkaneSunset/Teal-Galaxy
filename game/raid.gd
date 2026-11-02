@@ -2904,7 +2904,7 @@ func _show_results(result: Dictionary) -> void:
 		lines.append("\nYour pouch, for the next raid: " + ", ".join(kit))
 	elif result.outcome != "extracted":
 		lines.append("\nYour pouch was lost. Next raid you start with the basic kit.")
-	lines.append("\nSell loot to the Fence at the Spaceport.")
+	lines.append("\nSell loot to the Fence at the Star Port.")
 	var body := Label.new()
 	body.text = "\n".join(lines)
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

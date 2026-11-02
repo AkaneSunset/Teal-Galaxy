@@ -1,7 +1,8 @@
 extends Node
 ## Plays a whole raid against a running galaxy server, the way a player would:
-## a Builder founds a facility's satellite site and places defences on it, the pilot docks at the
-## planet's High Port and picks the site in the ship's menu, picks a landing spot from overhead (out
+## a Builder of the Luminar Accord founds an Extractor outpost on a sector of Halcyon the Luminar
+## Accord holds and places defences on it, and a pilot of the Ashen Collective docks at Halcyon
+## Orbital, picks the outpost in the ship's menu and a landing spot from overhead (out
 ## of the turrets' reach), is dropped off, blows up the power plant, walks in
 ## through the blast door, rides the lifts down to the deepest level, searches containers until the
 ## keycard turns up, opens the safe room's vault, takes something from it, rides back up before the
@@ -11,13 +12,15 @@ extends Node
 ## and the wheel, and cancelling), the grenade launcher (swap, rounds, blast falloff, walls,
 ## damage to yourself) and picking up supplies.
 ## (Selling it is covered by the server tests.)
-##   cd server && DEMO=1 BUILD_SPEED=0 npm start
+## Use a fresh galaxy (a new save file):
+##   cd server && SAVE_FILE=/tmp/raid.json DEMO=1 BUILD_SPEED=0 npm start   (delete /tmp/raid.json first)
 ##   godot --headless --path game res://tests/raid.tscn
 ## Add `-- --shots=/some/dir` and run with a display to save screenshots along the way,
 ## and `-- --server=ws://127.0.0.1:9000` to use a server on another port.
 ## Prints PASS or FAIL and quits.
 
 const ExplorerMode := preload("res://explorer.gd")
+const BUILDER := "Raid Test Builder"
 
 var _explorer: Node
 var _raid: Node
@@ -36,9 +39,13 @@ var _server := "ws://127.0.0.1:8080"
 var _key := "" # the site being raided
 var _port := "" # the planet whose High Port the pilot docks at
 var _laid_out := false
+var _sector := "" # the sector of Halcyon the outpost goes on
 var _overview: Camera3D
 var _t := 0.0 # time in the current combat check
 var _pouch_before := {}
+var _pick := "" # the loose supply being picked up
+var _tried: Array = [] # loose supplies whose pick-up went wrong
+var _done := false
 
 
 func _ready() -> void:
@@ -57,6 +64,8 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_clock += delta
 	_wait -= delta
+	if _done:
+		return
 	if _clock > 150:
 		_finish(false, "timed out at step " + _step)
 	if Net.state.is_empty() or _wait > 0:
@@ -64,18 +73,60 @@ func _process(delta: float) -> void:
 	match _step:
 		"build":
 			if _builder.get_ready_state() == WebSocketPeer.STATE_CLOSED:
+				_builder.inbound_buffer_size = 4 * 1024 * 1024 # the welcome is over the default 64 KiB
 				_builder.connect_to_url(_server)
 			_builder.poll()
 			if _builder.get_ready_state() != WebSocketPeer.STATE_OPEN:
 				return
-			_builder.send_text(JSON.stringify({"type": "hello", "role": "builder", "name": "Raid Test Builder"}))
-			_builder.send_text(JSON.stringify({"type": "found_site", "facility": "refinery"}))
+			# Both pick sides: the outpost goes in a sector of Halcyon the Luminar Accord holds, with
+			# no outposts yet, and an Ashen pilot raids it. (Luminar, so the raid's numbers aren't
+			# scaled: Compact defences are tougher, and Heat builds faster in Ashen outposts.)
+			var used := []
+			for p in Net.state.system.planets:
+				used.append(p.get("sector", ""))
+			var sector := ""
+			for sec in _war_planet("halcyon").get("sectors", []):
+				if sec.owner == "luminar" and not used.has(sec.id) and sector == "":
+					sector = sec.id
+			if sector == "":
+				_finish(false, "no free sector of Halcyon held by the Luminar Accord")
+				return
+			Net.send({"type": "choose_faction", "faction": "ashen"})
+			_send_builder({"type": "hello", "role": "builder", "name": BUILDER})
+			_send_builder({"type": "choose_faction", "faction": "luminar"})
+			_sector = sector
+			_step = "command"
+		"command":
+			# A new base's Command Centre (level 1) founds no outposts: the Builder takes it to level 2
+			# first, then founds the outpost.
+			_builder.poll()
+			var home := {}
+			for p in Net.state.system.planets:
+				if p.get("owner", "") == BUILDER and p.get("kind", "") != "satellite":
+					home = p
+			if home.is_empty():
+				return
+			var level := 1
+			for b in home.get("buildings", []):
+				if b.get("type", "") == "command":
+					level = int(b.get("level", 1))
+			if level < 2:
+				_send_builder({"type": "upgrade_building", "planet": home.id, "slot": 8})
+				_wait = 0.5
+				return
+			_send_builder({"type": "found_site", "facility": "refinery", "planet": "halcyon", "sector": _sector})
 			_step = "fly"
 		"fly":
 			_builder.poll()
 			if _facility().is_empty():
 				return
 			_key = _facility().planet
+			var site := Net.planet(_key)
+			if site.get("faction") != "luminar" or site.get("parent") != "halcyon" or site.get("dormant", true):
+				_finish(false, "the outpost should stand awake on Halcyon for the Luminar Accord: %s" % [[site.get("faction"), site.get("sector"), site.get("dormant")]])
+				return
+			if _explorer._me().get("faction") != "ashen":
+				return # the pilot's side is on its way
 			if not _laid_out:
 				# The Builder lays out defences (trying a few spots, as obstacles may be in the way)
 				# and upgrades the facility to level 3, so the raid has three levels below.
@@ -200,15 +251,18 @@ func _process(delta: float) -> void:
 					power = id
 			if power == "":
 				_finish(false, "the Builder's power plant isn't in the raid")
-			# A grenade does three times the damage to the site's defences.
+			# A grenade does three times the damage to the site's defences. It goes off 2 m out from
+			# the middle of the turret's side that faces the core, so its nearest point is 2 m away
+			# wherever the turret stands (pieces are square to the grid).
 			for id in _raid._pieces:
 				var pc: Dictionary = _raid._pieces[id]
 				if pc.data.type == "turret" and not pc.dead and not pc.data.get("ring", false):
 					var body: StaticBody3D = pc.node
-					var half: float = body.get_child(0).shape.size.x / 2.0
-					var inward := (-body.global_position * Vector3(1, 0, 1)).normalized()
+					var inward := -body.global_position * Vector3(1, 0, 1)
+					var side := Vector3(signf(inward.x), 0, 0) if absf(inward.x) >= absf(inward.z) else Vector3(0, 0, signf(inward.z))
+					var half: float = (body.get_child(0).shape.size as Vector3).dot(side.abs()) / 2.0
 					var before: float = pc.health
-					_raid.burst(body.global_position * Vector3(1, 0, 1) + Vector3(0, 1.0, 0) + inward * (half + 2.0))
+					_raid.burst(body.global_position * Vector3(1, 0, 1) + Vector3(0, 1.0, 0) + side * (half + 2.0))
 					var want: float = _raid.blast_damage(2.0) * 3.0
 					if absf(before - pc.health - want) > 1.0:
 						_finish(false, "a grenade 2 m from turret %s did %.0f, expected %.0f" % [id, before - pc.health, want])
@@ -251,13 +305,20 @@ func _process(delta: float) -> void:
 			if _raid.armor >= 50.0:
 				if _t < 4.5:
 					_finish(false, "the battery took %.1f s, not 5" % _t)
-				if int(_raid.pouch.get("battery", 0)) != 0:
-					_finish(false, "the server should have counted the battery off")
-				if _raid.best_item() != "syringe":
-					_finish(false, "10 health down should pick the syringe, not " + _raid.best_item())
-				_step = "radial"
+				_t = 0.0
+				_step = "healed"
 			elif _t > 9.0:
 				_finish(false, "the battery never finished")
+		"healed":
+			# The pouch comes in its own message just after the armour, maybe a frame later.
+			_t += delta
+			if int(_raid.pouch.get("battery", 0)) != 0:
+				if _t > 1.5:
+					_finish(false, "the server should have counted the battery off: %s" % _raid.pouch)
+				return
+			if _raid.best_item() != "syringe":
+				_finish(false, "10 health down should pick the syringe, not " + _raid.best_item())
+			_step = "radial"
 		"radial":
 			# Hold for the wheel: point at a slice, the centre cancels.
 			_raid.open_radial()
@@ -316,19 +377,26 @@ func _process(delta: float) -> void:
 			_raid.select_weapon("rifle")
 			_step = "pickup"
 		"pickup":
-			# Supplies lying about go in the pouch with F.
+			# Supplies lying about go in the pouch with F. Prefer one nothing else is in reach of from where we
+			# stand (another loose item or a lift would take the F instead), and try another if a pick goes wrong.
 			var pick := ""
 			for id in _raid._loose:
 				var l: Dictionary = _raid._loose[id].data
-				if int(l.floor) == _raid._floor and l.item in ["syringe", "cell"] and int(_raid.pouch.get(l.item, 0)) < 4:
+				if _tried.has(id) or int(l.floor) != _raid._floor or not (l.item in ["syringe", "cell"]) or int(_raid.pouch.get(l.item, 0)) >= 4:
+					continue
+				var clear := _clear_pick(id)
+				if pick == "" or clear:
 					pick = id
+				if clear:
+					break
 			if pick == "":
-				_finish(false, "no loose syringe or shield cell on level 1")
+				_finish(false, "no loose syringe or shield cell on level 1" if _tried.is_empty() else "picking up %d loose supplies never reached the pouch" % _tried.size())
+				return
+			_pick = pick
 			_pouch_before = _raid.pouch.duplicate()
 			_pouch_before["item"] = _raid._loose[pick].data.item
 			var spot: Vector3 = _raid._loose[pick].pos
-			var room_c: Vector3 = _raid._room_centre(int(_raid._loose[pick].data.room))
-			_raid.teleport_to(spot + (room_c - spot).normalized() * 1.2)
+			_raid.teleport_to(_pick_spot(pick))
 			_raid._player.look_at(Vector3(spot.x, _raid._player.position.y, spot.z))
 			_raid._pitch = -0.5
 			_wait = 0.2
@@ -344,7 +412,11 @@ func _process(delta: float) -> void:
 			if int(_raid.pouch.get(item, 0)) > int(_pouch_before.get(item, 0)):
 				_step = "cabinet"
 			elif _t > 3.0:
-				_finish(false, "picking up the %s didn't reach the pouch" % item)
+				_tried.append(_pick)
+				if _tried.size() >= 3:
+					_finish(false, "picking up the %s didn't reach the pouch" % item)
+				else:
+					_step = "pickup"
 		"cabinet":
 			# Every med cabinet is a container on a wall with a green cross.
 			var cabs := 0
@@ -485,6 +557,28 @@ func _process(delta: float) -> void:
 				_finish(_took_from_vault, "raided the vault, extracted with %d stacks worth %d credits, back in your ship in the hangar" % [_result.kept.size(), int(_result.value)])
 
 
+## Where to stand to pick up loose supply `id`: a little way from it, towards the middle of its room.
+func _pick_spot(id: String) -> Vector3:
+	var spot: Vector3 = _raid._loose[id].pos
+	var room_c: Vector3 = _raid._room_centre(int(_raid._loose[id].data.room))
+	return spot + (room_c - spot).normalized() * 1.2
+
+
+## True when, standing at `id`'s pick spot, F would pick up `id` and nothing else.
+func _clear_pick(id: String) -> bool:
+	var stand := _pick_spot(id)
+	var flat := func(p: Vector3) -> Vector2: return Vector2(p.x, p.z)
+	var reach: float = (flat.call(_raid._loose[id].pos) - flat.call(stand)).length()
+	for other in _raid._loose:
+		if other != id and int(_raid._loose[other].data.floor) == _raid._floor \
+				and (flat.call(_raid._loose[other].pos) - flat.call(stand)).length() < reach + 0.3:
+			return false
+	for l in _raid._lifts:
+		if _raid._floor_of(l.pos) == _raid._floor and (flat.call(l.pos) - flat.call(stand)).length() < _raid.LIFT_REACH + 0.5:
+			return false
+	return true
+
+
 # Blast falloff, walls and your own grenade, with grenades set off by hand on level 1.
 func _blast_checks() -> bool:
 	var r := _raid
@@ -545,8 +639,15 @@ func _send_builder(msg: Dictionary) -> void:
 
 func _facility() -> Dictionary:
 	for f in Net.facilities():
-		if Net.planet(f.planet).get("owner", "") == "Raid Test Builder":
+		if Net.planet(f.planet).get("owner", "") == BUILDER:
 			return f
+	return {}
+
+
+func _war_planet(id: String) -> Dictionary:
+	for p in Net.state.get("war", {}).get("planets", []):
+		if p.id == id:
+			return p
 	return {}
 
 
@@ -566,5 +667,8 @@ func _shot(name: String) -> void:
 
 
 func _finish(ok: bool, what: String) -> void:
+	if _done:
+		return # the first result stands
+	_done = true
 	print(("PASS " if ok else "FAIL ") + "raid: " + what)
 	get_tree().quit(0 if ok else 1)

@@ -1,5 +1,5 @@
 extends Node3D
-## A place you walk around on foot in first person: the base class of the High Port interior
+## A place you walk around on foot: the base class of the High Port interior
 ## (station.gd) and a Builder's base on a planet's surface (surface.gd).
 ##
 ## You arrive seated in your own ship, landed with its ramp down. The ship's menu (drawn by the
@@ -10,14 +10,33 @@ extends Node3D
 ## Subclasses build their world in `_build()`, may add per-frame work in `_tick()`, and name where
 ## the player is in `_location()`. Building blocks (boxes, screens, signs, consoles, lights, things
 ## to use with F, landed ships with ramps) are shared from here.
+## `planet_id` is a Builder's home planet, or a contested world of the war (its orbital station),
+## which has no record in the system's planets: `_planet` is empty there.
+##
+## On foot the camera sits over your right shoulder (third person) by default, and V (the
+## "foot_camera" control, or the pause screen) switches to first person and back; the choice is kept
+## in the controls' settings. In third person you see your own pilot, the same figure the others see
+## of you (walkers.gd), and the camera pulls in rather than go through a wall.
+##
+## Places are shared: other pilots in the same space (see walkers.gd) walk around in them too. The
+## explorer enters the server's space and sets `space_id`; `walker_pose()` is what others see of you.
+## While a sector battle's RTS view is up (game/battle/, BattleView.active), the explorer hides and
+## disables the place; `battle_active()` says so.
 
 const System := preload("res://teal_prime.gd")
 const Models := preload("res://models.gd")
 const ChatBox := preload("res://chat_box.gd")
+const WarInfo := preload("res://war_info.gd")
+const Walkers := preload("res://walkers.gd")
+const BATTLE_VIEW := "res://battle/battle_view.gd"
+const DEFENSE_VIEW := "res://defense/defense_view.gd"
+const FACILITY_VIEW := "res://facility/facility_view.gd"
+const SPACE_VIEW := "res://space/space_view.gd"
 
 signal seated_down # walked up your own ship's ramp and sat down
-signal service(kind: String) # "repair"
+signal service(kind: String) # "repair", "war" (a War terminal), "contracts", "dock_market"
 signal wants_menu # used a console that opens the ship's menu (the transit terminal)
+signal wants_space(space: String) # walked through a door into another shared space (an airlock, a boarding door)
 
 const WALK := 4.2
 const SPRINT := 7.0
@@ -26,6 +45,11 @@ const GRAVITY := 14.0
 const EYE := 1.65
 const LOOK_SPEED := 2.6
 const REACH := 2.6
+const SIT_EYE := 1.15
+const THIRD_BACK := 2.9 # third person: how far behind your head the camera sits
+const THIRD_SIDE := 0.75 # and how far to the right, over the shoulder
+const THIRD_UP := 0.2
+const THIRD_GAP := 0.25 # how far the camera keeps off a wall it's pulled in by
 
 # Colours, sampled from the station concept art: light grey panels, darker trim, cyan light strips.
 const WALL := Color(0.56, 0.58, 0.61)
@@ -44,14 +68,25 @@ var planet_id := "aster"
 var place_name := ""
 var seated := true # sitting in your ship (the ship's menu is up)
 var menu_open := false # the explorer has the ship's menu up while you stand (the transit terminal)
+var space_id := "" # the shared space the server has us in here ("station:cinder"), set by the explorer
+var walkers: Node3D # the other pilots here (walkers.gd)
+var hud_layer: CanvasLayer
 
 var _planet := {} # the server's planet record
 var _player: CharacterBody3D
 var _camera: Camera3D
 var _pitch := 0.0
+var _self: Node3D # your own pilot, seen in third person (walkers.gd's figure)
+var _self_phase := 0.0
+var _cam_reach := 1.0 # how much of the third-person distance the camera has room for, eased
+var _third_box: CheckBox
 var _mats := {}
 var _uses := [] # {"node": Node3D, "prompt": Callable, "action": Callable}
 var _ships := [] # landed ships: {"root", "entry", "spawn", "seat", "owner", "open", "mine", "pad"}
+var _arrival: Marker3D # where you stand when you leave your seat, in a place with no landed ship of yours
+var _sitting := false # sitting on a seat (a lounge chair), not in your ship
+var _own: Array[Node] = [] # what the place built, to hide while a battle's RTS view is up
+var _battle_envs: Array[Node] = []
 
 var _prompt: Label
 var _chat: VBoxContainer
@@ -70,6 +105,9 @@ func _ready() -> void:
 	_build()
 	_build_player()
 	_build_hud()
+	walkers = Walkers.new(self)
+	add_child(walkers)
+	_own.assign(get_children())
 	sit()
 
 
@@ -425,6 +463,12 @@ func _build_player() -> void:
 	_camera.far = 16000.0
 	_player.add_child(_camera)
 	_camera.make_current()
+	var me := _me()
+	_self = Walkers.figure(Net.my_name, Walkers.colour_of(me.get("faction")))
+	_self.name = "Self"
+	_self.get_node("Tag").visible = false
+	_self.visible = false
+	_player.add_child(_self)
 
 
 func _my_ship() -> Dictionary:
@@ -459,18 +503,59 @@ func _show_canopy(sh: Dictionary, on: bool) -> void:
 
 
 ## Leave your seat and walk down the ramp: you stand at its foot, facing away from the ship.
+## A place with no landed ship of yours stands you at its arrival point instead.
 func stand() -> void:
 	seated = false
 	menu_open = false
+	_sitting = false
 	_camera.top_level = false
-	_camera.transform = Transform3D(Basis(), Vector3(0, EYE, 0))
 	_pitch = 0.0
+	_cam_reach = 1.0
+	_place_view()
 	var sh := _my_ship()
 	if not sh.is_empty():
 		_stand_at(sh.spawn)
 		_show_canopy(sh, true)
+	elif _arrival:
+		_stand_at(_arrival)
 	if controls:
 		controls.capture_mouse()
+
+
+## Sit down on a seat (a lounge chair or a bar stool): the view drops to a sitting eye height and the
+## others see you sitting. Walking stands you up again.
+func sit_on(pos: Vector3, yaw: float) -> void:
+	_player.global_position = pos
+	_player.velocity = Vector3.ZERO
+	_player.rotation.y = yaw
+	_sitting = true
+	_place_view()
+
+
+func _stand_up() -> void:
+	_sitting = false
+	_player.global_position += _player.global_basis * Vector3(0, 0.05, -0.7)
+
+
+## What the other pilots in this space see of you: {"pos", "yaw", "anim"}, or {} to send nothing
+## (seated in your ship, which they see as a landed ship).
+func walker_pose() -> Dictionary:
+	if seated:
+		return {}
+	var v := Vector2(_player.velocity.x, _player.velocity.z).length()
+	var anim := "sit" if _sitting else ("run" if v > WALK + 0.5 else ("walk" if v > 0.4 else "idle"))
+	return {"pos": _player.global_position, "yaw": _player.rotation.y, "anim": anim}
+
+
+## True while a sector battle's RTS view is up (game/battle/battle_view.gd sets BattleView.active).
+## The view may not be built yet, so it's looked up rather than named.
+static func battle_active() -> bool:
+	for path in [BATTLE_VIEW, DEFENSE_VIEW, FACILITY_VIEW, SPACE_VIEW]: # a sector battle's RTS view, or an FPS match (Supremacy's view is a Facility one)
+		if ResourceLoader.exists(path):
+			var view = load(path)
+			if view != null and view.get("active") == true:
+				return true
+	return false
 
 
 ## For tests and screenshots: stand at a point (in `space`'s coordinates) looking at another.
@@ -482,11 +567,12 @@ func view_at(space: Node3D, at: Vector3, look: Vector3) -> void:
 	var dir: Vector3 = space.to_global(look) - space.to_global(at)
 	_player.rotation.y = atan2(-dir.x, -dir.z)
 	_pitch = atan2(dir.y, Vector2(dir.x, dir.z).length())
-	_camera.rotation.x = _pitch
+	_cam_reach = 1.0
+	_place_view()
 
 
 func _walking() -> bool:
-	return not seated and not menu_open and not _paused.visible and not _chat.is_typing()
+	return not seated and not menu_open and not _paused.visible and not _chat.is_typing() and not battle_active()
 
 
 ## Mouse look is read in _input, before any on-screen control can catch the motion.
@@ -499,7 +585,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if seated or menu_open or _chat.is_typing():
+	if seated or menu_open or _chat.is_typing() or battle_active():
 		return
 	if event.is_action_pressed("menu"):
 		_set_paused(not _paused.visible)
@@ -513,6 +599,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and controls:
 		controls.capture_mouse()
+	if event.is_action_pressed("foot_camera"):
+		set_third_person(not third_person())
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("interact"):
 		var u := _nearest_use()
 		if not u.is_empty():
@@ -541,16 +631,117 @@ func set_menu_open(on: bool) -> void:
 func _look(yaw: float, pitch: float) -> void:
 	_player.rotate_y(yaw)
 	_pitch = clampf(_pitch + pitch, -1.45, 1.45)
-	_camera.rotation.x = _pitch
+	_place_view()
+
+
+## Third person (over the shoulder) or first person, on foot. The controls keep the choice.
+func third_person() -> bool:
+	return controls.foot_third_person if controls else true
+
+
+func set_third_person(on: bool) -> void:
+	if controls:
+		controls.foot_third_person = on
+		controls.save_settings()
+	if _third_box:
+		_third_box.set_pressed_no_signal(on)
+	_cam_reach = 1.0
+	_place_view()
+	_say("Third person" if on else "First person", 1.5)
+
+
+## Puts the camera for this frame: at your eyes, or behind and to the right of your head, pulled in
+## when a wall or the floor is in the way. Seated in your ship (or a carrier's chair) the camera is
+## its own, and your figure is hidden.
+func _place_view(delta := 0.0) -> void:
+	if not _camera:
+		return
+	var third := third_person() and not seated
+	if _self:
+		_self.visible = third and not _camera.top_level
+	if _camera.top_level:
+		return
+	var head := Vector3(0, SIT_EYE if _sitting else EYE, 0)
+	var tilt := Basis(Vector3.RIGHT, _pitch)
+	if not third:
+		_camera.transform = Transform3D(tilt, head)
+		return
+	var pivot := head + Vector3(0, THIRD_UP, 0)
+	var back := tilt * Vector3(THIRD_SIDE, 0.0, THIRD_BACK)
+	var reach := 1.0
+	if is_inside_tree():
+		var from := _player.to_global(pivot)
+		var to := _player.to_global(pivot + back)
+		var q := PhysicsRayQueryParameters3D.create(from, to)
+		q.exclude = [_player.get_rid()]
+		var hit := get_world_3d().direct_space_state.intersect_ray(q)
+		if not hit.is_empty():
+			reach = clampf((from.distance_to(hit.position) - THIRD_GAP) / maxf(from.distance_to(to), 0.01), 0.08, 1.0)
+	# In at once (never through the wall), back out gently.
+	_cam_reach = reach if reach < _cam_reach or delta <= 0.0 else lerpf(_cam_reach, reach, minf(1.0, delta * 5.0))
+	_camera.transform = Transform3D(tilt, pivot + back * _cam_reach)
+	if _self and THIRD_BACK * _cam_reach < 0.9:
+		_self.visible = false # pressed right up against your back: the view would be all helmet
+
+
+## Your own figure walks, runs and sits like the others see you.
+func _pose_self(delta: float) -> void:
+	if not _self or not _self.visible:
+		return
+	var v := Vector2(_player.velocity.x, _player.velocity.z).length()
+	var stride := 0.0
+	if not _sitting and v > 0.4:
+		_self_phase += delta * v * 2.1
+		stride = 0.55 if v > WALK + 0.5 else 0.4
+	else:
+		_self_phase = lerpf(_self_phase, roundf(_self_phase / PI) * PI, minf(1.0, delta * 8.0))
+	Walkers.pose_limbs(_self.get_node("Body"), _self_phase, stride, _sitting)
+
+
+func _process(delta: float) -> void:
+	if battle_active():
+		return
+	_place_view(delta)
+	_pose_self(delta)
+
+
+## Hides the place (and takes it out of the physics) while a sector battle's RTS view is up, or
+## brings it back. Only what the place built itself: screens a battle added stay as they are.
+func battle_hide(on: bool) -> void:
+	if on:
+		_battle_envs.clear()
+	for node in _own:
+		if not is_instance_valid(node):
+			continue
+		if node is WorldEnvironment:
+			if on and node.get_parent() == self:
+				remove_child(node)
+				_battle_envs.append(node)
+		elif node is Node3D or node is CanvasLayer:
+			node.visible = not on
+			node.process_mode = Node.PROCESS_MODE_DISABLED if on else Node.PROCESS_MODE_INHERIT
+	if not on:
+		for env in _battle_envs:
+			add_child(env)
+			move_child(env, 0)
+		_battle_envs.clear()
+		_player.velocity = Vector3.ZERO
 
 
 func _physics_process(delta: float) -> void:
+	if battle_active() or _player.process_mode == Node.PROCESS_MODE_DISABLED:
+		return
 	var walking := _walking()
 	var input := Input.get_vector("foot_left", "foot_right", "foot_forward", "foot_back") if walking else Vector2.ZERO
 	var look := Input.get_vector("foot_look_left", "foot_look_right", "foot_look_up", "foot_look_down") if walking else Vector2.ZERO
 	if look.length() > 0.1:
 		_look(-look.x * LOOK_SPEED * delta, -look.y * LOOK_SPEED * delta)
-	if not seated:
+	if _sitting and input.length() > 0.3:
+		_stand_up()
+	if _sitting:
+		input = Vector2.ZERO
+		_player.velocity = Vector3.ZERO
+	if not seated and not _sitting:
 		var speed := SPRINT if walking and Input.is_action_pressed("foot_sprint") else WALK
 		var dir := (_player.global_basis * Vector3(input.x, 0, input.y)).normalized() * input.length()
 		_player.velocity.x = dir.x * speed
@@ -561,7 +752,7 @@ func _physics_process(delta: float) -> void:
 		else:
 			_player.velocity.y -= GRAVITY * delta
 		_player.move_and_slide()
-		if _player.global_position.y < -10.0:
+		if _player.position.y < _fall_limit():
 			stand()
 		_check_ramps()
 	_tick(delta)
@@ -571,7 +762,7 @@ func _physics_process(delta: float) -> void:
 func _nearest_use() -> Dictionary:
 	var best := {}
 	var best_d := REACH
-	var eye := _camera.global_position
+	var eye := _player.to_global(Vector3(0, SIT_EYE if _sitting else EYE, 0)) # your head, not the camera: in third person that's behind you
 	var forward := -_camera.global_basis.z
 	for u in _uses:
 		var p: Vector3 = u.node.global_position
@@ -587,6 +778,7 @@ func _nearest_use() -> Dictionary:
 func _build_hud() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
+	hud_layer = layer
 	_where = Label.new()
 	_where.position = Vector2(20, 16)
 	_where.add_theme_font_size_override("font_size", 20)
@@ -644,23 +836,28 @@ func _build_hud() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	col.add_child(title)
 	var hint := Label.new()
-	hint.text = "To leave, walk back up your ship's ramp and take your seat."
+	hint.text = _leave_hint()
 	col.add_child(hint)
 	var resume := Button.new()
 	resume.text = "Resume"
 	resume.pressed.connect(func(): _set_paused(false))
 	col.add_child(resume)
+	_third_box = CheckBox.new()
+	_third_box.text = "Third person view (%s switches)" % _view_key()
+	_third_box.button_pressed = third_person()
+	_third_box.toggled.connect(set_third_person)
+	col.add_child(_third_box)
 
 
 func _update_hud(delta: float) -> void:
 	var crosshair := _prompt.get_parent().get_node("Crosshair") as Control
-	crosshair.visible = not seated
+	crosshair.visible = not seated and not third_person()
 	if seated:
-		_where.text = "%s · in your ship" % place_name
+		_where.text = _seated_text()
 		_prompt.text = ""
 	else:
 		var here := _location()
-		_where.text = "%s%s\nW A S D walk   Shift run   Mouse look   %s use   %s chat   Esc pause" % [place_name, (" · " + here) if here != "" else "", _key(), _chat_key()]
+		_where.text = "%s%s\nW A S D walk   Shift run   Mouse look   %s use   %s view   %s chat   Esc pause" % [place_name, (" · " + here) if here != "" else "", _key(), _view_key(), _chat_key()]
 		var u := _nearest_use()
 		_prompt.text = u.prompt.call() if not u.is_empty() and not menu_open else ""
 		var near := _near_ship(4.5)
@@ -676,6 +873,21 @@ func _update_hud(delta: float) -> void:
 	_message.visible = _message_time > 0.0
 
 
+## Below this height you've fallen out of the place: back to the start.
+func _fall_limit() -> float:
+	return -10.0
+
+
+## The top-left line while you sit in your ship.
+func _seated_text() -> String:
+	return "%s · in your ship" % place_name
+
+
+## How to leave, on the pause screen.
+func _leave_hint() -> String:
+	return "To leave, walk back up your ship's ramp and take your seat."
+
+
 func _say(text: String, seconds := 4.0) -> void:
 	_message.text = text
 	_message_time = seconds
@@ -686,9 +898,20 @@ func _chat_key() -> String:
 	return controls.binding_text("chat", false) if controls else "Enter"
 
 
+func _view_key() -> String:
+	return controls.binding_text("foot_camera", false) if controls else "V"
+
+
 func _key() -> String:
 	return controls.binding_text("interact", false) if controls else "F"
 
 
 func _me() -> Dictionary:
 	return Net.state.get("pilots", {}).get(Net.my_name, {}) if not Net.state.is_empty() else {}
+
+
+## The planet's name: a Builder's home, or a contested world of the war.
+func _planet_name() -> String:
+	if _planet.has("name"):
+		return str(_planet.name)
+	return str(WarInfo.planet(planet_id).get("name", planet_id.capitalize()))

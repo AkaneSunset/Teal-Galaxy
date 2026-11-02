@@ -9,6 +9,7 @@ var _server := "ws://127.0.0.1:8080"
 var _shots := "/tmp"
 var _plan := []
 var _wait := 1.0
+var _joined := false # asked to join a faction
 
 
 func _ready() -> void:
@@ -26,6 +27,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_wait -= delta
 	if Net.state.is_empty() or _wait > 0:
+		return
+	# A pilot with no side gets the faction choice over everything, so the Photographer picks one.
+	if _explorer._me().get("faction") == null:
+		if not _joined:
+			_joined = true
+			Net.send({"type": "choose_faction", "faction": "compact"})
 		return
 	if _plan.is_empty():
 		_plan = [

@@ -4,6 +4,15 @@ const test = require('node:test');
 const assert = require('node:assert');
 const G = require('../galaxy');
 
+// `owner`'s outpost on Cinder, which their faction (the Terran Compact) holds. Each sector takes 3.
+function outpost(g, owner, type, sector = 'cinder-1') {
+  G.setCommandLevel(g, G.claimBase(g, owner).id, 5); // room for every outpost
+  if (!g.bases[owner].faction) G.chooseFaction(g, 'builder', owner, 'compact');
+  const r = G.foundSite(g, owner, type, 'cinder', sector);
+  assert.ok(r.ok, r.reason);
+  return r;
+}
+
 test('the first Builder takes Aster and its starting economy; the next founds a new planet', () => {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
@@ -27,17 +36,18 @@ test('each base pays for, builds and earns on its own planet only', () => {
   assert.ok(G.owns(g, 'Rin', rin.id));
   assert.ok(!G.owns(g, 'Rin', 'aster'));
 
-  assert.ok(G.build(g, rin.id, 0, 'mine').ok);
-  assert.strictEqual(g.bases.Rin.stock.metal, 50);
+  assert.ok(G.build(g, rin.id, 1, 'extractor').ok);
+  assert.strictEqual(g.bases.Rin.stock.metal, 45);
   assert.strictEqual(g.bases.Akane.stock.metal, 60);
   G.tick(g);
-  assert.strictEqual(g.bases.Rin.stock.metal, 51);
+  assert.strictEqual(g.bases.Rin.stock.metal, 46);
   assert.strictEqual(g.bases.Akane.stock.metal, 60);
 
   // A Spaceport on Aster doesn't let Rin build a Foundry or post jobs.
   assert.ok(G.build(g, 'aster', 0, 'spaceport').ok);
-  assert.match(G.build(g, rin.id, 1, 'foundry').reason, /Spaceport first/);
-  assert.match(G.postJob(g, 'ice', 10, 100, rin.id).reason, /Spaceport first/);
+  G.setCommandLevel(g, rin.id, 3);
+  assert.match(G.build(g, rin.id, 6, 'foundry').reason, /Star Port first/);
+  assert.match(G.postJob(g, 'ice', 10, 100, rin.id).reason, /Star Port first/);
 });
 
 test('deliveries land in the stock of the base that posted the job', () => {
@@ -57,8 +67,7 @@ test('deliveries land in the stock of the base that posted the job', () => {
   assert.ok(!g.bases.Akane.unlocked.includes('hydroponics'));
 });
 
-test('facilities go on satellite sites with a free grid of defences', () => {
-  const S = require('../sites');
+test('outposts go on their own sites, with a free grid of defences', () => {
   const g = G.newGalaxy();
   g.buildSpeed = Infinity; // instant buildings: build times are tested in levels.test.js
   G.claimBase(g, 'Akane');
@@ -66,12 +75,12 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   e.stock.metal = 500;
   e.stock.alloy = 20;
   e.stock.ice = 20;
-  assert.match(G.build(g, 'aster', 0, 'refinery').reason, /satellite site/);
-  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  assert.match(G.build(g, 'aster', 0, 'refinery').reason, /outpost/);
+  const { site } = outpost(g, 'Akane', 'refinery');
   assert.ok(site.obstacles.length > 0, 'a new site comes with obstacles');
   site.obstacles = []; // a clear site, so defences go where the test puts them
-  assert.strictEqual(site.parent, 'aster');
-  assert.strictEqual(site.name, 'Aster Mining Refinery');
+  assert.strictEqual(site.parent, 'cinder');
+  assert.strictEqual(site.name, 'Cinder 1 Extractor');
   assert.strictEqual(e.stock.metal, 460);
   assert.ok(G.facility(g, site.id, 0));
 
@@ -81,7 +90,7 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   assert.match(G.placePiece(g, site.id, 'wall', 5, 5).reason, /facility is there/);
   assert.match(G.placePiece(g, site.id, 'turret', 11, 0).reason, /edge/);
   assert.ok(G.placePiece(g, site.id, 'wall', 2, 0).ok);
-  assert.deepStrictEqual(S.defence(site), { attack: 4, hull: 30 });
+  assert.deepStrictEqual(site.pieces.map((p) => p.type), ['turret', 'wall']);
   assert.ok(G.placePiece(g, site.id, 'power', 0, 10).ok);
   assert.match(G.placePiece(g, site.id, 'power', 10, 10).reason, /only 1 Power plant per site/);
 
@@ -89,9 +98,9 @@ test('facilities go on satellite sites with a free grid of defences', () => {
   assert.ok(G.removePiece(g, site.id, site.pieces[0].id).ok);
   assert.strictEqual(e.stock.metal, metal + 10, 'half the cost back');
 
-  assert.ok(G.foundSite(g, 'Akane', 'lab').ok);
-  assert.ok(G.foundSite(g, 'Akane', 'spire').ok);
-  assert.match(G.foundSite(g, 'Akane', 'refinery').reason, /already have 3/);
+  e.stock.metal = 500;
+  for (const [type, sector] of [['lab', 'cinder-1'], ['spire', 'cinder-1'], ['fuel', 'cinder-2'], ['munitions', 'cinder-2']]) outpost(g, 'Akane', type, sector);
+  assert.match(G.foundSite(g, 'Akane', 'refinery', 'cinder', 'cinder-3').reason, /allows 5 outposts/);
   // Someone else can't touch Akane's site.
   G.claimBase(g, 'Rin');
   assert.ok(!G.owns(g, 'Rin', site.id));
@@ -104,7 +113,7 @@ test('obstacles block defences until cleared for credits, and some leave salvage
   G.claimBase(g, 'Akane');
   const e = g.bases.Akane;
   e.stock.metal = 500;
-  const { site } = G.foundSite(g, 'Akane', 'refinery');
+  const { site } = outpost(g, 'Akane', 'refinery');
   const again = { id: site.id, pieces: [], nextPiece: 1 };
   S.scatter(again);
   assert.deepStrictEqual(again.obstacles, site.obstacles, 'the same site id always gets the same obstacles');

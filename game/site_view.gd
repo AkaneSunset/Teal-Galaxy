@@ -55,7 +55,8 @@ func _process(delta: float) -> void:
 
 ## Draws `site` (a satellite planet from the server). `turrets` is how many its security tier adds.
 ## `constructing` draws scaffolding in place of the facility while it's first being built.
-func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int, constructing := false) -> void:
+## A `dormant` outpost (its faction lost the planet) is labelled so, in a cold grey.
+func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int, constructing := false, dormant := false) -> void:
 	grid = int(site.get("grid", 12))
 	var c: Dictionary = Net.catalog.get("sites", {}).get("core", {"w": 4, "h": 4})
 	core = Rect2i((grid - int(c.w)) / 2, (grid - int(c.h)) / 2, int(c.w), int(c.h))
@@ -68,8 +69,8 @@ func show_site(site: Dictionary, label: String, raid: bool, tier_turrets: int, c
 	if key != _key:
 		_key = key
 		_rebuild(b.get("type", ""), tier_turrets, constructing, ready)
-	_label.text = ("RAID!  " + label) if raid else label
-	_label.modulate = Color(1, 0.55, 0.45) if raid else Color(1, 1, 1, 0.9)
+	_label.text = ("RAID!  " if raid else "") + ("DORMANT  " if dormant else "") + label
+	_label.modulate = Color(1, 0.55, 0.45) if raid else (Color(0.62, 0.7, 0.82, 0.9) if dormant else Color(1, 1, 1, 0.9))
 	_raid_light.visible = raid
 
 
