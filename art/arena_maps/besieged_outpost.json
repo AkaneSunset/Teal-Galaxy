@@ -1,0 +1,184 @@
+{
+ "id": "besieged_outpost",
+ "name": "Besieged Outpost",
+ "modes": [
+  "Coma Firefight"
+ ],
+ "notes": "Hold the outpost core while Coma phase-shifting bots drop in at the edges; resupply at the turrets, away from cover.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -75.0,
+   -75.0,
+   -0.6
+  ],
+  "max": [
+   75.0,
+   75.0,
+   7.6
+  ]
+ },
+ "markers": [
+  {
+   "name": "resupply_1",
+   "kind": "resupply",
+   "pos": [
+    20.51,
+    16.26,
+    0.0
+   ]
+  },
+  {
+   "name": "resupply_2",
+   "kind": "resupply",
+   "pos": [
+    -16.26,
+    20.51,
+    0.0
+   ]
+  },
+  {
+   "name": "resupply_3",
+   "kind": "resupply",
+   "pos": [
+    -20.51,
+    -16.26,
+    0.0
+   ]
+  },
+  {
+   "name": "resupply_4",
+   "kind": "resupply",
+   "pos": [
+    16.26,
+    -20.51,
+    0.0
+   ]
+  },
+  {
+   "name": "hub",
+   "kind": "objective",
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "radius": 9,
+   "id": "hub"
+  },
+  {
+   "name": "spawn_players_hub_01",
+   "kind": "spawn",
+   "pos": [
+    -3.75,
+    -5.5,
+    0.0
+   ],
+   "team": "players",
+   "set": "hub",
+   "facing": 270
+  },
+  {
+   "name": "spawn_players_hub_02",
+   "kind": "spawn",
+   "pos": [
+    -1.25,
+    -5.5,
+    0.0
+   ],
+   "team": "players",
+   "set": "hub",
+   "facing": 270
+  },
+  {
+   "name": "spawn_players_hub_03",
+   "kind": "spawn",
+   "pos": [
+    1.25,
+    -5.5,
+    0.0
+   ],
+   "team": "players",
+   "set": "hub",
+   "facing": 270
+  },
+  {
+   "name": "spawn_players_hub_04",
+   "kind": "spawn",
+   "pos": [
+    3.75,
+    -5.5,
+    0.0
+   ],
+   "team": "players",
+   "set": "hub",
+   "facing": 270
+  },
+  {
+   "name": "coma_drop_1",
+   "kind": "drop_zone",
+   "pos": [
+    50.23,
+    29.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 1
+  },
+  {
+   "name": "coma_drop_2",
+   "kind": "drop_zone",
+   "pos": [
+    0.0,
+    58.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 2
+  },
+  {
+   "name": "coma_drop_3",
+   "kind": "drop_zone",
+   "pos": [
+    -50.23,
+    29.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 3
+  },
+  {
+   "name": "coma_drop_4",
+   "kind": "drop_zone",
+   "pos": [
+    -50.23,
+    -29.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 4
+  },
+  {
+   "name": "coma_drop_5",
+   "kind": "drop_zone",
+   "pos": [
+    -0.0,
+    -58.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 5
+  },
+  {
+   "name": "coma_drop_6",
+   "kind": "drop_zone",
+   "pos": [
+    50.23,
+    -29.0,
+    0.0
+   ],
+   "radius": 6,
+   "id": 6
+  }
+ ]
+}

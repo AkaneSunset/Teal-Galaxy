@@ -1,0 +1,586 @@
+{
+ "id": "carrier_boarding",
+ "name": "Carrier Boarding",
+ "modes": [
+  "Boarding Action"
+ ],
+ "notes": "Hybrid: take the hangar, escort a breach charge through the power room, then the bridge; forward spawns at each checkpoint.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -76.0,
+   -25.56,
+   -0.6
+  ],
+  "max": [
+   70.56,
+   25.6,
+   12.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "bridge_controls",
+   "kind": "objective",
+   "pos": [
+    60.0,
+    0.0,
+    1.5
+   ]
+  },
+  {
+   "name": "checkpoint_1",
+   "kind": "checkpoint",
+   "pos": [
+    -40,
+    -10,
+    0
+   ],
+   "radius": 6,
+   "order": 1
+  },
+  {
+   "name": "checkpoint_2",
+   "kind": "checkpoint",
+   "pos": [
+    24,
+    0,
+    0
+   ],
+   "radius": 4,
+   "order": 2
+  },
+  {
+   "name": "checkpoint_3",
+   "kind": "checkpoint",
+   "pos": [
+    60.0,
+    0.0,
+    1.5
+   ],
+   "radius": 4,
+   "order": 3
+  },
+  {
+   "name": "charge_path_01",
+   "kind": "path",
+   "pos": [
+    -40,
+    -10,
+    0
+   ],
+   "order": 1
+  },
+  {
+   "name": "charge_path_02",
+   "kind": "path",
+   "pos": [
+    -25,
+    -10,
+    0
+   ],
+   "order": 2
+  },
+  {
+   "name": "charge_path_03",
+   "kind": "path",
+   "pos": [
+    -14,
+    -14,
+    0
+   ],
+   "order": 3
+  },
+  {
+   "name": "charge_path_04",
+   "kind": "path",
+   "pos": [
+    0,
+    -15,
+    0
+   ],
+   "order": 4
+  },
+  {
+   "name": "charge_path_05",
+   "kind": "path",
+   "pos": [
+    14,
+    -12,
+    0
+   ],
+   "order": 5
+  },
+  {
+   "name": "charge_path_06",
+   "kind": "path",
+   "pos": [
+    20,
+    0,
+    0
+   ],
+   "order": 6
+  },
+  {
+   "name": "charge_path_07",
+   "kind": "path",
+   "pos": [
+    35,
+    0,
+    0
+   ],
+   "order": 7
+  },
+  {
+   "name": "charge_path_08",
+   "kind": "path",
+   "pos": [
+    44,
+    0,
+    0
+   ],
+   "order": 8
+  },
+  {
+   "name": "breach_charge",
+   "kind": "objective",
+   "pos": [
+    -40,
+    -10,
+    0
+   ]
+  },
+  {
+   "name": "spawn_attack_section_1_01",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -19.25,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_02",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -16.75,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_03",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -14.25,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_04",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -11.75,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_05",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -9.25,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_06",
+   "kind": "spawn",
+   "pos": [
+    -70.0,
+    -6.75,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_01",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    7.75,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_02",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    10.25,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_03",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    12.75,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_04",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    15.25,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_05",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    17.75,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_06",
+   "kind": "spawn",
+   "pos": [
+    -50.0,
+    20.25,
+    6.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_01",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    15.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_02",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    17.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_03",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    19.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_04",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    21.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_05",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    23.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_3_06",
+   "kind": "spawn",
+   "pos": [
+    -10.0,
+    25.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 0
+  },
+  {
+   "name": "spawn_defend_section_1_01",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    25.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_1_02",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    23.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_1_03",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    21.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_1_04",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    19.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_1_05",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    17.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_1_06",
+   "kind": "spawn",
+   "pos": [
+    12.0,
+    15.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_2_01",
+   "kind": "spawn",
+   "pos": [
+    26.0,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_2_02",
+   "kind": "spawn",
+   "pos": [
+    27.6,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_2_03",
+   "kind": "spawn",
+   "pos": [
+    29.2,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_2_04",
+   "kind": "spawn",
+   "pos": [
+    30.8,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_2_05",
+   "kind": "spawn",
+   "pos": [
+    32.4,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_2_06",
+   "kind": "spawn",
+   "pos": [
+    34.0,
+    18.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_section_3_01",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    -3.5,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_3_02",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    -2.1,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_3_03",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    -0.7,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_3_04",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    0.7,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_3_05",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    2.1,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  },
+  {
+   "name": "spawn_defend_section_3_06",
+   "kind": "spawn",
+   "pos": [
+    64.0,
+    3.5,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 180
+  }
+ ]
+}

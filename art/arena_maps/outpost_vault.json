@@ -1,0 +1,173 @@
+{
+ "id": "outpost_vault",
+ "name": "Outpost Vault",
+ "modes": [
+  "Core Breach",
+  "One Flag (Data Core)"
+ ],
+ "notes": "Attackers come in over an outpost's 12x12 surface grid and down three shafts; two charge points on the level below; the defenders start by the vault.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -36.4,
+   -36.4,
+   -9.6
+  ],
+  "max": [
+   36.4,
+   36.4,
+   9.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "spawn_attack_round_start_01",
+   "kind": "spawn",
+   "pos": [
+    6.0,
+    -34.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_02",
+   "kind": "spawn",
+   "pos": [
+    3.0,
+    -34.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_03",
+   "kind": "spawn",
+   "pos": [
+    0.0,
+    -34.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_04",
+   "kind": "spawn",
+   "pos": [
+    -3.0,
+    -34.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_05",
+   "kind": "spawn",
+   "pos": [
+    -6.0,
+    -34.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "charge_A",
+   "kind": "charge",
+   "pos": [
+    -24.0,
+    7.0,
+    -9.0
+   ],
+   "id": "A"
+  },
+  {
+   "name": "charge_B",
+   "kind": "charge",
+   "pos": [
+    24.0,
+    7.0,
+    -9.0
+   ],
+   "id": "B"
+  },
+  {
+   "name": "data_core",
+   "kind": "core",
+   "pos": [
+    0.0,
+    29.0,
+    -8.0
+   ]
+  },
+  {
+   "name": "spawn_defend_round_start_01",
+   "kind": "spawn",
+   "pos": [
+    -6.0,
+    32.5,
+    -9.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_02",
+   "kind": "spawn",
+   "pos": [
+    -3.0,
+    32.5,
+    -9.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_03",
+   "kind": "spawn",
+   "pos": [
+    0.0,
+    32.5,
+    -9.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_04",
+   "kind": "spawn",
+   "pos": [
+    3.0,
+    32.5,
+    -9.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_05",
+   "kind": "spawn",
+   "pos": [
+    6.0,
+    32.5,
+    -9.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  }
+ ]
+}

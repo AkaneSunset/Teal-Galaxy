@@ -1,0 +1,259 @@
+{
+ "id": "carrier_dock_pads",
+ "name": "Carrier Dock Pads",
+ "modes": [
+  "Slayer",
+  "CTF",
+  "Hardpoint"
+ ],
+ "notes": "Two landed carriers face each other across a Builder's Carrier Dock; ramps and cargo make three lanes; each carrier's hold is a base.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -72.0,
+   -34.0,
+   -0.6
+  ],
+  "max": [
+   72.0,
+   34.0,
+   13.6
+  ]
+ },
+ "markers": [
+  {
+   "name": "flag_A",
+   "kind": "flag",
+   "pos": [
+    -62,
+    4,
+    2
+   ],
+   "team": "A"
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -11.5,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -9.3,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -7.1,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -4.9,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -2.7,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -57.0,
+    -0.5,
+    2.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "flag_B",
+   "kind": "flag",
+   "pos": [
+    62,
+    4,
+    2
+   ],
+   "team": "B"
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -11.5,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -9.3,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -7.1,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -4.9,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -2.7,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    57.0,
+    -0.5,
+    2.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "pickup_power_weapon",
+   "kind": "pickup",
+   "pos": [
+    0.0,
+    0.0,
+    1.5
+   ],
+   "item": "power_weapon"
+  },
+  {
+   "name": "hill_1",
+   "kind": "hill",
+   "pos": [
+    0.0,
+    0.0,
+    1.5
+   ],
+   "radius": 3.0,
+   "order": 1,
+   "note": "mid pad"
+  },
+  {
+   "name": "hill_2",
+   "kind": "hill",
+   "pos": [
+    0,
+    24,
+    0
+   ],
+   "radius": 3.0,
+   "order": 2,
+   "note": "north lane"
+  },
+  {
+   "name": "hill_3",
+   "kind": "hill",
+   "pos": [
+    -24,
+    -18,
+    0
+   ],
+   "radius": 3.0,
+   "order": 3,
+   "note": "west ramp foot"
+  },
+  {
+   "name": "hill_4",
+   "kind": "hill",
+   "pos": [
+    0,
+    -24,
+    0
+   ],
+   "radius": 3.0,
+   "order": 4,
+   "note": "south lane"
+  },
+  {
+   "name": "hill_5",
+   "kind": "hill",
+   "pos": [
+    24,
+    18,
+    0
+   ],
+   "radius": 3.0,
+   "order": 5,
+   "note": "east ramp foot"
+  }
+ ]
+}

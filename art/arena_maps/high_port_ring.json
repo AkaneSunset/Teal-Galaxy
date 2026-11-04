@@ -1,0 +1,354 @@
+{
+ "id": "high_port_ring",
+ "name": "High Port Ring",
+ "modes": [
+  "Sector Hold",
+  "Hardpoint",
+  "Slayer",
+  "Oddball"
+ ],
+ "notes": "Ring corridor round a core atrium; three zones 120 degrees apart so it plays as 2 or 3 teams; atrium balconies give height.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -36.0,
+   -36.0,
+   -0.5
+  ],
+  "max": [
+   36.0,
+   36.0,
+   14.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "zone_A",
+   "kind": "zone",
+   "pos": [
+    0.0,
+    30.5,
+    0.0
+   ],
+   "radius": 3.5,
+   "id": "A"
+  },
+  {
+   "name": "zone_B",
+   "kind": "zone",
+   "pos": [
+    -26.41,
+    -15.25,
+    0.0
+   ],
+   "radius": 3.5,
+   "id": "B"
+  },
+  {
+   "name": "zone_C",
+   "kind": "zone",
+   "pos": [
+    26.41,
+    -15.25,
+    0.0
+   ],
+   "radius": 3.5,
+   "id": "C"
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -24.25,
+    14.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -25.11,
+    14.5,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -25.98,
+    15.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -26.85,
+    15.5,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -27.71,
+    16.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -28.58,
+    16.5,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 330
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    24.25,
+    14.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    25.11,
+    14.5,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    25.98,
+    15.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    26.85,
+    15.5,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    27.71,
+    16.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    28.58,
+    16.5,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 210
+  },
+  {
+   "name": "spawn_C_main_01",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -28.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "spawn_C_main_02",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -29.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "spawn_C_main_03",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -30.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "spawn_C_main_04",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -31.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "spawn_C_main_05",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -32.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "spawn_C_main_06",
+   "kind": "spawn",
+   "pos": [
+    -0.0,
+    -33.0,
+    0.0
+   ],
+   "team": "C",
+   "set": "main",
+   "facing": 90
+  },
+  {
+   "name": "hill_1",
+   "kind": "hill",
+   "pos": [
+    -0.0,
+    -8.0,
+    0.0
+   ],
+   "radius": 3.0,
+   "order": 1,
+   "note": "atrium floor"
+  },
+  {
+   "name": "hill_2",
+   "kind": "hill",
+   "pos": [
+    0.0,
+    30.5,
+    0.0
+   ],
+   "radius": 3.0,
+   "order": 2,
+   "note": "ring, zone A"
+  },
+  {
+   "name": "hill_3",
+   "kind": "hill",
+   "pos": [
+    -10.39,
+    -6.0,
+    4.0
+   ],
+   "radius": 3.0,
+   "order": 3,
+   "note": "balcony"
+  },
+  {
+   "name": "hill_4",
+   "kind": "hill",
+   "pos": [
+    26.41,
+    -15.25,
+    0.0
+   ],
+   "radius": 3.0,
+   "order": 4,
+   "note": "ring, zone C"
+  },
+  {
+   "name": "hill_5",
+   "kind": "hill",
+   "pos": [
+    10.39,
+    6.0,
+    4.0
+   ],
+   "radius": 3.0,
+   "order": 5,
+   "note": "balcony"
+  },
+  {
+   "name": "oddball_spawn",
+   "kind": "ball",
+   "pos": [
+    0.0,
+    7.0,
+    0.0
+   ]
+  },
+  {
+   "name": "pickup_power_weapon",
+   "kind": "pickup",
+   "pos": [
+    -0.0,
+    -12.0,
+    4.0
+   ],
+   "item": "power_weapon"
+  }
+ ]
+}

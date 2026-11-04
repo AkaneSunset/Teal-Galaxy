@@ -1,0 +1,416 @@
+{
+ "id": "hangar_flight_deck",
+ "name": "Hangar and Flight Deck",
+ "modes": [
+  "Hardpoint",
+  "Slayer"
+ ],
+ "notes": "A carrier's hangar (close quarters) under its flight deck (long sightlines); the hill rotates round the hangar floor, a lift, the deck catapult and the observation tower.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -52.0,
+   -19.0,
+   -0.6
+  ],
+  "max": [
+   52.0,
+   19.0,
+   19.5
+  ]
+ },
+ "markers": [
+  {
+   "name": "lift_w",
+   "kind": "lift",
+   "pos": [
+    -22.0,
+    6.0,
+    0.0
+   ],
+   "bottom": 0.0,
+   "top": 9.0,
+   "seconds": 4
+  },
+  {
+   "name": "lift_e",
+   "kind": "lift",
+   "pos": [
+    22.0,
+    6.0,
+    0.0
+   ],
+   "bottom": 0.0,
+   "top": 9.0,
+   "seconds": 4
+  },
+  {
+   "name": "hill_1",
+   "kind": "hill",
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "radius": 3.0,
+   "order": 1,
+   "note": "hangar floor"
+  },
+  {
+   "name": "hill_2",
+   "kind": "hill",
+   "pos": [
+    -22.0,
+    6.0,
+    9.0
+   ],
+   "radius": 3.0,
+   "order": 2,
+   "note": "west lift top"
+  },
+  {
+   "name": "hill_3",
+   "kind": "hill",
+   "pos": [
+    0.0,
+    -4.0,
+    9.0
+   ],
+   "radius": 3.0,
+   "order": 3,
+   "note": "catapult"
+  },
+  {
+   "name": "hill_4",
+   "kind": "hill",
+   "pos": [
+    0.0,
+    15.0,
+    15.0
+   ],
+   "radius": 3.0,
+   "order": 4,
+   "note": "observation tower"
+  },
+  {
+   "name": "hill_5",
+   "kind": "hill",
+   "pos": [
+    22.0,
+    6.0,
+    9.0
+   ],
+   "radius": 3.0,
+   "order": 5,
+   "note": "east lift top"
+  },
+  {
+   "name": "spawn_A_hangar_01",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    -5.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_hangar_02",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    -3.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_hangar_03",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    -1.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_hangar_04",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    1.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_hangar_05",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    3.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_hangar_06",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    5.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "hangar",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_01",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    1.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_02",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    3.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_03",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    5.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_04",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    7.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_05",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    9.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_deck_06",
+   "kind": "spawn",
+   "pos": [
+    -47.0,
+    11.0,
+    9.0
+   ],
+   "team": "A",
+   "set": "deck",
+   "facing": 0
+  },
+  {
+   "name": "spawn_B_hangar_01",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    -5.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_hangar_02",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    -3.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_hangar_03",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    -1.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_hangar_04",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    1.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_hangar_05",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    3.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_hangar_06",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    5.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "hangar",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_01",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    1.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_02",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    3.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_03",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    5.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_04",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    7.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_05",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    9.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_deck_06",
+   "kind": "spawn",
+   "pos": [
+    47.0,
+    11.0,
+    9.0
+   ],
+   "team": "B",
+   "set": "deck",
+   "facing": 180
+  },
+  {
+   "name": "pickup_power_weapon",
+   "kind": "pickup",
+   "pos": [
+    0,
+    -9,
+    0
+   ],
+   "item": "power_weapon"
+  },
+  {
+   "name": "pickup_overshield",
+   "kind": "pickup",
+   "pos": [
+    0.0,
+    15.0,
+    15.0
+   ],
+   "item": "overshield"
+  }
+ ]
+}
