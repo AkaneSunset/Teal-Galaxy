@@ -49,7 +49,7 @@ Godot (x, y, z) = Blender (x, z, −y).
 
 ```sh
 pip install bpy==5.0.1        # with Python 3.11; or use a Blender 5 install with -b -P
-python3.11 tools/blender/arena_maps.py --out art/arena_maps                 # all six
+python3.11 tools/blender/arena_maps.py --out art/arena_maps                 # all 19
 python3.11 tools/blender/arena_maps.py --out art/arena_maps --only vault    # one: see MAPS in the script
 python3.11 tools/blender/arena_maps.py --out art/arena_maps --no-render     # skip the previews
 ```
