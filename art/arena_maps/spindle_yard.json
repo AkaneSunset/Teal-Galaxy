@@ -1,0 +1,344 @@
+{
+ "id": "spindle_yard",
+ "name": "Spindle Yard",
+ "modes": [
+  "Hardpoint",
+  "King of the Hill"
+ ],
+ "notes": "Archetype 2, rotating hill (figure 8): H1 in the middle, H2 to H5 at the corners, on a fixed 60 s rotation. Each hill has two or three ways in and a perch over it; spawns flip as the hill moves.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -40.4,
+   -36.4,
+   -0.6
+  ],
+  "max": [
+   40.4,
+   36.4,
+   6.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "hill_1",
+   "kind": "hill",
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "radius": 3.5,
+   "order": 1,
+   "note": "fixed rotation, 60 s"
+  },
+  {
+   "name": "hill_2",
+   "kind": "hill",
+   "pos": [
+    -22,
+    20,
+    0
+   ],
+   "radius": 3.5,
+   "order": 2,
+   "note": "fixed rotation, 60 s"
+  },
+  {
+   "name": "hill_3",
+   "kind": "hill",
+   "pos": [
+    22,
+    20,
+    0
+   ],
+   "radius": 3.5,
+   "order": 3,
+   "note": "fixed rotation, 60 s"
+  },
+  {
+   "name": "hill_4",
+   "kind": "hill",
+   "pos": [
+    22,
+    -20,
+    0
+   ],
+   "radius": 3.5,
+   "order": 4,
+   "note": "fixed rotation, 60 s"
+  },
+  {
+   "name": "hill_5",
+   "kind": "hill",
+   "pos": [
+    -22,
+    -20,
+    0
+   ],
+   "radius": 3.5,
+   "order": 5,
+   "note": "fixed rotation, 60 s"
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    -6.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    -3.6,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    -1.2,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    1.2,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    3.6,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    6.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    -6.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    -3.6,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    -1.2,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    1.2,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    3.6,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    6.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_A_flip_01",
+   "kind": "spawn",
+   "pos": [
+    -3.6,
+    33.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flip",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_flip_02",
+   "kind": "spawn",
+   "pos": [
+    -1.2,
+    33.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flip",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_flip_03",
+   "kind": "spawn",
+   "pos": [
+    1.2,
+    33.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flip",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_flip_04",
+   "kind": "spawn",
+   "pos": [
+    3.6,
+    33.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flip",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_flip_01",
+   "kind": "spawn",
+   "pos": [
+    -3.6,
+    -33.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flip",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flip_02",
+   "kind": "spawn",
+   "pos": [
+    -1.2,
+    -33.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flip",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flip_03",
+   "kind": "spawn",
+   "pos": [
+    1.2,
+    -33.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flip",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flip_04",
+   "kind": "spawn",
+   "pos": [
+    3.6,
+    -33.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flip",
+   "facing": 90
+  },
+  {
+   "name": "pickup_power_weapon",
+   "kind": "pickup",
+   "pos": [
+    -30.0,
+    0.0,
+    0.0
+   ],
+   "item": "power_weapon"
+  },
+  {
+   "name": "pickup_power_weapon_2",
+   "kind": "pickup",
+   "pos": [
+    30.0,
+    0.0,
+    0.0
+   ],
+   "item": "power_weapon_2"
+  }
+ ]
+}

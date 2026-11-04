@@ -1,0 +1,287 @@
+{
+ "id": "nest_loop",
+ "name": "Nest Loop",
+ "modes": [
+  "Oddball",
+  "King of the Hill",
+  "Strongholds"
+ ],
+ "notes": "Oddball map: a compact loop, the ball spawns in the middle, and several nests where a carrier can be shielded by teammates. Each nest can be broken from at least two directions.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -32.4,
+   -30.4,
+   -0.6
+  ],
+  "max": [
+   32.4,
+   30.4,
+   7.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "ball_spawn",
+   "kind": "ball",
+   "pos": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "nest_1",
+   "kind": "nest",
+   "pos": [
+    20.0,
+    18.0,
+    3.5
+   ],
+   "radius": 2.5
+  },
+  {
+   "name": "nest_2",
+   "kind": "nest",
+   "pos": [
+    -20,
+    -18,
+    0
+   ],
+   "radius": 2.5
+  },
+  {
+   "name": "nest_3",
+   "kind": "nest",
+   "pos": [
+    -20.0,
+    18.0,
+    3.5
+   ],
+   "radius": 2.5
+  },
+  {
+   "name": "nest_4",
+   "kind": "nest",
+   "pos": [
+    20.0,
+    -18.0,
+    -0.0
+   ],
+   "radius": 2.5
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    -6.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    -3.6,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    -1.2,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    1.2,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    3.6,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    6.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    -6.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    -3.6,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    -1.2,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    1.2,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    3.6,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    6.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "zone_A",
+   "kind": "zone",
+   "pos": [
+    -12,
+    2,
+    0
+   ],
+   "radius": 3,
+   "id": "A"
+  },
+  {
+   "name": "zone_B",
+   "kind": "zone",
+   "pos": [
+    0,
+    16,
+    0
+   ],
+   "radius": 3,
+   "id": "B"
+  },
+  {
+   "name": "zone_C",
+   "kind": "zone",
+   "pos": [
+    12,
+    -2,
+    0
+   ],
+   "radius": 3,
+   "id": "C"
+  },
+  {
+   "name": "hill_1",
+   "kind": "hill",
+   "pos": [
+    0,
+    -16,
+    0
+   ],
+   "radius": 2.5,
+   "order": 1,
+   "note": "KotH"
+  },
+  {
+   "name": "hill_2",
+   "kind": "hill",
+   "pos": [
+    20.0,
+    18.0,
+    3.5
+   ],
+   "radius": 2.5,
+   "order": 2,
+   "note": "KotH"
+  },
+  {
+   "name": "hill_3",
+   "kind": "hill",
+   "pos": [
+    -20,
+    -18,
+    0
+   ],
+   "radius": 2.5,
+   "order": 3,
+   "note": "KotH"
+  }
+ ]
+}

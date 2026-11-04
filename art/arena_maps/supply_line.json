@@ -1,0 +1,726 @@
+{
+ "id": "supply_line",
+ "name": "Supply Line",
+ "modes": [
+  "Payload",
+  "Escort",
+  "Hybrid",
+  "Rush",
+  "Breakthrough"
+ ],
+ "notes": "Archetype 3 (figure 10): one winding route in three sections, each with a choke the defenders can hold. Checkpoints add time and move both sides' spawns forward. Played once per side.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -100.0,
+   -40.0,
+   -0.6
+  ],
+  "max": [
+   100.0,
+   40.0,
+   7.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "route_01",
+   "kind": "path",
+   "pos": [
+    -92.0,
+    14.88,
+    0.0
+   ],
+   "order": 1
+  },
+  {
+   "name": "route_02",
+   "kind": "path",
+   "pos": [
+    -76.0,
+    6.81,
+    0.0
+   ],
+   "order": 2
+  },
+  {
+   "name": "route_03",
+   "kind": "path",
+   "pos": [
+    -60.0,
+    -4.94,
+    0.0
+   ],
+   "order": 3
+  },
+  {
+   "name": "route_04",
+   "kind": "path",
+   "pos": [
+    -44.0,
+    -14.02,
+    0.0
+   ],
+   "order": 4
+  },
+  {
+   "name": "route_05",
+   "kind": "path",
+   "pos": [
+    -28.0,
+    -15.5,
+    0.0
+   ],
+   "order": 5
+  },
+  {
+   "name": "route_06",
+   "kind": "path",
+   "pos": [
+    -12.0,
+    -8.57,
+    0.0
+   ],
+   "order": 6
+  },
+  {
+   "name": "route_07",
+   "kind": "path",
+   "pos": [
+    4.0,
+    3.0,
+    0.0
+   ],
+   "order": 7
+  },
+  {
+   "name": "route_08",
+   "kind": "path",
+   "pos": [
+    20.0,
+    12.94,
+    0.0
+   ],
+   "order": 8
+  },
+  {
+   "name": "route_09",
+   "kind": "path",
+   "pos": [
+    36.0,
+    15.87,
+    0.0
+   ],
+   "order": 9
+  },
+  {
+   "name": "route_10",
+   "kind": "path",
+   "pos": [
+    52.0,
+    10.2,
+    0.0
+   ],
+   "order": 10
+  },
+  {
+   "name": "route_11",
+   "kind": "path",
+   "pos": [
+    68.0,
+    -1.0,
+    0.0
+   ],
+   "order": 11
+  },
+  {
+   "name": "route_12",
+   "kind": "path",
+   "pos": [
+    84.0,
+    -11.66,
+    0.0
+   ],
+   "order": 12
+  },
+  {
+   "name": "cart",
+   "kind": "cart",
+   "pos": [
+    -92.0,
+    14.88,
+    0.0
+   ],
+   "note": "Payload cart / Escort payload: speeds up with up to 3 pushers"
+  },
+  {
+   "name": "checkpoint_1",
+   "kind": "checkpoint",
+   "pos": [
+    -30.0,
+    -15.8,
+    0.0
+   ],
+   "radius": 4,
+   "order": 1
+  },
+  {
+   "name": "checkpoint_2",
+   "kind": "checkpoint",
+   "pos": [
+    32.0,
+    15.97,
+    0.0
+   ],
+   "radius": 4,
+   "order": 2
+  },
+  {
+   "name": "checkpoint_3",
+   "kind": "checkpoint",
+   "pos": [
+    90.0,
+    -14.26,
+    0.0
+   ],
+   "radius": 4,
+   "order": 3
+  },
+  {
+   "name": "zone_hybrid",
+   "kind": "zone",
+   "pos": [
+    -78.0,
+    16.14,
+    0.0
+   ],
+   "radius": 4,
+   "id": "hybrid"
+  },
+  {
+   "name": "rush_charge_1a",
+   "kind": "charge",
+   "pos": [
+    -50.0,
+    0.69,
+    0.0
+   ],
+   "id": "1a",
+   "mode": "Rush"
+  },
+  {
+   "name": "rush_charge_1b",
+   "kind": "charge",
+   "pos": [
+    -50.0,
+    -23.31,
+    0.0
+   ],
+   "id": "1b",
+   "mode": "Rush"
+  },
+  {
+   "name": "rush_charge_2a",
+   "kind": "charge",
+   "pos": [
+    10.0,
+    19.26,
+    0.0
+   ],
+   "id": "2a",
+   "mode": "Rush"
+  },
+  {
+   "name": "rush_charge_2b",
+   "kind": "charge",
+   "pos": [
+    10.0,
+    -4.74,
+    0.0
+   ],
+   "id": "2b",
+   "mode": "Rush"
+  },
+  {
+   "name": "rush_charge_3a",
+   "kind": "charge",
+   "pos": [
+    66.0,
+    12.5,
+    0.0
+   ],
+   "id": "3a",
+   "mode": "Rush"
+  },
+  {
+   "name": "rush_charge_3b",
+   "kind": "charge",
+   "pos": [
+    66.0,
+    -11.5,
+    0.0
+   ],
+   "id": "3b",
+   "mode": "Rush"
+  },
+  {
+   "name": "resupply_health_0",
+   "kind": "resupply",
+   "pos": [
+    -60.0,
+    -10.94,
+    0.0
+   ]
+  },
+  {
+   "name": "resupply_health_1",
+   "kind": "resupply",
+   "pos": [
+    -10.0,
+    -13.26,
+    0.0
+   ]
+  },
+  {
+   "name": "resupply_health_2",
+   "kind": "resupply",
+   "pos": [
+    45.0,
+    7.64,
+    0.0
+   ]
+  },
+  {
+   "name": "spawn_attack_section_1_01",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    -6.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_02",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    -3.6,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_03",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    -1.2,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_04",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    1.2,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_05",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    3.6,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_1_06",
+   "kind": "spawn",
+   "pos": [
+    -96.0,
+    6.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_1",
+   "facing": 0
+  },
+  {
+   "name": "spawn_attack_section_2_01",
+   "kind": "spawn",
+   "pos": [
+    -41.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_2_02",
+   "kind": "spawn",
+   "pos": [
+    -39.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_2_03",
+   "kind": "spawn",
+   "pos": [
+    -37.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_2_04",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_2_05",
+   "kind": "spawn",
+   "pos": [
+    -33.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_2_06",
+   "kind": "spawn",
+   "pos": [
+    -31.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_01",
+   "kind": "spawn",
+   "pos": [
+    21.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_02",
+   "kind": "spawn",
+   "pos": [
+    23.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_03",
+   "kind": "spawn",
+   "pos": [
+    25.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_04",
+   "kind": "spawn",
+   "pos": [
+    27.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_05",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_section_3_06",
+   "kind": "spawn",
+   "pos": [
+    31.0,
+    -26.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_01",
+   "kind": "spawn",
+   "pos": [
+    -35.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_02",
+   "kind": "spawn",
+   "pos": [
+    -33.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_03",
+   "kind": "spawn",
+   "pos": [
+    -31.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_04",
+   "kind": "spawn",
+   "pos": [
+    -29.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_05",
+   "kind": "spawn",
+   "pos": [
+    -27.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_1_06",
+   "kind": "spawn",
+   "pos": [
+    -25.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_1",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_01",
+   "kind": "spawn",
+   "pos": [
+    27.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_02",
+   "kind": "spawn",
+   "pos": [
+    29.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_03",
+   "kind": "spawn",
+   "pos": [
+    31.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_04",
+   "kind": "spawn",
+   "pos": [
+    33.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_05",
+   "kind": "spawn",
+   "pos": [
+    35.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_2_06",
+   "kind": "spawn",
+   "pos": [
+    37.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_2",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_01",
+   "kind": "spawn",
+   "pos": [
+    83.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_02",
+   "kind": "spawn",
+   "pos": [
+    85.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_03",
+   "kind": "spawn",
+   "pos": [
+    87.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_04",
+   "kind": "spawn",
+   "pos": [
+    89.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_05",
+   "kind": "spawn",
+   "pos": [
+    91.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_section_3_06",
+   "kind": "spawn",
+   "pos": [
+    93.0,
+    -34.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "section_3",
+   "facing": 90
+  }
+ ]
+}

@@ -26,6 +26,10 @@ Markers are objects whose custom property `kind` says what they are:
   resupply    ammo and health refill
   drop_zone   where Coma bots land in Firefight
   lift        bottom and top heights
+  jump_pad    to (where it throws you)
+  nest        an Oddball nest
+  cart, robot, hoop, power_core, node, vehicle_pad, ai_spawn, heavy_drop: the objects of
+              Payload, Push, Bombing Run, Onslaught / Warfare and Attrition
 """
 
 import json
@@ -70,6 +74,7 @@ COLOURS = {
     "attack": ((0.15, 0.40, 1.00), 1.5),
     "defend": ((1.00, 0.20, 0.18), 1.5),
     "players": ((0.15, 0.40, 1.00), 1.5),
+    "ffa": ((0.95, 0.95, 0.95), 1.5),
     "zone": ((1.00, 0.80, 0.10), 0.6),
     "hill": ((1.00, 0.45, 0.05), 0.6),
     "objective": ((1.00, 0.45, 0.05), 5),
@@ -718,6 +723,449 @@ def besieged_outpost():
     return m
 
 
+
+# --- The archetype and per-mode maps ------------------------------------------------------------
+# Sections 4 to 9 of the report: the four map archetypes (figures 7, 8, 10 and 12) and the map
+# types table 9 and the mode sections ask for. Original Teal Galaxy layouts that follow those rules.
+
+
+def arena_floor(m, x0, x1, y0, y1, h=6.0, key="hull", doors=()):
+    m.rect("floor", x0, x1, y0, y1, -0.6, 0, "floor")
+    m.room("perimeter", x0, x1, y0, y1, h, doors, 0, 0.8, key)
+
+
+def jump_pad(m, i, x, y, z, to, note=""):
+    ob = m.cyl(f"jump_pad_{i}", x, y, z + 0.02, 1.2, 0.2, "lift", "Markers", n=20)
+    ob["pos"] = (x, y, z)
+    m.marker(ob, "jump_pad", to=list(to), note=note)
+    m.label("Jump", x, y - 2, z + 0.3, 1.0)
+
+
+def twin_bastions():
+    m = Map("twin_bastions", "Twin Bastions", ["CTF", "Slayer", "One Flag", "Neutral Bomb"],
+            "Archetype 1 (figure 7): two mirrored bases, each with its flag, spawn, three entrances and a high "
+            "perch; a long-sightline top lane with mirrored weapon pickups, a short contested middle with the "
+            "power-up, and a covered bottom flank. Flag to flag is about 116 m, 25 to 40 s on foot.")
+    arena_floor(m, -66, 66, -32, 32, 7)
+    for s, team in ((-1, "A"), (1, "B")):
+        X = lambda x: s * x
+        lo, hi = sorted((X(50), X(65.2)))
+        front = "E" if s < 0 else "W"
+        m.room(f"base_{team}", lo, hi, -10, 10, 6, [(front, 0, 4), ("N", X(57), 4), ("S", X(57), 4)], 0, 0.6, "hull")
+        m.rect(f"base_{team}_roof", lo, hi, -10, 10, 6, 6.5, "hull", "Roofs")
+        # the high defensive perch at the back, with a ramp up
+        m.rect(f"perch_{team}", *sorted((X(61), X(65))), -9.5, 9.5, 3.2, 3.6, "floor2")
+        m.ramp(f"perch_ramp_{team}", X(52), -7.5, X(61), -7.5, 2.5, 0, 3.6, 0)
+        m.rect(f"perch_rail_{team}", *sorted((X(60.8), X(61))), -6, 9.5, 3.6, 4.7, "glass")
+        m.beacon("flag", f"flag_{team}", X(58), 3, 0, team, 2.6, 0.35, f"Flag {team}", team=team)
+        m.spawn_row(team, X(63), 0, 3.6, 0 if s < 0 else 180, n=6, spread=2.6, across=90)
+        # Neutral Bomb plants in each base; One Flag defends base A's flag.
+        m.disc_marker("charge", f"bomb_plant_{team}", X(56), -4, 0, 1.6, "objective", None, id=f"plant_{team}", mode="Neutral Bomb")
+        m.callout(f"{'Red' if s < 0 else 'Blue'} Base", X(57), -2, 3.6)
+        # base mouths open onto each lane: angled walls make the corner routes of the figure
+        m.seg(f"mouth_n_{team}", X(50), 10, X(42), 16, 4)
+        m.seg(f"mouth_s_{team}", X(50), -10, X(42), -16, 4)
+    # Lane dividers, with crossings near the middle.
+    for y in (-11, 11):
+        for x0, x1 in ((-40, -15), (-9, 9), (15, 40)):
+            m.seg(f"divider_{y}_{x0}", x0, y, x1, y, 4)
+    # Top lane: long sightlines, a little low cover, mirrored weapon pickups.
+    for x in (-30, 30):
+        m.pickup(f"weapon_W_{'west' if x < 0 else 'east'}", x * 0.6, 22)
+    for x in (-36, -8, 8, 36):
+        m.box(f"top_cover_{x}", x, 22 + (2 if x in (-8, 36) else -2), 0, 3, 0.8, 1.2, "cover")
+    m.callout("Top Lane: long sightlines", 0, 27)
+    # Middle: short route, the contested power-up on a low plinth.
+    m.rect("mid_plinth", -3, 3, -3, 3, 0, 0.8, "floor2")
+    m.pickup("power_up_P", 0, 0, 0.8)
+    m.beacon("ball", "neutral_bomb_spawn", 0, 5, 0, "objective", 0.8, 0.4, "Bomb", mode="Neutral Bomb")
+    for x in (-22, 22):
+        m.box(f"mid_cover_{x}", x, 0, 0, 1, 4, 1.4, "cover")
+    m.callout("Mid: short route", 0, -6)
+    # Bottom lane: cover and a roofed stretch, the flag-run route.
+    m.rect("tunnel_roof", -24, 24, -31, -13, 4.2, 4.7, "hull", "Roofs")
+    for x in (-24, 24):
+        m.rect(f"tunnel_mouth_{x}", x - 0.4, x + 0.4, -31.2, -26, 0, 4.2, "hull")
+    for i, (x, y) in enumerate(((-34, -18), (-16, -25), (-6, -18), (6, -26), (16, -18), (34, -25), (0, -22))):
+        m.box(f"flank_crate_{i}", x, y, 0, 2.2, 2.2, 1.6, "crate")
+    m.callout("Bottom Lane: covered flank", 0, -29)
+    m.cutaways.append(("plan", ["Roofs"], "roofs hidden"))
+    return m
+
+
+def spindle_yard():
+    m = Map("spindle_yard", "Spindle Yard", ["Hardpoint", "King of the Hill"],
+            "Archetype 2, rotating hill (figure 8): H1 in the middle, H2 to H5 at the corners, on a fixed 60 s "
+            "rotation. Each hill has two or three ways in and a perch over it; spawns flip as the hill moves.")
+    arena_floor(m, -40, 40, -36, 36, 6)
+    HILLS = [(0, 0), (-22, 20), (22, 20), (22, -20), (-22, -20)]
+    m.rect("plaza", -8, 8, -8, 8, 0, 0.02, "floor2")
+    for x, y in ((-6, -6), (6, -6), (-6, 6), (6, 6)):
+        m.box(f"plaza_pillar_{x}_{y}", x, y, 0, 1.2, 1.2, 5, "hull")
+    for i, (x, y) in enumerate(HILLS[1:], 2):
+        sx, sy = (1 if x > 0 else -1), (1 if y > 0 else -1)
+        # a courtyard: two walls of an L round the hill, leaving three ways in
+        m.seg(f"court_{i}_a", x - 7 * sx, y + 7 * sy, x + 3 * sx, y + 7 * sy, 4)
+        m.seg(f"court_{i}_b", x + 7 * sx, y + 7 * sy, x + 7 * sx, y - 3 * sy, 4)
+        m.box(f"court_{i}_cover", x - 3 * sx, y - 3 * sy, 0, 3, 1, 1.2, "cover", rot=math.radians(45))
+        # the perch: a platform on the outer corner, a ramp up from inside the courtyard
+        m.rect(f"perch_{i}", *sorted((x + 7 * sx, x + 11 * sx)), *sorted((y + 2 * sy, y + 11 * sy)), 0, 3.5, "floor2")
+        m.ramp(f"perch_{i}_ramp", x + 9 * sx, y - 7 * sy, x + 9 * sx, y + 2 * sy, 3, 0, 3.5, 0)
+    for i, (x, y) in enumerate(HILLS, 1):
+        m.hill(i, x, y, 0, 3.5, "fixed rotation, 60 s")
+    # the links between hills in the figure (H2-H3, H3-H4, H4-H5, H5-H1, H1-H2): low walls guide them
+    for x0, y0, x1, y1 in ((-10, 28, 10, 28), (30, 8, 30, -8), (-10, -28, 10, -28)):
+        m.seg(f"link_wall_{x0}_{y0}", x0, y0, x1, y1, 1.2, 0, 0.6, "cover")
+    m.spawn_row("A", -35, 0, 0, 0, n=6, spread=2.4, across=90, set_="main")
+    m.spawn_row("B", 35, 0, 0, 180, n=6, spread=2.4, across=90, set_="main")
+    # flipped spawn sets used while the hill is near a team's main spawn
+    m.spawn_row("A", 0, 33, 0, 270, n=4, spread=2.4, across=0, set_="flip")
+    m.spawn_row("B", 0, -33, 0, 90, n=4, spread=2.4, across=0, set_="flip")
+    m.pickup("power_weapon", -30, 0)
+    m.pickup("power_weapon_2", 30, 0)
+    return m
+
+
+def three_pylons():
+    m = Map("three_pylons", "Three Pylons", ["Domination", "Strongholds", "Total Control"],
+            "Archetype 2, static three zones (figure 8): A near one team's spawn, C near the other's, B in "
+            "the middle as the main fight. Holding two of three outscores the enemy; taking their home point "
+            "flips their spawns.")
+    arena_floor(m, -48, 48, -32, 32, 6)
+    m.spawn_row("A", -40, 24, 0, 270, n=6, spread=2.2, across=0, set_="home")
+    m.spawn_row("B", 40, 24, 0, 270, n=6, spread=2.2, across=0, set_="home")
+    m.spawn_row("A", -40, -25, 0, 90, n=6, spread=2.2, across=0, set_="flipped")
+    m.spawn_row("B", 40, -25, 0, 90, n=6, spread=2.2, across=0, set_="flipped")
+    # B: a central pylon house with three ways in.
+    m.room("pylon_house_B", -8, 8, -8, 8, 5, [("W", 0, 4), ("E", 0, 4), ("S", 0, 4)], 0, 0.6, "hull")
+    m.cyl("pylon_B", 0, 4, 0, 1, 9, "core", n=16)
+    m.zone("B", 0, 0, 0, 4)
+    # A and C: semi-open bunkers, each a U of walls opening toward the middle and toward home.
+    for zid, s in (("A", -1), ("C", 1)):
+        x = s * 28
+        m.seg(f"bunker_{zid}_back", x + s * 7, -6, x + s * 7, 6, 3.5)
+        m.seg(f"bunker_{zid}_s", x - s * 2, -7, x + s * 7, -7, 3.5)
+        m.cyl(f"pylon_{zid}", x + s * 4, 3, 0, 0.8, 7, "core", n=16)
+        m.zone(zid, x, 0, 0, 4)
+        m.box(f"bunker_{zid}_cover", x - s * 6, 4, 0, 1, 3.5, 1.2, "cover")
+    # mid power-up near B, the routes between with cover
+    m.pickup("power_up", 0, -16)
+    for x, y in ((-16, 10), (16, 10), (-16, -12), (16, -12), (-34, 10), (34, 10), (0, 20)):
+        m.box(f"route_cover_{x}_{y}", x, y, 0, 3, 1, 1.4, "crate")
+    m.rect("north_walk", -20, 20, 16, 17, 0, 3.5, "hull")
+    return m
+
+
+def supply_line():
+    m = Map("supply_line", "Supply Line", ["Payload", "Escort", "Hybrid", "Rush", "Breakthrough"],
+            "Archetype 3 (figure 10): one winding route in three sections, each with a choke the defenders "
+            "can hold. Checkpoints add time and move both sides' spawns forward. Played once per side.")
+    m.rect("ground", -100, 100, -40, 40, -0.6, 0, "floor")
+    path = [(x, 16 * math.sin(x / 100 * math.pi * 1.5)) for x in range(-92, 96, 8)]
+    for i in range(len(path) - 1):
+        m.seg(f"track_{i}", *path[i], *path[i + 1], 0.08, 0.01, 2.0, "path", "Markers")
+    for i, (x, y) in enumerate(path[::2], 1):
+        m.beacon("path", f"route_{i:02d}", x, y, 0, "path", 0.3, 0.35, None, order=i)
+    cart = m.box("cart", path[0][0], path[0][1], 0, 2.4, 1.6, 1.4, "objective", "Markers")
+    cart["pos"] = (path[0][0], path[0][1], 0)
+    m.marker(cart, "cart", note="Payload cart / Escort payload: speeds up with up to 3 pushers")
+    m.label("Cart", path[0][0], path[0][1] - 2.5, 1.8, 1.4)
+    yat = lambda x: 16 * math.sin(x / 100 * math.pi * 1.5)
+    # Chokes: two buildings either side of the route before each checkpoint.
+    for k, cx in enumerate((-40, 22, 76), 1):
+        y = yat(cx)
+        m.box(f"choke_{k}_n", cx, y + 9, 0, 10, 8, 7, "hull")
+        m.box(f"choke_{k}_s", cx, y - 9, 0, 10, 8, 7, "hull")
+        m.box(f"choke_{k}_bridge", cx, y, 6, 4, 10, 1, "hull")
+    for k, (cx, txt) in enumerate(((-30, "CP1"), (32, "CP2"), (90, "Final")), 1):
+        m.disc_marker("checkpoint", f"checkpoint_{k}", cx, yat(cx), 0, 4, "zone", f"{txt}: +time, spawns move", order=k)
+    # Hybrid's first capture point at the start of the route.
+    m.zone("hybrid", -78, yat(-78) + 8, 0, 4)
+    # Rush: two charge stations per section.
+    for k, cx in enumerate((-50, 10, 66), 1):
+        for j, dy in enumerate((12, -12)):
+            m.beacon("charge", f"rush_charge_{k}{'ab'[j]}", cx, yat(cx) + dy, 0, "objective", 1.4, 0.6, f"Charge {k}{'AB'[j]}", id=f"{k}{'ab'[j]}", mode="Rush")
+    # Health packs along the route.
+    for i, x in enumerate((-60, -10, 45)):
+        m.resupply(f"health_{i}", x, yat(x) - 6)
+    # Cover along the route, and side buildings for each section's terrain.
+    for x in range(-84, 96, 12):
+        m.box(f"route_cover_{x}", x, yat(x) + (6 if (x // 12) % 2 else -6), 0, 3, 1, 1.3, "cover", rot=math.radians(20))
+    for x, y in ((-70, -30), (-55, 30), (-5, -30), (5, 32), (55, -32), (60, 30)):
+        m.box(f"bldg_{x}_{y}", x, y, 0, 14, 10, 6, "hull")
+    m.spawn_row("attack", -96, 0, 0, 0, n=6, spread=2.4, across=90, set_="section_1")
+    m.spawn_row("attack", -36, -26, 0, 90, n=6, spread=2.0, across=0, set_="section_2")
+    m.spawn_row("attack", 26, -26, 0, 90, n=6, spread=2.0, across=0, set_="section_3")
+    for k, x in enumerate((-30, 32, 88), 1):
+        m.spawn_row("defend", x, -34, 0, 90, n=6, spread=2.0, across=0, set_=f"section_{k}")
+    return m
+
+
+def lattice():
+    m = Map("lattice", "Lattice", ["Onslaught", "Warfare", "Conquest"],
+            "Archetype 4 (figure 12): a power core per team and power nodes between them in a chain. A node "
+            "can be built or attacked only if it links to your core or a node you hold; the enemy core is open "
+            "only while you hold a node linked to it. The closest model to Teal Galaxy's lattice. Vehicles.")
+    m.rect("ground", -135, 135, -75, 75, -0.6, 0, "floor")
+    NODES = {"red_core": (-115, 0), "n1": (-60, 40), "n2": (-60, -40), "n3": (0, 0), "n4": (60, 40), "n5": (60, -40), "blue_core": (115, 0)}
+    LINKS = [("red_core", "n1"), ("red_core", "n2"), ("n1", "n3"), ("n2", "n3"), ("n3", "n4"), ("n3", "n5"), ("n4", "blue_core"), ("n5", "blue_core")]
+    for a, b in LINKS:
+        m.seg(f"link_{a}_{b}", *NODES[a], *NODES[b], 0.06, 0.01, 0.6, "path", "Markers")
+    for team, key in (("A", "red_core"), ("B", "blue_core")):
+        x, y = NODES[key]
+        m.cyl(f"{key}_base", x, y, 0, 9, 1.2, "floor2", n=40)
+        ob = m.cyl(key, x, y, 1.2, 3, 10, team, "Markers", n=24)
+        ob["pos"] = (x, y, 1.2)
+        m.marker(ob, "power_core", team=team, hp=5000, links=[l[1] if l[0] == key else l[0] for l in LINKS if key in l])
+        m.label("Red Core" if team == "A" else "Blue Core", x, y - 12, 1.5, 2.5)
+        s = -1 if team == "A" else 1
+        m.spawn_row(team, x + s * 14, 0, 0, 0 if s < 0 else 180, n=8, spread=2.5, across=90)
+        for j, dy in enumerate((-16, 16)):
+            ob = m.rect(f"vehicle_pad_{team}_{j}", x - 4, x + 4, y + dy - 3, y + dy + 3, 0, 0.15, "lift", "Markers")
+            ob["pos"] = (x, y + dy, 0)
+            m.marker(ob, "vehicle_pad", team=team)
+        m.beacon("pickup", f"orb_{team}", x + s * 8, 12, 0, "pickup", 1.0, 0.5, "Orb", item="orb", note="Warfare: captures a node at once")
+    for key in ("n1", "n2", "n3", "n4", "n5"):
+        x, y = NODES[key]
+        m.cyl(f"{key}_pad", x, y, 0, 6, 0.8, "floor2", n=32)
+        ob = m.cyl(key, x, y, 0.8, 1.5, 5, "zone", "Markers", n=16)
+        ob["pos"] = (x, y, 0.8)
+        m.marker(ob, "node", hp=2000, links=[l[1] if l[0] == key else l[0] for l in LINKS if key in l])
+        m.label(f"Node {key[1]}", x, y - 8, 1.0, 2.2)
+    for key, x, y, note in (("side_vehicle", 0, 58, "vehicle node"), ("side_countdown", 0, -58, "countdown node")):
+        m.cyl(f"{key}_pad", x, y, 0, 5, 0.8, "floor2", n=32)
+        ob = m.cyl(key, x, y, 0.8, 1.2, 4, "pickup", "Markers", n=16)
+        ob["pos"] = (x, y, 0.8)
+        m.marker(ob, "node", hp=2000, side_node=note, links=[])
+        m.label(f"Side node: {note}", x, y - 7, 1.0, 1.8)
+    # Terrain for vehicles: ridges and rock outcrops, out of the link lines.
+    for i, (x, y, sx, sy, h, r) in enumerate([(-88, 30, 18, 8, 5, 30), (-88, -30, 18, 8, 5, -30), (88, 30, 18, 8, 5, -30), (88, -30, 18, 8, 5, 30),
+                                              (-30, 0, 10, 24, 7, 0), (30, 0, 10, 24, 7, 0), (-30, 60, 30, 10, 9, 0), (30, -60, 30, 10, 9, 0),
+                                              (-100, 55, 20, 14, 10, 0), (100, -55, 20, 14, 10, 0)]):
+        m.box(f"rock_{i}", x, y, 0, sx, sy, h, "hull", rot=math.radians(r))
+    return m
+
+
+def foundry_spire():
+    m = Map("foundry_spire", "Foundry Spire", ["Deathmatch", "FFA", "Duel", "Clan Arena", "Freeze Tag", "Invasion"],
+            "A kill-count arena in the Quake tradition: many loops, no single choke, high verticality on three "
+            "levels with jump routes, and item timing (armour, mega health, the power-up) as the objective.")
+    arena_floor(m, -26, 26, -26, 26, 15)
+    L1, L2 = 5.0, 10.0
+    # level 1: four corner platforms joined by edge walkways
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            m.rect(f"l1_corner_{sx}_{sy}", *sorted((sx * 25.6, sx * 13)), *sorted((sy * 25.6, sy * 13)), L1 - 0.5, L1, "floor2")
+    for sy in (-1, 1):
+        m.rect(f"l1_walk_{sy}", -13, 13, *sorted((sy * 25.6, sy * 22)), L1 - 0.5, L1, "floor2")
+    # level 2: a bridge over the middle, north to south, on the west side; a platform east
+    m.rect("l2_bridge", -10, -6, -25.6, 25.6, L2 - 0.5, L2, "floor2")
+    m.rect("l2_east", 14, 25.6, -6, 6, L2 - 0.5, L2, "floor2")
+    for x0, x1 in ((-10.2, -10), (-6, -5.8)):
+        m.rect(f"l2_rail_{x0}", x0, x1, -13, 13, L2, L2 + 1.1, "glass")
+    # ramps: floor to level 1 in two corners, level 1 to level 2 at the bridge ends
+    m.ramp("ramp_f1_sw", -4, -18, -13, -18, 3, 0, L1, 0)
+    m.ramp("ramp_f1_ne", 4, 18, 13, 18, 3, 0, L1, 0)
+    m.ramp("ramp_12_s", -17, -16, -17, -24, 3, L1, L2, L1 - 0.5)
+    m.ramp("ramp_12_e", 19, 13, 19, 6, 3, L1, L2, L1 - 0.5)
+    # the pit: a sunken middle loop with pillars
+    for x, y in ((6, 6), (6, -6), (-2, 0)):
+        m.box(f"pillar_{x}_{y}", x, y, 0, 2, 2, L2 + 3, "hull")
+    for x, y in ((14, -16), (-18, 8), (16, 10)):
+        m.box(f"floor_cover_{x}_{y}", x, y, 0, 3, 1, 1.3, "cover", rot=math.radians(30))
+    jump_pad(m, 1, 2, -12, 0, (-8, -12, L2), "floor to the bridge")
+    jump_pad(m, 2, 10, 0, 0, (20, 0, L2), "floor to the east platform")
+    jump_pad(m, 3, -20, 0, 0, (-20, 18, L1), "floor to level 1")
+    m.pickup("heavy_armour", 20, 0, L2)
+    m.pickup("mega_health", 0, 0, 0)
+    m.pickup("power_up", -8, 0, L2)
+    m.pickup("light_armour", -20, -20, L1)
+    for i, (x, y, z) in enumerate([(-22, 22, L1), (22, -22, L1), (22, 22, L1), (-22, -22, L1), (0, 24, L1), (0, -24, L1),
+                                   (-22, 0, 0), (22, -10, 0), (12, 22, 0), (-12, -22, 0), (-8, 20, L2), (20, 4, L2)], 1):
+        m.spawn("ffa", i, x, y, z, math.degrees(math.atan2(-y, -x)), "ffa")
+    return m
+
+
+def longwatch():
+    m = Map("longwatch", "Longwatch", ["Instagib"],
+            "Instagib map: every hit kills, so long sightlines and verticality, with tracking and dodging the "
+            "skill. Towers at each end and in the middle, catwalks on the walls, little cover.")
+    arena_floor(m, -60, 60, -20, 20, 16)
+    for x in (-48, 0, 48):
+        h = 12 if x == 0 else 8
+        m.rect(f"tower_{x}", x - 4, x + 4, -4, 4, 0, h, "hull")
+        # ramps run inward from each end tower; the middle tower has one from each side
+        for d, y in ([(1, 9)] if x < 0 else [(-1, -9)] if x > 0 else [(1, 9), (-1, -9)]):
+            m.ramp(f"tower_{x}_ramp_{d}", x + d * 20, y, x + d * 4, y, 3, 0, h, 0)
+            m.rect(f"tower_{x}_link_{d}", *sorted((x, x + d * 4)), *((4, y + 1.5) if y > 0 else (y - 1.5, -4)), h - 0.5, h, "floor2")
+    for y in (-18, 18):
+        m.rect(f"catwalk_{y}", -56, 56, *sorted((y, y - 3 if y > 0 else y + 3)), 5.5, 6, "floor2")
+    m.rect("bridge_mid", -1.5, 1.5, -18, 18, 7.5, 8, "glass")
+    for i, x in enumerate((-30, -14, 14, 30)):
+        jump_pad(m, i + 1, x, 12 if i % 2 else -12, 0, (x, 16.5 if i % 2 else -16.5, 6), "floor to the catwalk")
+    for x, y in ((-24, 0), (24, 0), (-36, -10), (36, 10)):
+        m.box(f"cover_{x}_{y}", x, y, 0, 1, 4, 1.4, "cover")
+    for i, (x, y, z) in enumerate([(-56, 0, 0), (56, 0, 0), (-48, 0, 8), (48, 0, 8), (-30, 18, 6), (30, -18, 6), (0, 0, 12), (-10, -14, 0),
+                                   (10, 14, 0), (-40, -16, 6), (40, 16, 6), (0, 18, 6)], 1):
+        m.spawn("ffa", i, x, y, z, 0 if x < 0 else 180, "ffa")
+    return m
+
+
+def crossfire_box():
+    m = Map("crossfire_box", "Crossfire Box", ["Gun Game"],
+            "Gun Game map: small and symmetrical so nobody has an edge. Four-way symmetry round a central block.")
+    arena_floor(m, -18, 18, -18, 18, 5)
+    m.box("centre_block", 0, 0, 0, 5, 5, 3.5, "hull")
+    for a in range(0, 360, 90):
+        c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+        m.box(f"corner_box_{a}", 11 * (c - s), 11 * (s + c), 0, 3, 3, 2.6, "crate")
+        m.box(f"low_cover_{a}", 9 * c, 9 * s, 0, 1, 4, 1.2, "cover", rot=math.radians(a))
+        m.box(f"edge_wall_{a}", 15 * c - 6 * s, 15 * s + 6 * c, 0, 1, 5, 2.4, "hull", rot=math.radians(a))
+    for i in range(8):
+        a = math.radians(i * 45 + 22.5)
+        m.spawn("ffa", i + 1, 15 * math.cos(a), 15 * math.sin(a), 0, math.degrees(a) + 180, "ffa")
+    return m
+
+
+def nest_loop():
+    m = Map("nest_loop", "Nest Loop", ["Oddball", "King of the Hill", "Strongholds"],
+            "Oddball map: a compact loop, the ball spawns in the middle, and several nests where a carrier can "
+            "be shielded by teammates. Each nest can be broken from at least two directions.")
+    arena_floor(m, -32, 32, -30, 30, 7)
+    m.beacon("ball", "ball_spawn", 0, 0, 0, "objective", 1.0, 0.45, "Ball")
+    m.ring_wall("loop_inner", 8, 8.6, 0, 3.5, [(0, 4), (90, 4), (180, 4), (270, 4)])
+    # four nests, each with two ways in
+    nests = [("Upper Room", 20, 18, 3.5), ("Bunker", -20, -18, 0), ("Balcony", -20, 18, 3.5), ("Pit", 20, -18, -0.0)]
+    for i, (name, x, y, z) in enumerate(nests, 1):
+        sx, sy = (1 if x > 0 else -1), (1 if y > 0 else -1)
+        if z > 0:
+            m.rect(f"nest_{i}_floor", x - 6, x + 6, y - 5, y + 5, 0, z, "floor2")
+            m.ramp(f"nest_{i}_ramp_a", x - sx * 14, y - sy * 2, x - sx * 6, y - sy * 2, 3, 0, z, 0)
+            m.ramp(f"nest_{i}_ramp_b", x + sx * 2, y - sy * 13, x + sx * 2, y - sy * 5, 3, 0, z, 0)
+            m.rect(f"nest_{i}_rail", *sorted((x - sx * 6, x + sx * 1)), *sorted((y - sy * 5, y - sy * 5.3)), z, z + 1.1, "glass")
+        else:
+            m.room(f"nest_{i}_walls", x - 6, x + 6, y - 5, y + 5, 3.5, [("N" if sy < 0 else "S", x, 3), ("E" if sx < 0 else "W", y, 3)], 0, 0.5)
+        ob = m.disc_marker("nest", f"nest_{i}", x, y, z, 2.5, "hill", name)
+    m.spawn_row("A", -29, 0, 0, 0, n=6, spread=2.4, across=90)
+    m.spawn_row("B", 29, 0, 0, 180, n=6, spread=2.4, across=90)
+    for zid, (x, y) in zip("ABC", ((-12, 2), (0, 16), (12, -2))):
+        m.zone(zid, x, y, 0, 3)
+    for i, (x, y, z) in enumerate(((0, -16, 0), (20, 18, 3.5), (-20, -18, 0)), 1):
+        m.hill(i, x, y, z, 2.5, "KotH")
+    return m
+
+
+def relay_sites():
+    m = Map("relay_sites", "Relay Sites", ["Search and Destroy", "Bomb defusal"],
+            "Bomb map: asymmetric by role, fair over a match. Attackers start on one side with two or more "
+            "routes to each of two sites; defenders start nearer the sites and must split. Sides swap at half.")
+    arena_floor(m, -50, 50, -50, 50, 7)
+    for side, x in (("A", -26), ("B", 26)):
+        m.disc_marker("charge", f"site_{side}", x, 26, 0, 5, "objective", f"Site {side}", id=side)
+        m.box(f"site_{side}_crate1", x - 3, 28, 0, 2.4, 2.4, 1.6, "crate")
+        m.box(f"site_{side}_crate2", x + 4, 23, 0, 3, 1, 1.3, "cover")
+        m.box(f"site_{side}_stack", x + 1, 31, 0, 2.4, 2.4, 3.2, "crate")
+    m.spawn_row("attack", 0, -46, 0, 90, n=5, spread=3.0, set_="round_start")
+    m.spawn_row("defend", 0, 44, 0, 270, n=5, spread=3.0, set_="round_start")
+    # Buildings that make the routes: A long (west), A short via mid, mid, B short, B long (east).
+    for name, x0, x1, y0, y1 in [("west_block", -38, -14, -20, 8), ("mid_west", -10, -4, -30, 14), ("mid_east", 4, 10, -30, 14),
+                                 ("east_block", 14, 38, -20, 8), ("north_mid", -12, 12, 22, 34)]:
+        m.rect(f"bldg_{name}", x0, x1, y0, y1, 0, 6, "hull")
+    m.room("a_short_room", -14, -4, 8, 18, 4, [("S", -9, 3), ("W", 13, 3)], 0, 0.5)
+    m.room("b_short_room", 4, 14, 8, 18, 4, [("S", 9, 3), ("E", 13, 3)], 0, 0.5)
+    for x, y in ((-44, -10), (44, -10), (0, -10), (0, 10), (-20, -32), (20, -32)):
+        m.box(f"route_cover_{x}_{y}", x, y, 0, 3, 1, 1.4, "cover")
+    for txt, x, y in [("A Long", -44, 0), ("A Short", -9, 6), ("Mid", 0, -2), ("B Short", 9, 6), ("B Long", 44, 0)]:
+        m.callout(txt, x, y)
+    return m
+
+
+def tug_line():
+    m = Map("tug_line", "Tug Line", ["Push"],
+            "Push map: long and mirrored with one central track. A robot in the middle pushes a barricade "
+            "toward whichever team's spawn it moves; forward spawns open after each checkpoint.")
+    arena_floor(m, -80, 80, -26, 26, 7)
+    m.rect("track", -72, 72, -1, 1, 0, 0.1, "path", "Markers")
+    ob = m.box("robot", 0, 0, 0.1, 2.4, 2.4, 2.6, "objective", "Markers")
+    ob["pos"] = (0, 0, 0)
+    m.marker(ob, "robot", note="about 1.22 m/s while pushed")
+    m.label("Robot", 0, -3.5, 3, 1.5)
+    for x in (-60, -30, 30, 60):
+        ob = m.box(f"barricade_cp_{x}", x, 0, 0, 0.6, 6, 2, "zone", "Markers")
+        ob["pos"] = (x, 0, 0)
+        m.marker(ob, "checkpoint", order=abs(x) // 30, toward="A" if x < 0 else "B")
+    for s, team in ((-1, "A"), (1, "B")):
+        m.spawn_row(team, s * 76, 0, 0, 0 if s < 0 else 180, n=6, spread=3, across=90, set_="main")
+        m.spawn_row(team, s * 45, 18, 0, 0 if s < 0 else 180, n=4, spread=2.5, across=0, set_="forward")
+    # Flank routes parallel to the track, separated by buildings with crossings.
+    for s in (-1, 1):
+        for x0, x1 in ((-66, -44), (-22, -8), (8, 22), (44, 66)):
+            m.rect(f"bldg_{s}_{x0}", x0, x1, *sorted((s * 7, s * 13)), 0, 6, "hull")
+    for x in (-52, -15, 15, 52):
+        m.box(f"track_cover_{x}", x, 4, 0, 3, 1, 1.3, "cover")
+        m.box(f"track_cover_s_{x}", -x, -4, 0, 3, 1, 1.3, "cover")
+    return m
+
+
+def goal_field():
+    m = Map("goal_field", "Goal Field", ["Bombing Run"],
+            "Bombing Run map: a long symmetric field like a CTF map, but with one ball in the centre and a "
+            "hoop at each end. Carry it through for 7, throw it through for 3: the area by each hoop matters most.")
+    arena_floor(m, -64, 64, -28, 28, 6)
+    m.beacon("ball", "ball_spawn", 0, 0, 0, "objective", 1.0, 0.45, "Ball")
+    for s, team in ((-1, "A"), (1, "B")):
+        x = s * 56
+        # the hoop: a frame standing in the goal mouth, 4 m up
+        for y in (-3, 3):
+            m.box(f"hoop_{team}_post{y}", x, y, 0, 0.6, 0.6, 7, "hull")
+        m.rect(f"hoop_{team}_top", x - 0.3, x + 0.3, -3, 3, 7, 7.5, team)
+        m.rect(f"hoop_{team}_bottom", x - 0.3, x + 0.3, -3, 3, 3, 3.4, team)
+        ob = m.rect(f"hoop_{team}", x - 0.1, x + 0.1, -2.7, 2.7, 3.4, 7, "glass", "Markers")
+        ob["pos"] = (x, 0, 3.4)
+        m.marker(ob, "hoop", team=team, carry=7, throw=3)
+        # galleries either side for the long throw, and cover round the hoop
+        m.rect(f"gallery_{team}_n", *sorted((s * 40, s * 50)), 14, 22, 0, 3.5, "floor2")
+        m.rect(f"gallery_{team}_s", *sorted((s * 40, s * 50)), -22, -14, 0, 3.5, "floor2")
+        m.ramp(f"gallery_{team}_ramp_n", s * 30, 18, s * 40, 18, 3, 0, 3.5, 0)
+        m.ramp(f"gallery_{team}_ramp_s", s * 30, -18, s * 40, -18, 3, 0, 3.5, 0)
+        for y in (-8, 8):
+            m.box(f"hoop_cover_{team}_{y}", s * 48, y, 0, 1, 4, 1.4, "cover")
+        m.spawn_row(team, s * 61, 0, 0, 0 if s < 0 else 180, n=6, spread=3.5, across=90)
+    for x, y in ((-20, 10), (20, -10), (-20, -10), (20, 10), (0, 16), (0, -16)):
+        m.box(f"field_cover_{x}_{y}", x, y, 0, 4, 1, 1.4, "crate")
+    return m
+
+
+def attrition_front():
+    m = Map("attrition_front", "Attrition Front", ["Attrition"],
+            "Attrition map: larger, with AI soldiers in the middle so even weaker players have targets that "
+            "score. Pilot kills are worth more than AI; team spawns at the ends, AI squads in the contested belt.")
+    m.rect("ground", -85, 85, -55, 55, -0.6, 0, "floor")
+    m.rect("belt", -40, 40, -55, 55, 0, 0.02, "floor2")
+    for s, team in ((-1, "A"), (1, "B")):
+        m.spawn_row(team, s * 78, 0, 0, 0 if s < 0 else 180, n=8, spread=3, across=90)
+        for j, y in enumerate((-30, 30)):
+            ob = m.rect(f"heavy_drop_{team}_{j}", s * 64 - 5, s * 64 + 5, y - 5, y + 5, 0, 0.12, "lift", "Markers")
+            ob["pos"] = (s * 64, y, 0)
+            m.marker(ob, "heavy_drop", team=team, note="drop zone for a heavy unit, worth more points")
+    # AI squads in the middle belt, two per side per lane.
+    for s, team in ((-1, "A"), (1, "B")):
+        for j, y in enumerate((-36, -12, 12, 36)):
+            ob = m.cyl(f"ai_squad_{team}_{j}", s * 22, y, 0.02, 3, 0.1, team, "Markers", n=16)
+            ob["pos"] = (s * 22, y, 0)
+            m.marker(ob, "ai_spawn", team=team, size=4)
+            m.label("AI squad", s * 22, y - 4, 0.3, 1.1)
+    # Buildings for the pilots, open ground for the heavies.
+    for i, (x, y, sx, sy, h) in enumerate([(0, 0, 14, 10, 8), (-30, 40, 12, 10, 6), (30, -40, 12, 10, 6), (-30, -22, 8, 8, 10),
+                                           (30, 22, 8, 8, 10), (-55, 10, 10, 18, 5), (55, -10, 10, 18, 5), (0, 40, 10, 6, 4), (0, -40, 10, 6, 4)]):
+        m.box(f"bldg_{i}", x, y, 0, sx, sy, h, "hull")
+        if h >= 8:
+            m.ramp(f"bldg_{i}_ramp", x - sx / 2 - 10, y, x - sx / 2, y, 3, 0, h, 0)
+    for x in range(-36, 40, 12):
+        m.box(f"belt_cover_{x}", x, (x * 7) % 30 - 15, 0, 3, 1, 1.3, "cover", rot=math.radians(x * 3))
+    return m
+
+
 MAPS = {
     "ring": high_port_ring,
     "dock": carrier_dock_pads,
@@ -725,6 +1173,19 @@ MAPS = {
     "vault": outpost_vault,
     "boarding": carrier_boarding,
     "outpost": besieged_outpost,
+    "bastions": twin_bastions,
+    "spindle": spindle_yard,
+    "pylons": three_pylons,
+    "supply": supply_line,
+    "lattice": lattice,
+    "spire": foundry_spire,
+    "longwatch": longwatch,
+    "crossfire": crossfire_box,
+    "nest": nest_loop,
+    "sites": relay_sites,
+    "tug": tug_line,
+    "goal": goal_field,
+    "attrition": attrition_front,
 }
 
 # --- Output -------------------------------------------------------------------------------------

@@ -1,0 +1,254 @@
+{
+ "id": "twin_bastions",
+ "name": "Twin Bastions",
+ "modes": [
+  "CTF",
+  "Slayer",
+  "One Flag",
+  "Neutral Bomb"
+ ],
+ "notes": "Archetype 1 (figure 7): two mirrored bases, each with its flag, spawn, three entrances and a high perch; a long-sightline top lane with mirrored weapon pickups, a short contested middle with the power-up, and a covered bottom flank. Flag to flag is about 116 m, 25 to 40 s on foot.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -66.4,
+   -32.4,
+   -0.6
+  ],
+  "max": [
+   66.4,
+   32.4,
+   7.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "flag_A",
+   "kind": "flag",
+   "pos": [
+    -58,
+    3,
+    0
+   ],
+   "team": "A"
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    -6.5,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    -3.9,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    -1.3,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    1.3,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    3.9,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -63.0,
+    6.5,
+    3.6
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "bomb_plant_A",
+   "kind": "charge",
+   "pos": [
+    -56,
+    -4,
+    0
+   ],
+   "radius": 1.6,
+   "id": "plant_A",
+   "mode": "Neutral Bomb"
+  },
+  {
+   "name": "flag_B",
+   "kind": "flag",
+   "pos": [
+    58,
+    3,
+    0
+   ],
+   "team": "B"
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    -6.5,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    -3.9,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    -1.3,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    1.3,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    3.9,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    63.0,
+    6.5,
+    3.6
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "bomb_plant_B",
+   "kind": "charge",
+   "pos": [
+    56,
+    -4,
+    0
+   ],
+   "radius": 1.6,
+   "id": "plant_B",
+   "mode": "Neutral Bomb"
+  },
+  {
+   "name": "pickup_weapon_W_west",
+   "kind": "pickup",
+   "pos": [
+    -18.0,
+    22.0,
+    0.0
+   ],
+   "item": "weapon_W_west"
+  },
+  {
+   "name": "pickup_weapon_W_east",
+   "kind": "pickup",
+   "pos": [
+    18.0,
+    22.0,
+    0.0
+   ],
+   "item": "weapon_W_east"
+  },
+  {
+   "name": "pickup_power_up_P",
+   "kind": "pickup",
+   "pos": [
+    0.0,
+    0.0,
+    0.8
+   ],
+   "item": "power_up_P"
+  },
+  {
+   "name": "neutral_bomb_spawn",
+   "kind": "ball",
+   "pos": [
+    0,
+    5,
+    0
+   ],
+   "mode": "Neutral Bomb"
+  }
+ ]
+}

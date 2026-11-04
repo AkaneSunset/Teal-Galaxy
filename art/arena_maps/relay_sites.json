@@ -1,0 +1,166 @@
+{
+ "id": "relay_sites",
+ "name": "Relay Sites",
+ "modes": [
+  "Search and Destroy",
+  "Bomb defusal"
+ ],
+ "notes": "Bomb map: asymmetric by role, fair over a match. Attackers start on one side with two or more routes to each of two sites; defenders start nearer the sites and must split. Sides swap at half.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -50.4,
+   -50.4,
+   -0.6
+  ],
+  "max": [
+   50.4,
+   50.4,
+   7.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "site_A",
+   "kind": "charge",
+   "pos": [
+    -26,
+    26,
+    0
+   ],
+   "radius": 5,
+   "id": "A"
+  },
+  {
+   "name": "site_B",
+   "kind": "charge",
+   "pos": [
+    26,
+    26,
+    0
+   ],
+   "radius": 5,
+   "id": "B"
+  },
+  {
+   "name": "spawn_attack_round_start_01",
+   "kind": "spawn",
+   "pos": [
+    6.0,
+    -46.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_02",
+   "kind": "spawn",
+   "pos": [
+    3.0,
+    -46.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_03",
+   "kind": "spawn",
+   "pos": [
+    0.0,
+    -46.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_04",
+   "kind": "spawn",
+   "pos": [
+    -3.0,
+    -46.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_attack_round_start_05",
+   "kind": "spawn",
+   "pos": [
+    -6.0,
+    -46.0,
+    0.0
+   ],
+   "team": "attack",
+   "set": "round_start",
+   "facing": 90
+  },
+  {
+   "name": "spawn_defend_round_start_01",
+   "kind": "spawn",
+   "pos": [
+    -6.0,
+    44.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_02",
+   "kind": "spawn",
+   "pos": [
+    -3.0,
+    44.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_03",
+   "kind": "spawn",
+   "pos": [
+    0.0,
+    44.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_04",
+   "kind": "spawn",
+   "pos": [
+    3.0,
+    44.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  },
+  {
+   "name": "spawn_defend_round_start_05",
+   "kind": "spawn",
+   "pos": [
+    6.0,
+    44.0,
+    0.0
+   ],
+   "team": "defend",
+   "set": "round_start",
+   "facing": 270
+  }
+ ]
+}

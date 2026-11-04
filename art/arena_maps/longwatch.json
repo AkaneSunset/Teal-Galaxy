@@ -1,0 +1,227 @@
+{
+ "id": "longwatch",
+ "name": "Longwatch",
+ "modes": [
+  "Instagib"
+ ],
+ "notes": "Instagib map: every hit kills, so long sightlines and verticality, with tracking and dodging the skill. Towers at each end and in the middle, catwalks on the walls, little cover.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -60.4,
+   -20.4,
+   -0.6
+  ],
+  "max": [
+   60.4,
+   20.4,
+   16.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "jump_pad_1",
+   "kind": "jump_pad",
+   "pos": [
+    -30,
+    -12,
+    0
+   ],
+   "to": [
+    -30,
+    -16.5,
+    6
+   ],
+   "note": "floor to the catwalk"
+  },
+  {
+   "name": "jump_pad_2",
+   "kind": "jump_pad",
+   "pos": [
+    -14,
+    12,
+    0
+   ],
+   "to": [
+    -14,
+    16.5,
+    6
+   ],
+   "note": "floor to the catwalk"
+  },
+  {
+   "name": "jump_pad_3",
+   "kind": "jump_pad",
+   "pos": [
+    14,
+    -12,
+    0
+   ],
+   "to": [
+    14,
+    -16.5,
+    6
+   ],
+   "note": "floor to the catwalk"
+  },
+  {
+   "name": "jump_pad_4",
+   "kind": "jump_pad",
+   "pos": [
+    30,
+    12,
+    0
+   ],
+   "to": [
+    30,
+    16.5,
+    6
+   ],
+   "note": "floor to the catwalk"
+  },
+  {
+   "name": "spawn_ffa_ffa_01",
+   "kind": "spawn",
+   "pos": [
+    -56,
+    0,
+    0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 0
+  },
+  {
+   "name": "spawn_ffa_ffa_02",
+   "kind": "spawn",
+   "pos": [
+    56,
+    0,
+    0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_03",
+   "kind": "spawn",
+   "pos": [
+    -48,
+    0,
+    8
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 0
+  },
+  {
+   "name": "spawn_ffa_ffa_04",
+   "kind": "spawn",
+   "pos": [
+    48,
+    0,
+    8
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_05",
+   "kind": "spawn",
+   "pos": [
+    -30,
+    18,
+    6
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 0
+  },
+  {
+   "name": "spawn_ffa_ffa_06",
+   "kind": "spawn",
+   "pos": [
+    30,
+    -18,
+    6
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_07",
+   "kind": "spawn",
+   "pos": [
+    0,
+    0,
+    12
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_08",
+   "kind": "spawn",
+   "pos": [
+    -10,
+    -14,
+    0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 0
+  },
+  {
+   "name": "spawn_ffa_ffa_09",
+   "kind": "spawn",
+   "pos": [
+    10,
+    14,
+    0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_10",
+   "kind": "spawn",
+   "pos": [
+    -40,
+    -16,
+    6
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 0
+  },
+  {
+   "name": "spawn_ffa_ffa_11",
+   "kind": "spawn",
+   "pos": [
+    40,
+    16,
+    6
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  },
+  {
+   "name": "spawn_ffa_ffa_12",
+   "kind": "spawn",
+   "pos": [
+    0,
+    18,
+    6
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 180
+  }
+ ]
+}

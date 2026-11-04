@@ -1,0 +1,119 @@
+{
+ "id": "crossfire_box",
+ "name": "Crossfire Box",
+ "modes": [
+  "Gun Game"
+ ],
+ "notes": "Gun Game map: small and symmetrical so nobody has an edge. Four-way symmetry round a central block.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -18.4,
+   -18.4,
+   -0.6
+  ],
+  "max": [
+   18.4,
+   18.4,
+   5.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "spawn_ffa_ffa_01",
+   "kind": "spawn",
+   "pos": [
+    13.86,
+    5.74,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 202.5
+  },
+  {
+   "name": "spawn_ffa_ffa_02",
+   "kind": "spawn",
+   "pos": [
+    5.74,
+    13.86,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 247.5
+  },
+  {
+   "name": "spawn_ffa_ffa_03",
+   "kind": "spawn",
+   "pos": [
+    -5.74,
+    13.86,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 292.5
+  },
+  {
+   "name": "spawn_ffa_ffa_04",
+   "kind": "spawn",
+   "pos": [
+    -13.86,
+    5.74,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 337.5
+  },
+  {
+   "name": "spawn_ffa_ffa_05",
+   "kind": "spawn",
+   "pos": [
+    -13.86,
+    -5.74,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 382.5
+  },
+  {
+   "name": "spawn_ffa_ffa_06",
+   "kind": "spawn",
+   "pos": [
+    -5.74,
+    -13.86,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 427.5
+  },
+  {
+   "name": "spawn_ffa_ffa_07",
+   "kind": "spawn",
+   "pos": [
+    5.74,
+    -13.86,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 472.5
+  },
+  {
+   "name": "spawn_ffa_ffa_08",
+   "kind": "spawn",
+   "pos": [
+    13.86,
+    -5.74,
+    0.0
+   ],
+   "team": "ffa",
+   "set": "ffa",
+   "facing": 517.5
+  }
+ ]
+}

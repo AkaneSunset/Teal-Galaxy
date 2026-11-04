@@ -1,0 +1,405 @@
+{
+ "id": "lattice",
+ "name": "Lattice",
+ "modes": [
+  "Onslaught",
+  "Warfare",
+  "Conquest"
+ ],
+ "notes": "Archetype 4 (figure 12): a power core per team and power nodes between them in a chain. A node can be built or attacked only if it links to your core or a node you hold; the enemy core is open only while you hold a node linked to it. The closest model to Teal Galaxy's lattice. Vehicles.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -135.0,
+   -75.0,
+   -0.6
+  ],
+  "max": [
+   135.0,
+   75.0,
+   11.2
+  ]
+ },
+ "markers": [
+  {
+   "name": "red_core",
+   "kind": "power_core",
+   "pos": [
+    -115.0,
+    0.0,
+    1.2
+   ],
+   "team": "A",
+   "hp": 5000,
+   "links": [
+    "n1",
+    "n2"
+   ]
+  },
+  {
+   "name": "spawn_A_main_01",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    -8.75,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_02",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    -6.25,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_03",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    -3.75,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_04",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    -1.25,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_05",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    1.25,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_06",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    3.75,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_07",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    6.25,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "spawn_A_main_08",
+   "kind": "spawn",
+   "pos": [
+    -129.0,
+    8.75,
+    0.0
+   ],
+   "team": "A",
+   "set": "main",
+   "facing": 0
+  },
+  {
+   "name": "vehicle_pad_A_0",
+   "kind": "vehicle_pad",
+   "pos": [
+    -115,
+    -16,
+    0
+   ],
+   "team": "A"
+  },
+  {
+   "name": "vehicle_pad_A_1",
+   "kind": "vehicle_pad",
+   "pos": [
+    -115,
+    16,
+    0
+   ],
+   "team": "A"
+  },
+  {
+   "name": "orb_A",
+   "kind": "pickup",
+   "pos": [
+    -123,
+    12,
+    0
+   ],
+   "item": "orb",
+   "note": "Warfare: captures a node at once"
+  },
+  {
+   "name": "blue_core",
+   "kind": "power_core",
+   "pos": [
+    115.0,
+    0.0,
+    1.2
+   ],
+   "team": "B",
+   "hp": 5000,
+   "links": [
+    "n4",
+    "n5"
+   ]
+  },
+  {
+   "name": "spawn_B_main_01",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    -8.75,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_02",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    -6.25,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_03",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    -3.75,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_04",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    -1.25,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_05",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    1.25,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_06",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    3.75,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_07",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    6.25,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "spawn_B_main_08",
+   "kind": "spawn",
+   "pos": [
+    129.0,
+    8.75,
+    0.0
+   ],
+   "team": "B",
+   "set": "main",
+   "facing": 180
+  },
+  {
+   "name": "vehicle_pad_B_0",
+   "kind": "vehicle_pad",
+   "pos": [
+    115,
+    -16,
+    0
+   ],
+   "team": "B"
+  },
+  {
+   "name": "vehicle_pad_B_1",
+   "kind": "vehicle_pad",
+   "pos": [
+    115,
+    16,
+    0
+   ],
+   "team": "B"
+  },
+  {
+   "name": "orb_B",
+   "kind": "pickup",
+   "pos": [
+    123,
+    12,
+    0
+   ],
+   "item": "orb",
+   "note": "Warfare: captures a node at once"
+  },
+  {
+   "name": "n1",
+   "kind": "node",
+   "pos": [
+    -60.0,
+    40.0,
+    0.8
+   ],
+   "hp": 2000,
+   "links": [
+    "red_core",
+    "n3"
+   ]
+  },
+  {
+   "name": "n2",
+   "kind": "node",
+   "pos": [
+    -60.0,
+    -40.0,
+    0.8
+   ],
+   "hp": 2000,
+   "links": [
+    "red_core",
+    "n3"
+   ]
+  },
+  {
+   "name": "n3",
+   "kind": "node",
+   "pos": [
+    0.0,
+    0.0,
+    0.8
+   ],
+   "hp": 2000,
+   "links": [
+    "n1",
+    "n2",
+    "n4",
+    "n5"
+   ]
+  },
+  {
+   "name": "n4",
+   "kind": "node",
+   "pos": [
+    60.0,
+    40.0,
+    0.8
+   ],
+   "hp": 2000,
+   "links": [
+    "n3",
+    "blue_core"
+   ]
+  },
+  {
+   "name": "n5",
+   "kind": "node",
+   "pos": [
+    60.0,
+    -40.0,
+    0.8
+   ],
+   "hp": 2000,
+   "links": [
+    "n3",
+    "blue_core"
+   ]
+  },
+  {
+   "name": "side_vehicle",
+   "kind": "node",
+   "pos": [
+    0.0,
+    58.0,
+    0.8
+   ],
+   "hp": 2000,
+   "side_node": "vehicle node",
+   "links": []
+  },
+  {
+   "name": "side_countdown",
+   "kind": "node",
+   "pos": [
+    0.0,
+    -58.0,
+    0.8
+   ],
+   "hp": 2000,
+   "side_node": "countdown node",
+   "links": []
+  }
+ ]
+}

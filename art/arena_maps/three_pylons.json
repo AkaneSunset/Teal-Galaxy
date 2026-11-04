@@ -1,0 +1,356 @@
+{
+ "id": "three_pylons",
+ "name": "Three Pylons",
+ "modes": [
+  "Domination",
+  "Strongholds",
+  "Total Control"
+ ],
+ "notes": "Archetype 2, static three zones (figure 8): A near one team's spawn, C near the other's, B in the middle as the main fight. Holding two of three outscores the enemy; taking their home point flips their spawns.",
+ "units": "metres; Blender Z up (x east, y north); Godot (x, y, z) = (x, z, -y)",
+ "bounds": {
+  "min": [
+   -48.4,
+   -32.4,
+   -0.6
+  ],
+  "max": [
+   48.4,
+   32.4,
+   9.0
+  ]
+ },
+ "markers": [
+  {
+   "name": "spawn_A_home_01",
+   "kind": "spawn",
+   "pos": [
+    -45.5,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_home_02",
+   "kind": "spawn",
+   "pos": [
+    -43.3,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_home_03",
+   "kind": "spawn",
+   "pos": [
+    -41.1,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_home_04",
+   "kind": "spawn",
+   "pos": [
+    -38.9,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_home_05",
+   "kind": "spawn",
+   "pos": [
+    -36.7,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_home_06",
+   "kind": "spawn",
+   "pos": [
+    -34.5,
+    24.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_01",
+   "kind": "spawn",
+   "pos": [
+    34.5,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_02",
+   "kind": "spawn",
+   "pos": [
+    36.7,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_03",
+   "kind": "spawn",
+   "pos": [
+    38.9,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_04",
+   "kind": "spawn",
+   "pos": [
+    41.1,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_05",
+   "kind": "spawn",
+   "pos": [
+    43.3,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_B_home_06",
+   "kind": "spawn",
+   "pos": [
+    45.5,
+    24.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "home",
+   "facing": 270
+  },
+  {
+   "name": "spawn_A_flipped_01",
+   "kind": "spawn",
+   "pos": [
+    -45.5,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_A_flipped_02",
+   "kind": "spawn",
+   "pos": [
+    -43.3,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_A_flipped_03",
+   "kind": "spawn",
+   "pos": [
+    -41.1,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_A_flipped_04",
+   "kind": "spawn",
+   "pos": [
+    -38.9,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_A_flipped_05",
+   "kind": "spawn",
+   "pos": [
+    -36.7,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_A_flipped_06",
+   "kind": "spawn",
+   "pos": [
+    -34.5,
+    -25.0,
+    0.0
+   ],
+   "team": "A",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_01",
+   "kind": "spawn",
+   "pos": [
+    34.5,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_02",
+   "kind": "spawn",
+   "pos": [
+    36.7,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_03",
+   "kind": "spawn",
+   "pos": [
+    38.9,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_04",
+   "kind": "spawn",
+   "pos": [
+    41.1,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_05",
+   "kind": "spawn",
+   "pos": [
+    43.3,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "spawn_B_flipped_06",
+   "kind": "spawn",
+   "pos": [
+    45.5,
+    -25.0,
+    0.0
+   ],
+   "team": "B",
+   "set": "flipped",
+   "facing": 90
+  },
+  {
+   "name": "zone_B",
+   "kind": "zone",
+   "pos": [
+    0,
+    0,
+    0
+   ],
+   "radius": 4,
+   "id": "B"
+  },
+  {
+   "name": "zone_A",
+   "kind": "zone",
+   "pos": [
+    -28,
+    0,
+    0
+   ],
+   "radius": 4,
+   "id": "A"
+  },
+  {
+   "name": "zone_C",
+   "kind": "zone",
+   "pos": [
+    28,
+    0,
+    0
+   ],
+   "radius": 4,
+   "id": "C"
+  },
+  {
+   "name": "pickup_power_up",
+   "kind": "pickup",
+   "pos": [
+    0.0,
+    -16.0,
+    0.0
+   ],
+   "item": "power_up"
+  }
+ ]
+}
