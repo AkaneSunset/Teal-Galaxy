@@ -47,7 +47,7 @@ var _send_for := "" # the picked system _send_to was chosen for
 var _armada_power := 60
 var _donate_item := ""
 var _donate_qty := 10
-var _donate_front := "" # the contested planet a donation counts for in the war-supply ledger
+var _donate_front := "" # the front (contested planet) war goods go to: its stockpile and its war-supply ledger
 var _lay_scale := 1.0 # map pixels per unit of a system's pos
 var _lay_origin := Vector2.ZERO
 
@@ -743,7 +743,7 @@ func _supply_key(state: Dictionary, war: Dictionary) -> Array:
 	for id in e.get("stock", {}):
 		if int(e.stock[id]) > 0:
 			stocked.append(id)
-	return ["supply", e.get("faction"), war.get("supply", {}).get(state.system.id, {}).get(str(e.get("faction")), {}), stocked]
+	return ["supply", e.get("faction"), war.get("stockpiles", {}), war.get("campaigns", {}).keys(), stocked, _donate_front]
 
 
 func _build_supply(state: Dictionary, war: Dictionary) -> void:
@@ -768,26 +768,69 @@ func _build_supply(state: Dictionary, war: Dictionary) -> void:
 		next_line.text = ("Your outposts make %d%% more. " % bonus if bonus > 0 else "") + \
 			("Next: %s at %d merit (%d to go, outposts +%d%%)." % [next.name, int(next.from), int(float(next.from) - merit), roundi(float(next.bonus) * 100)] if not next.is_empty() else "The top rank."))
 
-	_section(_supply, "%s supply in %s" % [ui._faction_name(faction), state.system.name])
-	var pile: Dictionary = war.get("supply", {}).get(state.system.id, {}).get(str(faction), {})
+	# The fronts: contested planets in your system whose campaign your faction is in. Goods go to
+	# your faction's stockpile on one, for its Supremacy and Sector Defense matches; sending them
+	# takes your account's side there. Each stockpile empties when its weekly campaign ends.
+	var fronts := []
+	for wp in WarInfo.planets_in(str(state.system.id)):
+		var c: Dictionary = war.get("campaigns", {}).get(str(wp.id), {})
+		if not c.is_empty() and c.get("entrants", []).has(faction):
+			fronts.append(wp)
+	if fronts.is_empty():
+		_section(_supply, "War goods for the front")
+		_note(_supply, "%s isn't in a campaign in %s right now, so there's no front to send war goods to." % [ui._faction_name(faction), state.system.name])
+		return
+	if fronts.all(func(wp): return str(wp.id) != _donate_front):
+		_donate_front = str(fronts[0].id)
+	var front_row := HFlowContainer.new()
+	front_row.add_theme_constant_override("h_separation", 6)
+	_supply.add_child(front_row)
+	var for_label: Label = ui._label(front_row, 15)
+	for_label.text = "Front"
+	var fronts_group := ButtonGroup.new()
+	var front_name := ""
+	for wp in fronts:
+		var fb := Button.new()
+		fb.toggle_mode = true
+		fb.button_group = fronts_group
+		fb.text = str(wp.name)
+		fb.add_theme_font_size_override("font_size", 14)
+		fb.add_theme_stylebox_override("pressed", ui._box(ui.C_TEAL.darkened(0.45), ui.C_AMBER, 12))
+		fb.button_pressed = str(wp.id) == _donate_front
+		if fb.button_pressed:
+			front_name = str(wp.name)
+		var id := str(wp.id)
+		fb.pressed.connect(func():
+			_donate_front = id
+			refresh(Net.state))
+		front_row.add_child(fb)
+
+	_section(_supply, "%s stockpile at %s" % [ui._faction_name(faction), front_name])
+	var pile: Dictionary = war.get("stockpiles", {}).get(_donate_front, {}).get(str(faction), {})
 	var parts := []
 	for id in pile:
 		if int(pile[id]) > 0:
 			parts.append(ui._amount_of(id, int(pile[id])))
-	_note(_supply, ", ".join(parts) if parts else "Nothing yet.")
-	_note(_supply, "Your faction's sector battles draw on this supply.").modulate = Color(0.7, 0.8, 0.88)
+	_note(_supply, ", ".join(parts) if parts else "Nothing yet this campaign.")
+	_note(_supply, "Supremacy and Sector Defense matches here draw their war chests from this: landers, drones, missiles and the rest become drop ships, bots, power weapons and strikes, named for the Builder who sent them. Half of what a match doesn't use comes back. It empties when the campaign ends.").modulate = Color(0.7, 0.8, 0.88)
+	var front_line := _note(_supply, "")
+	_ticks.append(func():
+		var mine: Dictionary = WarInfo.front_supply(_donate_front).get("factions", {}).get(str(faction), {})
+		var per_merit := float(Net.catalog.get("ledger", {}).get("perMerit", 0.05))
+		front_line.text = "%s has %s war supply there this campaign. Every %d War Merit of goods adds 1, times your side's underdog multiplier (x%.2f)." % [ui._faction_name(faction), WarInfo._num(float(mine.get("total", 0))), roundi(1.0 / per_merit) if per_merit > 0 else 0, WarInfo.supply_multiplier(str(faction))])
 
-	_section(_supply, "Donate from your stock")
+	_section(_supply, "Send war goods")
 	var values: Dictionary = Net.catalog.get("meritValue", {})
+	var goods: Array = Net.catalog.get("warGoods", [])
 	var stocked := []
-	for id in e.stock:
-		if int(e.stock[id]) > 0 and values.has(id):
+	for id in goods:
+		if int(e.stock.get(id, 0)) > 0:
 			stocked.append(id)
 	if stocked.is_empty():
-		_note(_supply, "Nothing in stock to give.")
+		_note(_supply, "No finished war goods in stock. Outposts make them: Lander and Drone Yards, the Armoury, Munitions Works, the Fuel Depot. Metal, ice and materials stay for building.")
 		return
 	if _donate_item not in stocked:
-		_donate_item = "fuel" if "fuel" in stocked else stocked[0]
+		_donate_item = stocked[0]
 	var group := ButtonGroup.new()
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -809,38 +852,6 @@ func _build_supply(state: Dictionary, war: Dictionary) -> void:
 			refresh(Net.state))
 		grid.add_child(b)
 		_ticks.append(func(): b.text = "%s: %d  (%d merit each)" % [_item_name(item), int(ui._econ().stock.get(item, 0)), int(values.get(item, 0))])
-	# The front the goods count for in the war-supply ledger: a contested planet in your system
-	# whose campaign your faction is in. Donating there takes your account's side on it.
-	var fronts := []
-	for wp in WarInfo.planets_in(str(state.system.id)):
-		var c: Dictionary = war.get("campaigns", {}).get(str(wp.id), {})
-		if not c.is_empty() and c.get("entrants", []).has(faction):
-			fronts.append(wp)
-	if not fronts.is_empty():
-		if fronts.all(func(wp): return str(wp.id) != _donate_front):
-			_donate_front = str(fronts[0].id)
-		var front_row := HFlowContainer.new()
-		front_row.add_theme_constant_override("h_separation", 6)
-		_supply.add_child(front_row)
-		var for_label: Label = ui._label(front_row, 15)
-		for_label.text = "For the front at"
-		var fronts_group := ButtonGroup.new()
-		for wp in fronts:
-			var fb := Button.new()
-			fb.toggle_mode = true
-			fb.button_group = fronts_group
-			fb.text = str(wp.name)
-			fb.add_theme_font_size_override("font_size", 14)
-			fb.add_theme_stylebox_override("pressed", ui._box(ui.C_TEAL.darkened(0.45), ui.C_AMBER, 12))
-			fb.button_pressed = str(wp.id) == _donate_front
-			var id := str(wp.id)
-			fb.pressed.connect(func(): _donate_front = id)
-			front_row.add_child(fb)
-		var front_line := _note(_supply, "")
-		_ticks.append(func():
-			var mine: Dictionary = WarInfo.front_supply(_donate_front).get("factions", {}).get(str(faction), {})
-			var per_merit := float(Net.catalog.get("ledger", {}).get("perMerit", 0.05))
-			front_line.text = "%s has %s war supply there this campaign. Every %d War Merit of goods adds 1, times your side's underdog multiplier (x%.2f)." % [ui._faction_name(faction), WarInfo._num(float(mine.get("total", 0))), roundi(1.0 / per_merit) if per_merit > 0 else 0, WarInfo.supply_multiplier(str(faction))])
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
 	_supply.add_child(row)
@@ -851,14 +862,11 @@ func _build_supply(state: Dictionary, war: Dictionary) -> void:
 	var give := Button.new()
 	give.icon = load(ui.ICONS + "send.png")
 	give.pressed.connect(func():
-		var msg := {"type": "donate", "item": _donate_item, "qty": ui._qty(edit)}
-		if _donate_front != "":
-			msg.planet = _donate_front
-		Net.send(msg))
+		Net.send({"type": "donate", "item": _donate_item, "qty": ui._qty(edit), "planet": _donate_front}))
 	row.add_child(give)
 	_ticks.append(func():
 		var n: int = ui._qty(edit)
-		give.text = "Donate: +%d merit" % (n * int(values.get(_donate_item, 0)))
+		give.text = "Send: +%d merit" % (n * int(values.get(_donate_item, 0)))
 		give.disabled = n < 1 or n > int(ui._econ().stock.get(_donate_item, 0)))
 
 

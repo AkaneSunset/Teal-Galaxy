@@ -46,6 +46,15 @@ const SCHEMA: Spec = {
     receiptsKept: int(1, 1000),
     historyKept: int(0, 100), // past campaigns' totals kept per front
   },
+  warChest: {
+    // Of each war good, the most a side's chest takes from its front's stockpile for each pilot who
+    // joins a match (stockpile.ts); 0 never draws it.
+    perPilot: Object.fromEntries(['lander_frame', 'hauler', 'drone_frame', 'weapon', 'fuel', 'missile', 'torpedo', 'warhead', 'sensor', 'shells', 'slugs'].map((k) => [k, int(0, 1000)])),
+    warheadsPerMatch: int(0, 10), // strategic warheads a side may bring to one match
+    returnShare: num(0, 1), // what a match didn't use goes back to the stockpile at this share, rounded up
+    defenseShare: num(0, 1), // Sector Defense (always against AI) draws this much of perPilot
+    usedWinMerit: num(0, 10), // War Merit for a Builder's goods used in a won match, as a share of their value
+  },
   accounts: {
     charactersMax: int(1, 100),
     nameMax: int(3, 64),
@@ -95,6 +104,7 @@ interface Tunables {
     receiptsKept: number;
     historyKept: number;
   };
+  warChest: { perPilot: Record<string, number>; warheadsPerMatch: number; returnShare: number; defenseShare: number; usedWinMerit: number };
   accounts: { charactersMax: number; nameMax: number; passwordMin: number; attemptsPerMinute: number };
   sideLock: { on: boolean };
   titles: { points: number };

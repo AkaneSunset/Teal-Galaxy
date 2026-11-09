@@ -98,11 +98,12 @@ test('one side per front: a donation takes the side, another character is refuse
     await builder.next(welcome);
     builder.send({ type: 'choose_faction', faction: 'compact' });
     await builder.next((m) => m.type === 'state' && m.state.bases.Akane?.faction === 'compact');
-    builder.send({ type: 'donate', item: 'metal', qty: 100, planet: 'cinder' });
+    server.galaxy.bases.Akane.stock.slugs = 10;
+    builder.send({ type: 'donate', item: 'slugs', qty: 10, planet: 'cinder' });
     const { receipt } = await builder.next((m) => m.type === 'war_receipt');
     assert.strictEqual(receipt.planet, 'cinder');
     assert.strictEqual(receipt.source, 'builder');
-    assert.strictEqual(receipt.base, 10, '100 metal is 200 War Merit, 10 war supply');
+    assert.strictEqual(receipt.base, 10, '10 slug crates are 200 War Merit, 10 war supply');
     const st = await builder.next((m) => m.type === 'state' && m.state.war.ledger.fronts.cinder?.factions.compact);
     assert.ok(st.state.war.ledger.fronts.cinder.factions.compact.sources.builder > 0, 'everyone sees the front\'s war supply');
     assert.strictEqual(st.state.accounts, undefined);

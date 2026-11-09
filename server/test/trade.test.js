@@ -2,7 +2,10 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const C = require('../campaign');
 const G = require('../galaxy');
+const W = require('../war');
+const WC = require('../stockpile.ts');
 
 // Akane's base with a Spaceport and, unless `dock` is false, a finished Carrier Dock; she and
 // the pilots named are in the given factions.
@@ -160,25 +163,31 @@ test('supply contracts: the reward is held, shared out by what each Builder brin
   assert.strictEqual(G.postContract(g, 'PilotA', 'ice', 1, 1).reason, 'you already have 5 open contracts');
 });
 
-test('donations go to the faction\'s war supply and earn War Merit and ranks', () => {
+test('Builders send finished war goods to a front\'s stockpile and earn War Merit and ranks', () => {
   const { g, e } = base({ faction: null });
-  assert.strictEqual(G.donate(g, 'Akane', 'metal', 10).reason, 'choose a faction first');
-  G.chooseFaction(g, 'builder', 'Akane', 'coma', 0, { admin: true }); // an admin playing the Conglomerate
-  assert.strictEqual(G.donate(g, 'Akane', 'metal', 0).reason, 'bad amount');
-  assert.strictEqual(G.donate(g, 'Akane', 'gold', 1).reason, 'no such item');
-  assert.strictEqual(G.donate(g, 'Akane', 'metal', 99999).reason, 'not enough metal');
-  const metal = e.stock.metal;
-  assert.deepStrictEqual(G.donate(g, 'Akane', 'metal', 200), { ok: true, merit: 400, rank: 'Recruit' });
-  assert.strictEqual(e.stock.metal, metal - 200);
-  assert.deepStrictEqual(g.war.supply['teal-prime'].coma, { metal: 200 });
-  assert.deepStrictEqual(g.war.supply['teal-prime'].compact, {});
-  assert.deepStrictEqual(G.donate(g, 'Akane', 'ice', 50), { ok: true, merit: 550, rank: 'Supplier' });
-  assert.strictEqual(e.alerts.at(-1).text, '550 War Merit: you are now a Supplier');
-  assert.ok(g.feed.some((f) => f.text === 'Akane donated 50 ice to the Coma Conglomerate'));
-  e.stock.exotic = 2;
-  G.donate(g, 'Akane', 'exotic', 2); // 900 each
-  assert.strictEqual(e.merit, 2350);
-  assert.deepStrictEqual(g.war.supply['teal-prime'].coma, { metal: 200, ice: 50, exotic: 2 });
-  assert.strictEqual(G.MERIT_VALUE.fuel, 12);
-  assert.strictEqual(G.MERIT_VALUE.metal, 2);
+  W.setDemo(true);
+  C.tick(g, C.DEMO_CYCLE_MS * 100); // a campaign on every contested planet
+  try {
+    assert.strictEqual(G.donate(g, 'Akane', 'fuel', 10, 'cinder').reason, 'choose a faction first');
+    G.chooseFaction(g, 'builder', 'Akane', 'coma', 0, { admin: true }); // an admin playing the Conglomerate
+    assert.strictEqual(G.donate(g, 'Akane', 'gold', 1, 'cinder').reason, 'no such item');
+    for (const raw of ['metal', 'ice', 'alloy', 'isotope', 'exotic', 'titanium']) assert.strictEqual(G.donate(g, 'Akane', raw, 1, 'cinder').reason, 'only finished war goods go to the front', `${raw} stays for building`);
+    assert.strictEqual(G.donate(g, 'Akane', 'fuel', 0, 'cinder').reason, 'bad amount');
+    assert.strictEqual(G.donate(g, 'Akane', 'fuel', 99999, 'cinder').reason, 'not enough Fuel cell');
+    e.stock.fuel = 100;
+    e.stock.missile = 3;
+    assert.match(G.donate(g, 'Akane', 'fuel', 1).reason, /no front/);
+    assert.strictEqual(G.donate(g, 'Akane', 'fuel', 1, 'bastion').reason, 'no campaign on that planet');
+    assert.strictEqual(e.stock.fuel, 100, 'nothing taken when refused');
+    assert.deepStrictEqual(G.donate(g, 'Akane', 'fuel', 40, 'cinder'), { ok: true, merit: 480, rank: 'Recruit' });
+    assert.strictEqual(e.stock.fuel, 60);
+    assert.deepStrictEqual(G.donate(g, 'Akane', 'missile', 3, 'cinder'), { ok: true, merit: 750, rank: 'Supplier' });
+    assert.strictEqual(e.alerts.at(-1).text, '750 War Merit: you are now a Supplier');
+    assert.ok(g.feed.some((f) => f.text === 'Akane sent 3 Missiles to the Coma Conglomerate on the front at Cinder'), g.feed.map((f) => f.text).join(' | '));
+    assert.deepStrictEqual(WC.totals(g, 'cinder', 'coma'), { lander_frame: 0, hauler: 0, drone_frame: 0, weapon: 0, fuel: 40, missile: 3, torpedo: 0, warhead: 0, sensor: 0, shells: 0, slugs: 0 });
+    assert.strictEqual(WC.totals(g, 'cinder', 'compact').fuel, 0);
+    assert.strictEqual(G.MERIT_VALUE.fuel, 12);
+  } finally {
+    W.setDemo(false);
+  }
 });

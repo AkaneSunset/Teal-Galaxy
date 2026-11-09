@@ -254,10 +254,14 @@ test('the faction war over the wire: factions, outposts, fleets, the dock, contr
     const cancelled = await pilotA.next(isState((s) => s.contracts[1]?.status === 'cancelled'));
     assert.strictEqual(cancelled.state.pilots['Pilot A'].credits, 330, 'the reward came back');
 
-    // Donations to the war supply.
-    akane.send({ type: 'donate', item: 'metal', qty: 300 });
-    const donated = await rin.next(isState((s) => s.war.supply['teal-prime'].compact.metal === 300));
-    assert.strictEqual(donated.state.bases.Akane.merit, 600);
+    // Donations: finished war goods only, to the faction's stockpile on a front.
+    akane.send({ type: 'donate', item: 'metal', qty: 300, planet: 'cinder' });
+    await akane.next(isError(/only finished war goods go to the front/));
+    server.galaxy.bases.Akane.stock.fuel = 50;
+    akane.send({ type: 'donate', item: 'fuel', qty: 30, planet: 'cinder' });
+    const donated = await rin.next(isState((s) => s.war.stockpiles.cinder?.compact?.fuel === 30));
+    assert.strictEqual(donated.state.bases.Akane.merit, 360);
+    assert.deepStrictEqual(welcome.catalog.warGoods, ['lander_frame', 'hauler', 'drone_frame', 'weapon', 'fuel', 'missile', 'torpedo', 'warhead', 'sensor', 'shells', 'slugs']);
 
     for (const c of [akane, rin, pilotA, pilotB]) c.close();
   } finally {

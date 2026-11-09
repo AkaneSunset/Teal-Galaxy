@@ -43,6 +43,7 @@ const F = require('./factions');
 const G = require('./galaxy');
 const H = require('./heist');
 const L = require('./ledger.ts');
+const WC = require('./stockpile.ts');
 const N = require('./navy');
 const S = require('./sites');
 const SP = require('./spaces');
@@ -170,11 +171,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
     const orders = O.viewFor(galaxy, faction, now());
     const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
-    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function adminView() {
-    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
   }
 
   function stateFor(me) {
@@ -291,6 +292,38 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     return pts;
   }
 
+  // War chests (stockpile.ts) for the matches that use war goods: drawn from a front's stockpile as
+  // pilots join, settled when the match ends. Every Builder whose goods were used hears what they
+  // did; goods used by the winning side earn warChest.usedWinMerit of their value in War Merit.
+  const warChest = (modeName) => ({
+    open: (planet, faction) => WC.newChest(galaxy, planet, faction),
+    draw: (chest, share = 1, goods = WC.WAR_GOODS) => WC.draw(galaxy, chest, share, goods),
+    settle: (m, wonSide = m.result) => {
+      const where = W.planet(galaxy, m.planet)?.name || m.planet;
+      for (const side of ['a', 'd']) {
+        const chest = m.chests?.[side];
+        if (!chest) continue;
+        WC.settle(galaxy, chest);
+        const won = side === wonSide;
+        const by = new Map();
+        for (const u of chest.used) {
+          const n = (by.get(u.from) || {});
+          n[u.item] = (n[u.item] || 0) + 1;
+          by.set(u.from, n);
+        }
+        for (const [builder, items] of by) {
+          const e = galaxy.bases?.[builder];
+          if (!e) continue;
+          const merit = won ? Math.round(Object.entries(items).reduce((a, [k, n]) => a + n * (G.MERIT_VALUE[k] || 0), 0) * T.get().warChest.usedWinMerit) : 0;
+          if (merit) e.merit = (e.merit || 0) + merit;
+          const list = Object.entries(items).map(([k, n]) => `${n} ${H.ITEMS[k]?.name || k}${n === 1 ? '' : 's'}`).join(', ');
+          F.alert(e, `Your war goods fought in ${modeName} on ${where} (${won ? 'won' : 'lost'}): ${list}${merit ? `. +${merit} War Merit` : ''}`, now());
+        }
+      }
+      save();
+    },
+  });
+
   const battles = B.createBattles({
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onCampaignEnd: (b, winner, vsAi) => {
@@ -304,6 +337,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
   const defenses = DF.createDefenses({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    warChest: { ...warChest('Sector Defense'), get share() { return T.get().warChest.defenseShare; } },
     onEnd: (d, winner) => {
       const squad = d.result === 'won';
       const names = squad ? [...d.pilots.values()].map((p) => p.name) : [];
@@ -330,6 +364,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
+    warChest: warChest('Supremacy'),
     onEnd: (f, winner, vsAi) => {
       const names = [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name);
       won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], names);
@@ -719,6 +754,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         },
         contractItems: G.CONTRACT_ITEMS,
         meritValue: G.MERIT_VALUE,
+        warGoods: WC.WAR_GOODS,
         demo,
         carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
         campaign: { modes: C.MODES, bonuses: C.BONUSES, aiShare: C.AI_SHARE },
@@ -815,8 +851,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'donate': {
         // To a front: the planet given, else the first in the Builder's system whose campaign
-        // their faction is in. The goods count for it in the ledger, and the account takes the
-        // faction's side there.
+        // their faction is in. The goods go to the faction's stockpile there (stockpile.ts), count
+        // for it in the ledger, and the account takes the faction's side there.
         const faction = galaxy.bases?.[me.name]?.faction ?? null;
         const planet = donationFront(faction, msg.planet);
         if (msg.planet && !planet) {
@@ -828,7 +864,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
           result = side;
           break;
         }
-        result = G.donate(galaxy, me.name, msg.item, msg.qty);
+        result = G.donate(galaxy, me.name, msg.item, msg.qty, planet);
         if (!result.ok) break;
         const merit = msg.qty * (G.MERIT_VALUE[msg.item] || 0);
         O.donated(galaxy, faction, me.name, merit, now());

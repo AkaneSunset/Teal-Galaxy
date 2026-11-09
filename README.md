@@ -578,11 +578,14 @@ their credits. Builders of the same faction find it under **Jobs** and fill as m
 from stock, paid their share of the reward as they go; the goods go in the pilot's hold. The pilot can
 cancel it and get back whatever hasn't been paid.
 
-**War supply and War Merit.** The War screen's **Supply** tab gives goods from stock to your faction's
-war supply in your system, which sector battles will spend. When your faction is in a campaign on a
-planet of your system, pick the front the goods go to (*For the front at*): they count for it in its
-[war-supply ledger](#war-supply-on-the-fronts), and your account takes your faction's side there. Each unit earns War Merit by its value
-(metal 2, ice 3, any other item what it's worth), and Merit ranks make your outposts produce more:
+**War goods, War Merit and the front.** The War screen's **Supply** tab sends finished war goods from
+stock to your faction's **stockpile on a front**: a planet of your system whose campaign your faction is
+in (pick it under *Front*). Only finished goods go: landers, hauler hulls, drone chassis, weapon systems,
+fuel cells, missiles, torpedoes, strategic warheads, sensor modules, shell and slug crates. Metal, ice,
+ores and materials such as alloy and isotope cells stay for building. The goods count for the front in
+its [war-supply ledger](#war-supply-on-the-fronts), and your account takes your faction's side there.
+What they do in battle is under [War goods at the front](#war-goods-at-the-front). Each unit earns War
+Merit by its value, and Merit ranks make your outposts produce more:
 
 | Rank | War Merit | Outposts produce |
 | --- | --- | --- |
@@ -591,6 +594,38 @@ planet of your system, pick the front the goods go to (*For the front at*): they
 | Quartermaster | 2000 | 4% more |
 | Provisioner | 8000 | 6% more |
 | War Industrialist | 25000 | 8% more |
+
+### War goods at the front
+
+What Builders' outposts make is what the big fights use (`server/stockpile.ts`). Each faction keeps a
+stockpile of war goods on each front, filled from the Supply tab, and it **empties when the front's
+weekly campaign ends**: every campaign is supplied afresh. Every lot remembers the Builder who sent it.
+
+A **Supremacy** or **Sector Defense** match takes a **war chest** from its side's stockpile as each pilot
+joins: up to `warChest.perPilot` of each good the mode uses, per pilot (1 lander, 1 hauler, 1 drone
+chassis, 1 weapon system, 20 fuel cells, 2 missiles, 1 sensor module, 2 shell crates and 5 slug crates),
+times the side's underdog multiplier, and one strategic warhead a match. Torpedoes wait for a mode that
+uses them. Sector Defense, always against AI,
+draws half that; AI troops draw nothing. When the match ends, **half of what it didn't use comes back**
+(rounded up), the rest lost in transit. Sector Battles, Space Battles and Facility Battles don't use
+war goods.
+
+| Good | Supremacy | Sector Defense |
+| --- | --- | --- |
+| Lander chassis | A forward drop ship 45 s into each ground phase, short of the nearest point you don't hold: respawn there until the ground is won | One more shared life |
+| Hauler hull | One more boarding shuttle, mid-field | |
+| Drone chassis | 4 more fodder bots for your side, all match | A sentry drone over the middle that fires on the waves until the set ends |
+| Weapon system | A railgun at your drop ship with the front-supply drop | One more rocket launcher in the end-of-set drop |
+| Fuel cells | 5 s more boarding window for every 10, up to 15 s | |
+| Missile | A rocket launcher at your drop ship with the front-supply drop | A rocket launcher in every drop |
+| Strategic warhead | A breaching charge: the first blast door aboard goes as you board | The first Warlord is taken out as it lands |
+| Sensor module | A Sensor Array sweep at the start of each ground phase | Scouts a set: the next wave's makeup in every break |
+| Shell crate | An Orbital Barrage for the pilot who brought it | 80 damage to every enemy as a wave lands |
+| Slug crate | | One more ammo crate in each drop |
+
+Every use is in the match feed with the Builder's name ("a Rocket launcher from Akane"). When the match
+ends, each Builder whose goods were used gets an alert of what they did and the result, and goods used
+by the winning side earn `warChest.usedWinMerit` (25%) of their value again in War Merit.
 
 ### The Coma Conglomerate: admins and the AI director
 
