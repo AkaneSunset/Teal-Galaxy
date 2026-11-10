@@ -45,6 +45,7 @@ const H = require('./heist');
 const L = require('./ledger.ts');
 const WC = require('./stockpile.ts');
 const FR = require('./frontier.ts');
+const CI = require('./cities.ts');
 const N = require('./navy');
 const S = require('./sites');
 const SP = require('./spaces');
@@ -100,7 +101,7 @@ const PILOT_ONLY = {
   starfight_move: 'only pilots fly', starfight_fire: 'only pilots fly', starfight_missile: 'only pilots fly', starfight_torpedo: 'only pilots fly', starfight_class: 'only pilots fly', starfight_leave: 'only pilots fly',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
-const ADMIN_ONLY = ['admin_intercept_result', 'director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order', 'admin_dashboard'];
+const ADMIN_ONLY = ['city_copy', 'admin_intercept_result', 'director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order', 'admin_dashboard'];
 
 // Whether a hello's admin_key is the server's ADMIN_KEY (none set: nobody is an admin). The bytes
 // are compared in constant time, so the key can't be found a character at a time; a key of another
@@ -227,6 +228,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       return galaxy.system.planets.some((p) => p.id === id && p.kind !== 'satellite');
     },
     isSurface: (id) => galaxy.system.planets.some((p) => p.id === id),
+    isCity: (id) => CI.isHomeworld(galaxy, id) || !!CI.colonyCluster(galaxy, id),
     berthsOpen: (id) => G.berthsOpen(galaxy, id),
     factionOf: (name) => (Object.hasOwn(galaxy.pilots, name) ? galaxy.pilots[name].faction ?? null : null),
     people: pilots,
@@ -761,6 +763,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         meritValue: G.MERIT_VALUE,
         warGoods: WC.WAR_GOODS,
         frontier: FR.CATALOG,
+        cities: CI.CATALOG,
         demo,
         carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
         campaign: { modes: C.MODES, bonuses: C.BONUSES, aiShare: C.AI_SHARE },
@@ -1018,6 +1021,22 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'admin_capture':
         result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
         break;
+      // The city builder: a Founder's colony city, or (admins) a homeworld's, piece by piece.
+      case 'city_place':
+        result = CI.place(galaxy, me, String(msg.planet || ''), String(msg.piece || ''), msg.x, msg.z, msg.rot, now());
+        break;
+      case 'city_move':
+        result = CI.move(galaxy, me, String(msg.planet || ''), msg.id, msg.x, msg.z, msg.rot, now());
+        break;
+      case 'city_remove':
+        result = CI.remove(galaxy, me, String(msg.planet || ''), msg.id, now());
+        break;
+      case 'city_clear':
+        result = CI.clear(galaxy, me, String(msg.planet || ''), now());
+        break;
+      case 'city_copy':
+        result = CI.copy(galaxy, me, String(msg.from || ''), String(msg.planet || ''), now());
+        break;
       case 'admin_dashboard':
         return send(ws, { type: 'dashboard', ...dashboard() });
       case 'place_piece':
@@ -1178,6 +1197,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         }
         return send(ws, { type: 'error', reason: `unknown message ${msg.type}` });
     }
+    if (result.ok && msg.type.startsWith('city_')) send(ws, { ...result, type: 'city_result', action: msg.type, planet: msg.planet });
     if (result.ok && (FRONTIER_MSGS.includes(msg.type) || msg.type === 'admin_intercept_result')) send(ws, { ...result, type: 'frontier_result', action: msg.type });
     if (result.ok) changed();
     else send(ws, { type: 'error', reason: result.reason });

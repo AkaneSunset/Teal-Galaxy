@@ -43,6 +43,7 @@ const WarPanel := preload("res://war_panel.gd")
 const JumpPanel := preload("res://jump_panel.gd")
 const OrdersPanel := preload("res://orders_panel.gd")
 const FrontierPanel := preload("res://frontier_panel.gd")
+const City := preload("res://city.gd")
 const TradePanel := preload("res://trade_panel.gd")
 const Carrier := preload("res://carrier.gd")
 const Place := preload("res://place.gd")
@@ -624,6 +625,7 @@ func _build_hud() -> void:
 	war_layer.add_child(_frontier_panel)
 	_frontier_panel.closed.connect(_close_panel)
 	_frontier_panel.jump_requested.connect(_request_frontier_jump)
+	_frontier_panel.city_requested.connect(_open_city)
 	# The jump itself: the view washes out to the FTL tunnel's blue, then back in at the far end.
 	_jump_veil = ColorRect.new()
 	_jump_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1018,6 +1020,15 @@ func _interact() -> void:
 			_prompt.text = "Press %s to request docking at %s: the carrier flies itself to its berth" % [controls.binding_text("interact", false), _stations[id].name]
 			if holding:
 				_request_dock(id)
+	elif _near_city() != "" and _station == null and _raid == null:
+		var id := _near_city()
+		var name := str(WarInfo.planet(id).get("name", id))
+		if flight.speed() > DOCK_SPEED:
+			_prompt.text = "Slow below %d m/s to go down to the city on %s" % [DOCK_SPEED, name]
+		else:
+			_prompt.text = "Press %s to take a lander down to the city on %s" % [controls.binding_text("interact", false), name]
+			if holding:
+				_open_city(id)
 	elif not _carrier and _near_station(DOCK_RANGE) != "":
 		var id := _near_station(DOCK_RANGE)
 		if flight.speed() > DOCK_SPEED:
@@ -1420,6 +1431,8 @@ func _sync_space(delta: float) -> void:
 			want = "station:" + id
 	elif _station and _station.get_script() == Surface:
 		want = "" if _station.seated else "surface:" + _station.planet_id
+	elif _station and _station.get_script() == City:
+		want = "city:" + _station.planet_id
 	elif _station == null and _carrier and _crew.is_empty():
 		want = "ship:" + Net.my_name # at the helm of your carrier
 	if want.begins_with("ship:") and want != "ship:" + Net.my_name and want != _space_id:
@@ -2016,6 +2029,43 @@ func _request_frontier_jump(system_id: String) -> void:
 		return
 	_request_jump(system_id, "")
 	_frontier_panel.say("Plotting the jump...")
+
+
+## A homeworld (a capital world, whose city stands below) whose orbit you're in, or "".
+func _near_city() -> String:
+	for wp in WarInfo.planets_in(System.current):
+		if wp.get("capital", false) and System.distance(System.orbital_pos(str(wp.id)), _pos) < OVER_RANGE:
+			return str(wp.id)
+	return ""
+
+
+## Down to a city on foot: a homeworld's from its orbit, or your colony's from the Frontier screen.
+## Your ship (or carrier) waits overhead; the shuttle stop's console brings you back up to it.
+func _open_city(planet_id: String) -> void:
+	_hide_panels()
+	flight.velocity = Vector3.ZERO
+	flight.throttle = 0.0
+	var place := City.new(planet_id)
+	place.leave_city.connect(_leave_city)
+	_land_in(place, false)
+	_dock_panel.visible = false
+	_station.stand()
+	_say("A lander sets you down at the edge of the city. Its shuttle stop takes you back up.")
+
+
+func _leave_city() -> void:
+	_leave_place()
+	controls.enabled = true
+	if _docked != "":
+		dock(_docked)
+		return
+	_set_space_visible(true)
+	if _carrier:
+		_set_outside(false)
+	else:
+		_camera.make_current()
+	_refresh_focus()
+	_say("Back aboard, in orbit.")
 
 
 ## A system's name: one of the war's, else a Frontier system (gate, deep space or a cluster).

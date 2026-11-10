@@ -930,6 +930,44 @@ Walk through one to visit that carrier; the same gate, or the shuttle console on
 you back. If its owner undocks with you aboard, you ride along as crew, and you can only step off where
 the carrier docks next.
 
+## Cities
+
+Cities are built on PC, with one city builder for two kinds of world: a Founder's terraformed
+Frontier world, and the factions' homeworlds (the capital worlds: Bastion, Anvil, Shade, Hollow,
+Radiance, Glimmer, Nadir, Zenith), which the game's admins lay out. The phone keeps its base and
+outposts. A city is a 1.2 km square of 10 m cells (server/cities.ts); every piece covers a block of
+cells and can be turned a quarter at a time: roads, plazas and parks, towers and high-rises, civic
+buildings, industry, walls and turrets.
+
+**Getting there.** Fly into a homeworld's orbit (no station there: capital worlds can't be attacked)
+and press F to take a lander down. A colony's city is reached from the Frontier screen (the FRONTIER
+console on your carrier's Command Deck, or Frontier on the ship's menu): on its system, "Go down to
+your city" on the Colony page, or "Visit the city" on the Trade page. You arrive on foot at the
+shuttle stop on the south edge; its console takes you back up. Everyone in a city walks it together.
+
+**Building.** Where you may build, press B (or use the CITY PLANNING console at the stop) for the
+builder: the view rises over the city, the pieces are down the right, and the grid shows.
+Click places the chosen piece (hold and drag to lay roads and walls), or picks a placed one: R turns
+it, M moves it, X takes it up. Right click lets go. W A S D or right drag pans, Q and E turn the view,
+the wheel zooms, and B or Esc leaves.
+
+- **On a colony** only its Founder builds. The colony's buildings (habitat blocks, precincts,
+  clinics, power plants, mines, foundries, smelters, works, reactors) are pieces: a building built on
+  the Colony page waits in store until placed, and placing one with none in store builds it there,
+  paid and tier-locked the same way. Taking one up puts it back in store; it still counts. Roads,
+  plazas, parks, towers and walls are free. Homeworld-only pieces (the Government Hall, Star Port,
+  Carrier Dock...) aren't offered. A colony that collapses and goes to auction leaves its city as
+  ruins.
+- **On a homeworld** only admins build (start the server with `ADMIN_KEY` and the game with
+  `--admin-key`, see Admins above). Every piece is offered and is scenery, tinted in the owning
+  faction's colour. "Copy city from" copies another homeworld's layout as a starting point, and
+  "Clear the whole city" (pressed twice) empties it.
+
+Messages: `city_place {planet, piece, x, z, rot}`, `city_move {planet, id, x, z, rot}`,
+`city_remove {planet, id}`, `city_clear {planet}`, `city_copy {from, planet}` (admins). Each success
+answers `city_result`; cities are in the state as `cities[planetId].pieces`, and the pieces in the
+catalog as `cities`.
+
 ## The Frontier and terraforming
 
 A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in

@@ -16,6 +16,7 @@ const WarInfo := preload("res://war_info.gd")
 
 signal closed
 signal jump_requested(system_id: String)
+signal city_requested(planet_id: String) # down to your colony's city
 
 const PAGES := [["clusters", "Clusters"], ["terraformer", "Terraformer"], ["colony", "Colony"], ["trade", "Trade"], ["hunt", "Hunt and travel"]]
 const STATE_TEXT := {"leased": "at the shipyard", "voyage": "under way", "orbit": "in orbit, terraforming", "world": "done: a living world", "destroyed": "destroyed", "lapsed": "lease lapsed"}
@@ -468,6 +469,8 @@ func _colony_block(c: Dictionary) -> void:
 	var cat: Dictionary = Net.catalog.get("frontier", {}).get("buildings", {})
 	var pop := int(col.get("pop", 0))
 	_heading("%s · population %d · tier %d" % [_planet_name(c, str(col.planet)), pop, int(col.get("tier", 0))], colour)
+	_city_button(str(col.planet), "Go down to your city and build (B)")
+	_note("Buildings you build here wait in store until you place them in the city; placing one with none in store builds it there.", Color(1, 1, 1, 0.5))
 	if col.get("collapseAt") != null:
 		_note("COLLAPSED. Resettle it within %s or the cluster goes to auction." % _until(float(col.collapseAt)), Color(1.0, 0.45, 0.4))
 		_button("Resettle (%d credits)" % int(_tun().get("colony", {}).get("resettleCost", 0)), {"type": "frontier_resettle", "cluster": cid})
@@ -505,6 +508,20 @@ func _colony_block(c: Dictionary) -> void:
 		_button("Export all to the galactic market", {"type": "frontier_export", "cluster": cid, "item": str(item), "qty": n}, row)
 
 
+## Down to a colony's city: from its own system only.
+func _city_button(planet_id: String, text: String) -> void:
+	var system := planet_id.substr(0, planet_id.rfind("-p"))
+	var b := Button.new()
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	if system == here_system:
+		b.text = text
+		b.pressed.connect(func(): city_requested.emit(planet_id))
+	else:
+		b.text = "%s: fly to %s first" % [text, _sys_name(system)]
+		b.disabled = true
+	_body.add_child(b)
+
+
 # --- Trade --------------------------------------------------------------------------------------
 
 func _page_trade() -> void:
@@ -526,6 +543,7 @@ func _page_trade() -> void:
 			continue
 		var stock: Dictionary = c.colony.get("stock", {})
 		_heading("%s's colony, cluster %s" % [str(c.owner), str(c.id)], WarInfo.faction_color(c.get("faction")))
+		_city_button(str(c.colony.planet), "Visit the city on %s" % _planet_name(c, str(c.colony.planet)))
 		for item in stock:
 			var n := int(stock[item])
 			if n <= 0:
