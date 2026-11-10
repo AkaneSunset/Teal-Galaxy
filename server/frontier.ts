@@ -173,6 +173,11 @@ function clusterOfSystem(fr: Frontier, systemId: string): Cluster | null {
   return (m && fr.clusters[m[1]]) || null;
 }
 
+// The deep-space system a leased cluster's first system hangs off.
+function anchorOf(c: Cluster): string {
+  return deepOf(c.faction, DEPTH, roll(c.id, WIDTH));
+}
+
 // The systems one jump from `id`: war-map lanes, the region links, and a leased cluster's chain
 // (its first system off the deepest level, the rest one after another).
 function neighbours(g: any, id: string): string[] {
@@ -181,7 +186,7 @@ function neighbours(g: any, id: string): string[] {
   for (const faction of Object.keys(EXIT)) for (const n of regionLinks(faction)[id] || []) out.add(n);
   for (const c of Object.values(fr.clusters)) {
     const ids = c.systems.map((s) => s.id);
-    const anchor = deepOf(c.faction, DEPTH, roll(c.id, WIDTH));
+    const anchor = anchorOf(c);
     if (id === anchor) out.add(ids[0]);
     const k = ids.indexOf(id);
     if (k === 0) out.add(anchor);
@@ -815,22 +820,32 @@ function tick(g: any, now: number): boolean {
 function view(g: any, faction: Faction | null, now: number) {
   const fr = frontier(g);
   const fade = T.get().frontier.traceHours * hourMs();
-  const clusters = Object.fromEntries(Object.values(fr.clusters).map((c) => [c.id, { ...c, scans: c.faction === faction ? c.scans : {}, surveys: c.faction === faction ? c.surveys : {} }]));
+  const clusters = Object.fromEntries(
+    Object.values(fr.clusters).map((c) => [c.id, { ...c, anchor: anchorOf(c), scans: c.faction === faction ? c.scans : {}, surveys: c.faction === faction ? c.surveys : {} }]),
+  );
+  // Its own faction's Terraformers come with what their stage still needs and where they can jump.
   const ships = Object.fromEntries(
     Object.values(fr.ships)
       .filter((s) => s.faction === faction || (faction && s.foundBy[faction] && now - s.foundBy[faction] < fade && ['leased', 'voyage'].includes(s.state)))
-      .map((s) => [s.id, s.faction === faction ? s : { id: s.id, faction: s.faction, owner: s.owner, at: s.at, state: s.state, escorts: s.escorts.length, interception: s.interception }]),
+      .map((s) => [s.id, s.faction === faction ? { ...s, needs: needs(g, s), next: neighbours(g, s.at) } : { id: s.id, faction: s.faction, owner: s.owner, at: s.at, state: s.state, escorts: s.escorts.length, interception: s.interception }]),
   );
-  return { clusters, ships, regions: regionsView() };
+  const pilots = new Set(Object.entries(g.pilots || {}).filter(([, p]: [string, any]) => p.faction === faction).map(([n]) => n));
+  return { clusters, ships, missions: fr.missions.filter((m) => pilots.has(m.pilot)), regions: regionsView() };
 }
 
 function adminView(g: any) {
   const fr = frontier(g);
-  return { ...fr, regions: regionsView() };
+  return { ...fr, clusters: Object.fromEntries(Object.values(fr.clusters).map((c) => [c.id, { ...c, anchor: anchorOf(c) }])), regions: regionsView() };
 }
 
 function regionsView() {
-  return Object.fromEntries(Object.keys(EXIT).map((f) => [f, { exit: EXIT[f], gate: gateOf(f), links: regionLinks(f) }]));
+  return Object.fromEntries(
+    Object.keys(EXIT).map((f) => {
+      const links = regionLinks(f);
+      const names = Object.fromEntries(Object.keys(links).filter((id) => id.startsWith('fr-')).map((id) => [id, id === gateOf(f) ? `${nameFor(id)} Gate` : nameFor(id)]));
+      return [f, { exit: EXIT[f], gate: gateOf(f), links, names }];
+    }),
+  );
 }
 
 // For the apps: what each building and engine is.
