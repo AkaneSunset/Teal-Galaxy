@@ -511,3 +511,43 @@ test('only apps the server welcomed hear the galaxy; a Coma character is the key
     await server.close();
   }
 });
+
+test('the Frontier over the wire: a lease, a survey, and a Terraformer only its own faction sees', async () => {
+  const port = 18297;
+  const server = startServer({ port, tickMs: 60000 });
+  try {
+    const akane = await connect(port);
+    const kite = await connect(port);
+    akane.send({ type: 'hello', role: 'explorer', name: 'Akane' });
+    kite.send({ type: 'hello', role: 'explorer', name: 'Kite' });
+    await akane.next((m) => m.type === 'welcome');
+    const welcome = await kite.next((m) => m.type === 'welcome');
+    assert.ok(welcome.catalog.frontier.buildings.habitat);
+    akane.send({ type: 'choose_faction', faction: 'compact' });
+    kite.send({ type: 'choose_faction', faction: 'ashen' });
+    await akane.next(isState((s) => s.pilots.Akane?.faction === 'compact'));
+    await kite.next(isState((s) => s.pilots.Kite?.faction === 'ashen'));
+    akane.send({ type: 'frontier_lease_cluster' });
+    assert.match((await akane.next((m) => m.type === 'error')).reason, /costs/);
+    server.galaxy.pilots.Akane.credits = 2_000_000;
+    akane.send({ type: 'frontier_lease_cluster' });
+    const lease = await akane.next((m) => m.type === 'frontier_result');
+    assert.strictEqual(lease.cluster, 'compact-1');
+    const planet = server.galaxy.frontier.clusters['compact-1'].systems[0].planets[0].id;
+    for (const point of [0, 1, 2]) akane.send({ type: 'frontier_survey', cluster: 'compact-1', planet, point });
+    const graded = await akane.next((m) => m.type === 'frontier_result' && m.grades);
+    assert.ok(graded.grades.size >= 1);
+    akane.send({ type: 'frontier_lease_ship', cluster: 'compact-1' });
+    const { ship } = await akane.next((m) => m.type === 'frontier_result' && m.ship);
+    await akane.next(isState((s) => s.frontier.ships[ship]?.owner === 'Akane'));
+    const theirs = await kite.next(isState((s) => s.frontier.clusters['compact-1']));
+    assert.deepStrictEqual(theirs.state.frontier.ships, {}, 'the Collective sees the lease, not the ship');
+    assert.deepStrictEqual(theirs.state.frontier.clusters['compact-1'].surveys, {});
+    kite.send({ type: 'frontier_build', cluster: 'compact-1', building: 'mine' });
+    assert.match((await kite.next((m) => m.type === 'error')).reason, /your own colony/);
+    akane.close();
+    kite.close();
+  } finally {
+    await server.close();
+  }
+});

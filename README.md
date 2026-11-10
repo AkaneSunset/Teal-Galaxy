@@ -930,6 +930,55 @@ Walk through one to visit that carrier; the same gate, or the shuttle console on
 you back. If its owner undocks with you aboard, you ride along as crew, and you can only step off where
 the carrier docks next.
 
+## The Frontier and terraforming
+
+A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in
+`tunables.json` under `frontier`). The design is in the "Terraforming ship design" doc. The server
+side is in; the Godot screens for it come next, so for now it's played through the messages below.
+
+- **Star clusters.** Each faction claims a region of Frontier space past Marrow Reach (Compact,
+  Collective) or The Drift (Luminar, Coma): a gate system, four levels of deep space three systems
+  wide, and its pool of about 13 billion clusters (some 400 billion systems in all). A pilot leases
+  the next cluster from their faction's pool (`frontier_lease_cluster`, 250,000 credits, one-off):
+  5 to 10 systems with 1 to 3 barren planets each, theirs for good unless the account is deleted,
+  they sell it back (`frontier_sell_back`), or its colony collapses. That pilot is its **Founder**.
+- **Surveys.** Three scans from around a planet's orbit (`frontier_survey`, points 0 to 2) grade its
+  size, core, ice and atmosphere. Any pilot of the faction can do it; the one who finishes is the
+  world's Pathfinder. Only the faction sees the grades.
+- **The Terraformer** (`frontier_lease_ship`, 400,000 credits) leaves from the faction's shipyard (its
+  capital system) with the Atmosphere Processor on board. The Founder picks a surveyed target
+  (`frontier_target`) and jumps it one lane at a time (`frontier_jump`, 6 hours apart) through the
+  region into the cluster, then establishes it in orbit (`frontier_establish`): the start point, after
+  which it's the system's permanent orbital hub. Every week before that costs a 25,000 credit renewal
+  fee; a Founder who can't pay loses the Terraformer lease.
+- **The hunt.** A Terraformer is never announced: other factions don't see it in the state. A Data
+  shard or Security dossier from a raid stash, decoded (`frontier_decode`), names a faction's leased
+  Terraformers and their clusters, never where they are. Each jump leaves a trace in the system it
+  left for 12 hours; scanning the system your carrier is in (`frontier_scan`) shows those traces' lanes
+  and finds any enemy Terraformer there. A faction that has found one can intercept it in its system
+  (`frontier_intercept`). A lost interception destroys it. Until the Intercept match is built, an admin
+  settles one with `admin_intercept_result`. Pilots of its own faction can escort it (`frontier_escort`).
+  Fleet carriers can jump into the Frontier (the region's systems and leased clusters count as lanes).
+- **The three stages.** Atmosphere (3 days: fuel and isotope cells), water (3 days: ice) and biosphere
+  (4 days: alloy plates and exotic matter), each scaled by the survey grades. Each needs its engine,
+  bought at the shipyard (`frontier_engine`) and delivered to fit it. Any pilot of the faction delivers
+  to the bar (`frontier_deliver`, from cargo or hold) and the Founder pays them 80% of each unit's
+  value. A stage ends when its bar is full and its time is up; a won attack on the engine
+  (`stageSetback`, for the Supremacy and Sector Defense hooks to come) takes a quarter of its bar.
+- **The colony.** The world starts at 500 people with a habitat block, precinct, clinic and power
+  plant. The Founder builds more (`frontier_build`); population tiers at 2,000, 8,000 and 25,000
+  unlock the foundry, the smelter and electronics works, and the isotope reactor. Precincts (crime),
+  clinics (services) and power plants each cover so many people: covered, the colony grows to its
+  housing; short, it shrinks. At zero the Founder has a week to resettle (`frontier_resettle`), or
+  the cluster goes to auction (`frontier_auction_buy`), its buildings left as ruins.
+- **Exports.** Pilots buy the colony's products at the source (`frontier_buy`, credits to the
+  Founder); the Founder sells to the galactic market (`frontier_export`, 60% of value); and Hauler
+  missions (`frontier_haul`, then `frontier_haul_deliver` at the station) carry goods to a contested
+  world's orbital station, where they sell at full value: half to the hauler, half to the Founder,
+  and each one adds 1% to the colony's export profits (up to 50%).
+
+Time runs 336 times faster in the demo war (a week in half an hour).
+
 ## Sector battles
 
 A sector battle is a real-time battle on a contested planet, in the spirit of Supreme Commander: Forged
