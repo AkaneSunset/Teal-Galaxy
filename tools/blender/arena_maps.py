@@ -1188,6 +1188,208 @@ MAPS = {
     "attrition": attrition_front,
 }
 
+# --- Planet terrain -----------------------------------------------------------------------------
+# The outdoor maps stand on a planet, built the way the game's own surface is (game/terrain.gd and
+# game/battle/battle_terrain.gd): faceted ground in the world's palette, gentle relief where the
+# fight is, flattened under every building, spawn and objective, then rising past the edge of play
+# into a rim, rolling high ground, ridged peaks, mesas and a cliff or a ledge on one side, with
+# boulders (and ice on frost worlds) scattered over it. Seeded by the map id, so it's the same
+# every build.
+
+from mathutils import noise as _noise  # noqa: E402
+
+# The game's world palettes (battle_terrain.gd): low ground, high ground, rock, peaks, sky, sun.
+WORLDS = {
+    "frost": {"low": (0.42, 0.47, 0.53), "high": (0.62, 0.67, 0.75), "rock": (0.25, 0.27, 0.32), "peak": (0.86, 0.9, 0.96),
+              "sky": (0.55, 0.66, 0.8), "sun": (1.0, 0.95, 0.88)},
+    "dust": {"low": (0.56, 0.42, 0.27), "high": (0.68, 0.55, 0.37), "rock": (0.36, 0.25, 0.18), "peak": (0.78, 0.66, 0.5),
+             "sky": (0.62, 0.52, 0.42), "sun": (1.0, 0.86, 0.7)},
+    "moss": {"low": (0.27, 0.36, 0.2), "high": (0.4, 0.45, 0.27), "rock": (0.32, 0.3, 0.27), "peak": (0.66, 0.66, 0.62),
+             "sky": (0.42, 0.58, 0.78), "sun": (1.0, 0.96, 0.86)},
+    "ash": {"low": (0.27, 0.26, 0.26), "high": (0.38, 0.36, 0.35), "rock": (0.16, 0.15, 0.15), "peak": (0.52, 0.47, 0.44),
+            "sky": (0.36, 0.28, 0.27), "sun": (1.0, 0.8, 0.62)},
+}
+
+# Which maps are outdoors, on what kind of world. Station and carrier interiors, and the enclosed
+# arenas, stay as they are.
+#   relief: metres of rolling ground inside the play area (0 = flat, like a built pad)
+#   strip: objects that stand in for ground or for the arena's boundary walls, replaced by terrain
+#   rim: a steep bank just past the edge of play, where the walls were
+OUTDOOR = {
+    "carrier_dock_pads": {"world": "frost", "relief": 0.0, "strip": [], "rim": 0},
+    "outpost_vault": {"world": "frost", "relief": 0.0, "strip": [], "rim": 0},
+    "besieged_outpost": {"world": "ash", "relief": 0.8, "strip": ["ground"], "rim": 0},
+    "twin_bastions": {"world": "moss", "relief": 0.6, "strip": ["floor", "perimeter"], "rim": 9},
+    "supply_line": {"world": "dust", "relief": 1.6, "strip": ["ground"], "rim": 10},
+    "lattice": {"world": "moss", "relief": 3.5, "strip": ["ground"], "rim": 0},
+    "relay_sites": {"world": "dust", "relief": 0.4, "strip": ["floor", "perimeter"], "rim": 9},
+    "attrition_front": {"world": "ash", "relief": 1.8, "strip": ["ground", "belt"], "rim": 8},
+}
+
+
+def _smooth(a, b, x):
+    t = min(1.0, max(0.0, (x - a) / (b - a)))
+    return t * t * (3 - 2 * t)
+
+
+def _mix(a, b, t):
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+
+
+def add_terrain(m, cfg, lo, hi):
+    import numpy as np
+
+    world = WORLDS[cfg["world"]]
+    seed = sum(ord(c) * (i + 7) for i, c in enumerate(m.id))
+    off = Vector(((seed % 997) * 13.1, (seed % 389) * 7.7, 0))
+    rng = __import__("random").Random(seed)
+
+    # Footprints of everything that stands on the ground: the terrain flattens round them.
+    for name in cfg["strip"]:
+        for ob in [o for o in bpy.data.objects if o.name == name or o.name.startswith(name + ".")]:
+            bpy.data.objects.remove(ob)
+    boxes = []
+    for ob in bpy.data.objects:
+        if ob.type != "MESH" or ob.users_collection[0].name not in ("Geometry", "Markers", "Surface", "Roofs", "Deck"):
+            continue
+        xs = [(ob.matrix_world @ Vector(c)) for c in ob.bound_box]
+        boxes.append((min(v.x for v in xs), max(v.x for v in xs), min(v.y for v in xs), max(v.y for v in xs)))
+    B = np.array(boxes) if boxes else np.zeros((0, 4))
+
+    play = (lo.x, hi.x, lo.y, hi.y)
+    span = max(hi.x - lo.x, hi.y - lo.y)
+    skirt = max(90.0, span * 0.55)
+    cell = max(2.0, (span + 2 * skirt) / 170)
+    nx = int((hi.x - lo.x + 2 * skirt) / cell) + 1
+    ny = int((hi.y - lo.y + 2 * skirt) / cell) + 1
+    X = np.linspace(lo.x - skirt, hi.x + skirt, nx)
+    Y = np.linspace(lo.y - skirt, hi.y + skirt, ny)
+    GX, GY = np.meshgrid(X, Y)
+    px, py = GX.ravel(), GY.ravel()
+    # distance to the nearest footprint, and how far outside the play area
+    if len(B):
+        dx = np.maximum(np.maximum(B[:, 0][None] - px[:, None], px[:, None] - B[:, 1][None]), 0)
+        dy = np.maximum(np.maximum(B[:, 2][None] - py[:, None], py[:, None] - B[:, 3][None]), 0)
+        near = np.sqrt(dx * dx + dy * dy).min(axis=1)
+    else:
+        near = np.full(px.shape, 1e9)
+    ox = np.maximum(np.maximum(play[0] - px, px - play[1]), 0)
+    oy = np.maximum(np.maximum(play[2] - py, py - play[3]), 0)
+    out = np.sqrt(ox * ox + oy * oy)
+
+    # One side gets a cliff (or a ledge), as on the game's bases; the peaks crowd some sides.
+    cliff_ang = rng.uniform(0, 2 * math.pi)
+    cliff_dir = (math.cos(cliff_ang), math.sin(cliff_ang))
+    cliff_h = rng.uniform(22, 40) * (-0.6 if rng.random() < 0.3 else 1)
+    cx, cy = (lo.x + hi.x) / 2, (lo.y + hi.y) / 2
+    half = Vector(((hi.x - lo.x) / 2, (hi.y - lo.y) / 2, 0))
+
+    H = np.zeros(px.shape)
+    for i in range(len(px)):
+        x, y, d = px[i], py[i], out[i]
+        p = Vector((x * 0.012, y * 0.012, 0)) + off
+        roll = _noise.fractal(p, 1.0, 2.0, 3, noise_basis="PERLIN_NEW")
+        detail = _noise.noise(Vector((x * 0.09, y * 0.09, 3.0)) + off)
+        # inside: gentle relief, flat under and round anything built or marked
+        flat = _smooth(2.0, 14.0, near[i])
+        h_in = (roll * cfg["relief"] + detail * 0.15 * cfg["relief"]) * flat
+        if d <= 0:
+            H[i] = max(h_in, -0.4 * cfg["relief"]) - 0.05
+            continue
+        o = _smooth(0.0, 30.0, d)
+        far = _smooth(15.0, skirt * 0.8, d)
+        ang = math.atan2(y - cy, x - cx)
+        side = _noise.noise(Vector((math.cos(ang) * 1.3, math.sin(ang) * 1.3, 9.0)) + off) * 0.5 + 0.5
+        far *= _smooth(0.2, 0.7, side) * 0.8 + 0.2
+        ridge = _noise.ridged_multi_fractal(Vector((x * 0.008, y * 0.008, 1.0)) + off, 1.0, 2.0, 4, 1.0, 2.0, noise_basis="PERLIN_NEW")
+        h = roll * 6.0 + detail * 1.2 + max(0.0, ridge - 0.6) ** 1.6 * (10.0 + 70.0 * far)
+        mesa = _noise.noise(Vector((x * 0.015, y * 0.015, 5.0)) + off)
+        if mesa > 0.3:
+            h = max(h, (12.0 + 10.0 * far) * _smooth(0.3, 0.38, mesa) + detail * 0.6)
+        s = (x - cx) * cliff_dir[0] + (y - cy) * cliff_dir[1] - (abs(half.x * cliff_dir[0]) + abs(half.y * cliff_dir[1])) - 25
+        h += _smooth(0.0, 6.0, s - _noise.noise(Vector((x * 0.03, y * 0.03, 7.0)) + off) * 12) * cliff_h
+        H[i] = h_in * (1 - o) + h * o - 0.05
+        # the rim: a steep bank where an arena wall stood, so the play area keeps its edge
+        if cfg["rim"]:
+            H[i] = max(H[i], cfg["rim"] * _smooth(0.0, 5.0, d) + detail * 1.0)
+
+    # Faceted mesh with vertex colours by height and slope.
+    Z = H.reshape(ny, nx)
+    verts = [(float(X[i]), float(Y[j]), float(Z[j, i])) for j in range(ny) for i in range(nx)]
+    faces = []
+    for j in range(ny - 1):
+        for i in range(nx - 1):
+            a = j * nx + i
+            faces += [(a, a + 1, a + nx + 1), (a, a + nx + 1, a + nx)]
+    me = bpy.data.meshes.new("terrain")
+    me.from_pydata(verts, [], faces)
+    me.update()
+    col = me.color_attributes.new("Col", "FLOAT_COLOR", "CORNER")
+    zmax = max(10.0, float(H.max()))
+    for poly in me.polygons:
+        vz = [verts[v][2] for v in poly.vertices]
+        n = poly.normal
+        steep = 1.0 - abs(n.z)
+        hz = sum(vz) / 3
+        c = _mix(world["low"], world["high"], _smooth(-2.0, 14.0, hz))
+        c = _mix(c, world["rock"], _smooth(0.25, 0.5, steep))
+        c = _mix(c, world["peak"], _smooth(zmax * 0.55, zmax * 0.85, hz) * (1 - _smooth(0.35, 0.6, steep)))
+        jit = 0.9 + 0.2 * ((poly.index * 2654435761) % 1000) / 1000
+        for li in poly.loop_indices:
+            col.data[li].color = (c[0] * jit, c[1] * jit, c[2] * jit, 1)
+    mat_t = bpy.data.materials.new("terrain")
+    mat_t.use_nodes = True
+    nt = mat_t.node_tree
+    attr = nt.nodes.new("ShaderNodeVertexColor")
+    attr.layer_name = "Col"
+    bsdf = nt.nodes.get("Principled BSDF")
+    bsdf.inputs["Roughness"].default_value = 0.95
+    nt.links.new(attr.outputs["Color"], bsdf.inputs["Base Color"])
+    me.materials.append(mat_t)
+    ob = bpy.data.objects.new("terrain", me)
+    m.coll("Terrain").objects.link(ob)
+    ob["kind"] = "terrain"
+    ob["world"] = cfg["world"]
+
+    # Boulders over the high ground and the edges of play, and ice on frost worlds.
+    def height(x, y):
+        i = min(nx - 1, max(0, int(round((x - X[0]) / (X[1] - X[0])))))
+        j = min(ny - 1, max(0, int(round((y - Y[0]) / (Y[1] - Y[0])))))
+        return float(Z[j, i]), float(near[j * nx + i]), float(out[j * nx + i])
+
+    placed = 0
+    for k in range(900):
+        x = rng.uniform(X[0], X[-1])
+        y = rng.uniform(Y[0], Y[-1])
+        z, nr, d = height(x, y)
+        if nr < 6 or d < 6:  # nothing loose inside the play area
+            continue
+        r = rng.uniform(1.5, 6.0)
+        bm = bmesh.new()
+        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=r)
+        for v in bm.verts:
+            v.co *= 1.0 + rng.uniform(-0.3, 0.3)
+            v.co.z *= 0.65
+            v.co += Vector((x, y, z + r * 0.25))
+        rme = bpy.data.meshes.new(f"boulder_{k}")
+        bm.to_mesh(rme)
+        bm.free()
+        rme.materials.append(mat("rock_" + cfg["world"]) if ("rock_" + cfg["world"]) in COLOURS else mat("hull"))
+        rob = bpy.data.objects.new(f"boulder_{k}", rme)
+        m.coll("Terrain").objects.link(rob)
+        placed += 1
+        if cfg["world"] == "frost" and d > 0 and rng.random() < 0.35:
+            m.box(f"ice_{k}", x + r, y, z, 0.8, 0.8, rng.uniform(3, 7), "ice", "Terrain", rot=rng.uniform(0, 3))
+        if placed > 260:
+            break
+    return world
+
+
+for _w, _p in WORLDS.items():
+    COLOURS["rock_" + _w] = (_p["rock"], 0)
+COLOURS["ice"] = ((0.55, 0.8, 0.95), 0.4)
+
+
 # --- Output -------------------------------------------------------------------------------------
 
 
@@ -1261,8 +1463,16 @@ def build(key):
     base = os.path.join(OUT, m.id)
 
     setup_render()
+    outdoor = OUTDOOR.get(m.id)
+    if outdoor:
+        world = add_terrain(m, outdoor, lo, hi)
+        sky = world["sky"]
+        sc.world.node_tree.nodes["Background"].inputs[0].default_value = (sky[0] * 0.35, sky[1] * 0.35, sky[2] * 0.35, 1)
+        sun = bpy.data.objects["Sun"]
+        sun.data.color = world["sun"]
+        size *= 1.3  # show the land round the play area
     top = camera("Camera_Top", size * 1.06)
-    top.location = (centre.x, centre.y, hi.z + 80)
+    top.location = (centre.x, centre.y, hi.z + 300)
     persp = camera("Camera_Perspective")
     persp.data.lens = 32
     d = Vector((0.55, -1.0, 0.85)).normalized() * size * 1.05

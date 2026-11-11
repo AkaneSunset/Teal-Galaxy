@@ -27,6 +27,32 @@ Breakthrough), **Lattice** (Onslaught/Warfare node chain), **Foundry Spire** (DM
 (Instagib), **Crossfire Box** (Gun Game), **Nest Loop** (Oddball), **Relay Sites** (Search and Destroy),
 **Tug Line** (Push), **Goal Field** (Bombing Run) and **Attrition Front** (Attrition).
 
+## Planet terrain
+
+The eight maps that are fought on a planet's surface are set in terrain built the way the game builds
+its own planet ground (`game/terrain.gd` and `game/battle/battle_terrain.gd`). The ground is faceted and
+uses the world's palette. There's gentle relief where the fighting happens, flattened under every
+building, spawn and objective. Past the edge of play it rises into rolling high ground, ridged peaks,
+mesas and a cliff or ledge on one side, with boulders scattered over it (and ice on frost worlds).
+Where an arena wall stood, a steep bank now marks the edge of play.
+
+| Map | World | Relief in play |
+|---|---|---|
+| Carrier Dock Pads | frost | flat (a built dock) |
+| Outpost Vault | frost | flat (the outpost grid) |
+| Besieged Outpost | ash | 0.8 m |
+| Twin Bastions | moss | 0.6 m |
+| Supply Line | dust | 1.6 m |
+| Lattice | moss | 3.5 m |
+| Relay Sites | dust | 0.4 m |
+| Attrition Front | ash | 1.8 m |
+
+The station and carrier interiors (High Port Ring, Hangar and Flight Deck, Carrier Boarding) and the
+enclosed arenas stay as they are. The world and relief for each map are in `OUTDOOR` in the script.
+Any of these maps can use any world (`frost`, `dust`, `moss`, `ash`), for example to match the planet a
+match is fought on. The terrain is in its own *Terrain* collection and goes into the .glb with its
+vertex colours.
+
 ## Files per map
 
 - `<id>.blend`: the editable Blender file. The collections are *Geometry*, *Markers*, *Labels* and, where
