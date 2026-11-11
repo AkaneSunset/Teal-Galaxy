@@ -976,8 +976,22 @@ for its faction yet uses the shared stand-in. Each model is built to its footpri
 origin on the ground in the middle, front toward Blender's +Y (Godot's -Z), with its small parts
 joined into a "detail" mesh. To rebuild them, with Blender installed:
 `blender -b -P tools/blender/city_models.py -- compact` (or with the `bpy` module from pip:
-`python tools/blender/city_models.py compact`); add `--render DIR` for a picture of each piece. The
-Terran Compact has the Government Hall, Tower Block, High-rise, Road, Plaza, Wall and Turret so far.
+`python tools/blender/city_models.py compact`); add `--render DIR` for a picture of each piece, or
+`--sheet DIR` for one picture of the faction's zone housing. `kit.py` holds the shared parts and
+materials, `housing.py` the zone housing. The Terran Compact has the Government Hall, Tower Block,
+High-rise, Road, Plaza, Wall and Turret so far; all four factions have their zone housing.
+
+**Housing zones.** Low-density housing (a 2x2 lot) and High-density housing (3x3) are in the
+builder's Zones group. Hold the button and drag to zone a street, like laying a road: every lot that
+fits is placed. Each lot is drawn as one of its faction's homes for that density, six looks each
+(`zone_low_1.glb` ... `zone_high_6.glb`), picked from the piece's id so everyone sees the same
+street and a lot keeps its look when moved. The Compact get barracks rows, bunker houses and plate
+huts, and stepped towers, twin slabs and court blocks; the Ashen hive clusters, pods on legs and
+thorn longhouses, and needles, spire knots, stacked hives and great hives; the Luminar spire
+clusters, chapel houses and terraces, and cathedral needles, blade pyramids and twin spires; the
+Coma shells, floating homes and ringed domes, and twisting needles, stacked discs and thorned
+keeps. Zones are free and are scenery for now: on a colony they don't house anyone yet (habitat
+blocks do).
 
 **Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
 each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop

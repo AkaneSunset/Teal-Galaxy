@@ -26,6 +26,9 @@ extends "res://place.gd"
 ## Drawing: pieces are not nodes. Every part of every model is drawn as one MultiMesh per piece type
 ## per 200 m chunk of the city, so a full city of 4,000 pieces is a few hundred draw calls, chunks
 ## off screen are culled, and small details stop drawing from far away.
+## Zones: a housing zone (low or high density) is dragged out like a road, a lot at a time. Each lot
+## is drawn as one of the faction's looks for that density (res://city/<faction>/zone_low_<n>.glb),
+## picked from the piece's id, so a zoned street is a mix of homes and everyone sees the same one.
 ## The pieces themselves come from the server on request (city_get), not in every state: each state
 ## only says when each city last changed.
 
@@ -36,7 +39,8 @@ const Terrain := preload("res://terrain.gd")
 
 const ARRIVAL_Z := 640.0 # the shuttle stop, just south of the grid
 const GROUND_PIECES := ["road", "plaza", "park", "pad"] # flat: you walk over them
-const GROUP_ORDER := ["Ground", "Civic", "Housing", "Industry", "Defence"]
+const GROUP_ORDER := ["Ground", "Zones", "Civic", "Housing", "Industry", "Defence"]
+const DRAG_PIECES := ["road", "wall", "zone_low", "zone_high"] # hold the button and drag to lay these
 const STYLE_PATH := "res://city/%s/%s.glb"
 const CHUNK := 20 # cells on a side of a drawing chunk
 const SMALL_PART := 2.5 # metres: parts no bigger than this are details...
@@ -54,6 +58,7 @@ var _asked := -1 # the stamp last asked for
 var _pieces := {} # piece id -> {"key", "type", "chunk", "xf", "solid"}
 var _parts := {} # piece type -> [{mesh, material, xf, small}]: its model, taken apart for drawing
 var _scenes := {} # glb path -> PackedScene (or null: none for this faction yet)
+var _looks := {} # zone type -> how many looks the faction has for it
 var _batches := {} # "type@chunk" -> Node3D holding its MultiMeshInstance3Ds
 var _city_root: Node3D
 var _grid: MeshInstance3D
@@ -330,7 +335,7 @@ func _drop_piece(id: int) -> void:
 	_pieces.erase(id)
 
 
-## Redraws one batch (one piece type in one chunk): a MultiMesh per part of the type's model.
+## Redraws one batch (one look in one chunk): a MultiMesh per part of the look's model.
 func _draw_batch(batch: String, xfs: Array) -> void:
 	var old: Node = _batches.get(batch)
 	if old:
@@ -361,17 +366,36 @@ func _draw_batch(batch: String, xfs: Array) -> void:
 		holder.add_child(mmi)
 
 
-## A piece type's model taken apart: every mesh in it, with its material and where it sits.
-func _parts_of(type: String) -> Array:
-	if _parts.has(type):
-		return _parts[type]
-	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
-	var model := _model(type, Vector2(float(info.w), float(info.d)) * _cell)
+## A look's model taken apart: every mesh in it, with its material and where it sits.
+func _parts_of(look: String) -> Array:
+	if _parts.has(look):
+		return _parts[look]
+	var info: Dictionary = _catalog.get(_type_of(look), {"w": 1, "d": 1})
+	var model := _model(look, Vector2(float(info.w), float(info.d)) * _cell)
 	var out := []
 	_collect(model, Transform3D.IDENTITY, out)
 	model.free()
-	_parts[type] = out
+	_parts[look] = out
 	return out
+
+
+## How a piece is drawn: its type, or for a zone lot one of the faction's looks for it
+## ("zone_low_3"), always the same one for the same piece.
+func _look(type: String, id: int) -> String:
+	if not type.begins_with("zone_"):
+		return type
+	if not _looks.has(type):
+		var count := 0
+		while _style != "" and ResourceLoader.exists(STYLE_PATH % [_style, "%s_%d" % [type, count + 1]]):
+			count += 1
+		_looks[type] = count
+	var n: int = _looks[type]
+	return type if n == 0 else "%s_%d" % [type, 1 + ((id * 2654435761) >> 8) % n]
+
+
+## The piece type a look belongs to.
+func _type_of(look: String) -> String:
+	return look if _catalog.has(look) else look.substr(0, look.rfind("_"))
 
 
 func _collect(n: Node, xf: Transform3D, out: Array) -> void:
@@ -411,7 +435,7 @@ func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
 	var basis := Basis(Vector3.UP, rot * PI * 0.5)
 	if ruins and not type in GROUND_PIECES:
 		basis = basis * Basis.from_scale(Vector3(1.0, 0.3, 1.0)) # tumbled down
-	var batch := "%s@%d,%d" % [type, floori(float(x) / CHUNK), floori(float(z) / CHUNK)]
+	var batch := "%s@%d,%d" % [_look(type, int(p.id)), floori(float(x) / CHUNK), floori(float(z) / CHUNK)]
 	var solid: Node3D = null
 	if not type in GROUND_PIECES:
 		var s := _size(type, rot)
@@ -433,12 +457,26 @@ func _style_model(type: String) -> Node3D:
 
 ## A piece's model, `foot` metres wide and deep (before turning), its origin on the ground: the
 ## faction's own, or the shared stand-in.
-func _model(type: String, foot: Vector2) -> Node3D:
-	var own := _style_model(type)
+func _model(look: String, foot: Vector2) -> Node3D:
+	var own := _style_model(look)
 	if own:
 		return own # authored to its footprint in Blender
+	var type := _type_of(look)
 	var n := Node3D.new()
 	match type:
+		"zone_low":
+			Models.block(n, Vector3(foot.x * 0.98, 0.2, foot.y * 0.98), "deck", Vector3(0, 0.1, 0), 0.0)
+			for sx in [-1.0, 1.0]:
+				Models.block(n, Vector3(foot.x * 0.36, 5.0, foot.y * 0.6), "navy", Vector3(sx * foot.x * 0.22, 2.7, 0), 0.3)
+				Models.block(n, Vector3(foot.x * 0.38, 0.5, foot.y * 0.62), _paint, Vector3(sx * foot.x * 0.22, 5.4, 0), 0.1)
+			return n
+		"zone_high":
+			var zw := foot.x * 0.8
+			Models.block(n, Vector3(zw, 56.0, zw), "navy", Vector3(0, 28.0, 0), 0.4)
+			for f in 9:
+				Models.block(n, Vector3(zw + 0.2, 1.2, zw + 0.2), "window", Vector3(0, 4.0 + f * 6.0, 0), 0.0)
+			Models.block(n, Vector3(zw + 0.6, 2.0, zw + 0.6), _paint, Vector3(0, 57.0, 0), 0.3)
+			return n
 		"road":
 			Models.block(n, Vector3(foot.x, 0.3, foot.y), "dark", Vector3(0, 0.15, 0), 0.0)
 			Models.block(n, Vector3(0.35, 0.05, foot.y * 0.4), "deck", Vector3(0, 0.32, 0), 0.0)
@@ -903,6 +941,10 @@ func _show_tip(type: String, why: String) -> void:
 			line = str(o.adds) if line == "" else line + " · " + str(o.adds)
 		if line != "":
 			lines.append(line)
+		if type.begins_with("zone_"):
+			_look(type, 0) # counts the faction's looks for it
+			var looks := int(_looks.get(type, 0))
+			lines.append("Hold and drag to zone a street" + (": each lot gets one of %d homes" % looks if looks > 1 else ""))
 	if why != "":
 		lines.append(why)
 	_tip.text = "\n".join(lines)
@@ -1031,7 +1073,7 @@ func _click() -> void:
 	if _choose != "":
 		_stroke += 1
 		_last_laid = Vector2i(999999, 999999)
-		_laying = _choose in ["road", "wall"]
+		_laying = _choose in DRAG_PIECES
 		_lay_here()
 		return
 	_picked = _piece_at(Vector2i(floori(at.x), floori(at.y)))

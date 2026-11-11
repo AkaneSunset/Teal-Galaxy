@@ -30,12 +30,16 @@ type City = { pieces: Piece[]; nextId: number; updated: number };
 
 // What the builder offers: [name, width, depth (cells, before turning), group, where]. `where` is
 // 'any' (homeworlds and colonies), 'home' (homeworlds only) or 'colony' (a colony building, which
-// homeworlds may use as scenery).
+// homeworlds may use as scenery). A zone is a lot of housing: the builder drags zones out like
+// roads, and each lot is drawn as one of its faction's many homes for that density (picked from
+// the piece's id by the apps, so everyone sees the same street).
 const PIECES: Record<string, { name: string; w: number; d: number; group: string; where: string }> = {};
 for (const [id, name, w, d, group, where] of [
   ['road', 'Road', 1, 1, 'Ground', 'any'],
   ['plaza', 'Plaza', 2, 2, 'Ground', 'any'],
   ['park', 'Park', 3, 3, 'Ground', 'any'],
+  ['zone_low', 'Low-density housing', 2, 2, 'Zones', 'any'],
+  ['zone_high', 'High-density housing', 3, 3, 'Zones', 'any'],
   ['hall', 'Government Hall', 7, 7, 'Civic', 'home'],
   ['spaceport', 'Star Port', 6, 6, 'Civic', 'home'],
   ['pad', 'Landing Pad', 3, 3, 'Civic', 'any'],

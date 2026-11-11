@@ -100,3 +100,15 @@ test('a full city of roads lays out within the server budget', () => {
   assert.strictEqual(CI.place(g, ADMIN, 'bastion', 'road', 1, 1, 0, 1).ok, false); // full
   assert.ok(ms < 1500, `4,000 placements took ${ms.toFixed(0)} ms`);
 });
+
+test('housing zones are lots anyone may lay, on homeworlds and colonies', () => {
+  const g = G.newGalaxy();
+  assert.deepStrictEqual(CI.size('zone_low', 0), [2, 2]);
+  assert.deepStrictEqual(CI.size('zone_high', 1), [3, 3]);
+  assert.strictEqual(CI.PIECES.zone_low.where, 'any');
+  const a = CI.place(g, ADMIN, 'bastion', 'zone_low', 0, 0, 0, 1);
+  const b = CI.place(g, ADMIN, 'bastion', 'zone_low', 2, 0, 0, 1); // the next lot along the street
+  assert.ok(a.ok && b.ok && a.piece !== b.piece);
+  assert.match(CI.place(g, ADMIN, 'bastion', 'zone_high', 1, 1, 0, 1).reason, /Low-density housing is in the way/);
+  assert.ok(CI.place(g, ADMIN, 'bastion', 'zone_high', 4, 0, 0, 1).ok);
+});

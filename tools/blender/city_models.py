@@ -10,214 +10,25 @@ or with the bpy module (pip install bpy):   python tools/blender/city_models.py 
 
 Writes game/city/<faction>/<piece>.glb (Godot imports them; game/city.gd loads them by name).
 --render also writes a PNG of each piece to DIR, for checking the look without the game.
+--sheet DIR writes one PNG per faction of all its zone housing side by side.
+
+kit.py holds the shared parts and export; housing.py the zone housing (many looks per faction).
 """
 
 import math
 import os
 import sys
 
-import bpy
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-CELL = 10.0
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-# --- Scene and parts -------------------------------------------------------------------------------
-
-_mats = {}
-_parts = []  # (object, is_detail) for the piece being built
-
-
-def reset():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    _mats.clear()
-    _parts.clear()
-
-
-def mat(name, rgb, emit=0.0, metal=0.55, rough=0.5):
-    """A material: a hex colour, optionally glowing (emit = strength)."""
-    if name in _mats:
-        return _mats[name]
-    m = bpy.data.materials.new(name)
-    m.use_nodes = True
-    b = m.node_tree.nodes["Principled BSDF"]
-    c = tuple(int(rgb[i:i + 2], 16) / 255.0 for i in (1, 3, 5)) + (1.0,)
-    b.inputs["Base Color"].default_value = c
-    b.inputs["Metallic"].default_value = metal
-    b.inputs["Roughness"].default_value = rough
-    if emit > 0:
-        b.inputs["Emission Color"].default_value = c
-        b.inputs["Emission Strength"].default_value = emit
-    _mats[name] = m
-    return m
-
-
-def _keep(ob, m, detail, bevel=0.0):
-    ob.data.materials.append(m)
-    if bevel > 0:
-        mod = ob.modifiers.new("bevel", "BEVEL")
-        mod.width = bevel
-        mod.segments = 1
-        mod.limit_method = "ANGLE"
-        bpy.context.view_layer.objects.active = ob
-        bpy.ops.object.modifier_apply(modifier=mod.name)
-    _parts.append((ob, detail))
-    return ob
-
-
-def box(size, at, m, bevel=0.0, rot=(0, 0, 0), detail=False):
-    """A box `size` (x, y, z) standing with its bottom centre at `at`."""
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(at[0], at[1], at[2] + size[2] / 2), rotation=rot)
-    ob = bpy.context.object
-    ob.scale = size
-    bpy.ops.object.transform_apply(scale=True)
-    return _keep(ob, m, detail, min(bevel, min(size) * 0.45))
-
-
-def cyl(r, h, at, m, verts=16, top=None, rot=(0, 0, 0), detail=False, bevel=0.0):
-    """A drum (or a cone when `top` is a radius) of height `h`, its bottom centre at `at`
-    (unless turned: then `at` is its middle)."""
-    loc = (at[0], at[1], at[2] + (h / 2 if rot == (0, 0, 0) else 0))
-    if top is None:
-        bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=r, depth=h, location=loc, rotation=rot)
-    else:
-        bpy.ops.mesh.primitive_cone_add(vertices=verts, radius1=r, radius2=top, depth=h, location=loc, rotation=rot)
-    return _keep(bpy.context.object, m, detail, bevel)
-
-
-def text(body, size, at, m, depth=0.15, detail=False):
-    """Stencilled lettering standing upright on a +Y face, its centre at `at`."""
-    bpy.ops.object.text_add(location=at, rotation=(math.pi / 2, 0, math.pi))
-    ob = bpy.context.object
-    ob.data.body = body
-    ob.data.size = size
-    ob.data.extrude = depth / 2
-    ob.data.align_x = "CENTER"
-    ob.data.align_y = "CENTER"
-    bpy.ops.object.convert(target="MESH")
-    return _keep(bpy.context.object, m, detail)
-
-
-def finish(faction, piece):
-    """Joins the parts into "<piece>" and "detail" and exports the glb."""
-    out = []
-    for detail in (False, True):
-        obs = [o for o, d in _parts if d == detail]
-        if not obs:
-            continue
-        bpy.ops.object.select_all(action="DESELECT")
-        for o in obs:
-            o.select_set(True)
-        bpy.context.view_layer.objects.active = obs[0]
-        if len(obs) > 1:
-            bpy.ops.object.join()
-        ob = bpy.context.object
-        ob.name = "detail" if detail else piece
-        ob.data.name = ob.name
-        out.append(ob)
-    bpy.ops.object.select_all(action="DESELECT")
-    for o in out:
-        o.select_set(True)
-    path = os.path.join(ROOT, "game", "city", faction, piece + ".glb")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_apply=True, export_yup=True)
-    tris = sum(len(o.data.polygons) for o in out)
-    print(f"{faction}/{piece}.glb  {tris} faces")
-    return out
-
-
-def render(path, foot, height):
-    """A daylight three-quarter view of the piece just built."""
-    scene = bpy.context.scene
-    scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
-    scene.cycles.samples = 24
-    scene.render.resolution_x, scene.render.resolution_y = 900, 640
-    world = bpy.data.worlds.new("sky")
-    world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.32, 0.4, 0.52, 1)
-    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.7
-    scene.world = world
-    bpy.ops.object.light_add(type="SUN", rotation=(math.radians(50), 0, math.radians(35)))
-    bpy.context.object.data.energy = 3.0
-    bpy.ops.mesh.primitive_plane_add(size=max(foot) * 4, location=(0, 0, -0.05))
-    bpy.context.object.data.materials.append(mat("ground", "#3a3f44", metal=0, rough=0.9))
-    span = max(max(foot), height)
-    d = span * 1.75
-    bpy.ops.object.camera_add(location=(d * 0.62, d * 0.85, height * 0.5 + span * 0.45))
-    cam = bpy.context.object
-    target = bpy.data.objects.new("target", None)
-    target.location = (0, 0, height * 0.45)
-    scene.collection.objects.link(target)
-    c = cam.constraints.new("TRACK_TO")
-    c.target = target
-    c.track_axis = "TRACK_NEGATIVE_Z"
-    c.up_axis = "UP_Y"
-    cam.data.lens = 40
-    scene.camera = cam
-    scene.render.filepath = path
-    bpy.ops.render.render(write_still=True)
-
+import bpy  # noqa: E402
+import housing  # noqa: E402
+import kit  # noqa: E402
+from kit import CELL, box, compact_mats, cyl, finish, pilasters, render, reset, slits, text, twin_turret  # noqa: E402
 
 # --- The Terran Compact ----------------------------------------------------------------------------
 # Dark navy naval-industrial armour, chamfered blocks, blue window slits, amber work lights, huge
 # white stencils, yellow hazard stripes, twin-barrel turrets. See the "Faction building designs" doc.
-
-def compact_mats():
-    return {
-        "navy": mat("navy", "#1f2b3e", metal=0.6, rough=0.45),
-        "slate": mat("slate", "#33435a", metal=0.6, rough=0.5),
-        "steel": mat("steel", "#3b4049", metal=0.75, rough=0.4),
-        "deck": mat("deck", "#2a2e33", metal=0.5, rough=0.7),
-        "blue": mat("blue", "#4f8fe0", emit=3.5),
-        "amber": mat("amber", "#ffb347", emit=5.0),
-        "white": mat("white", "#d9dee5", metal=0.1, rough=0.6),
-        "hazard": mat("hazard", "#e0b020", metal=0.2, rough=0.6),
-        "dark": mat("dark", "#111418", metal=0.3, rough=0.8),
-    }
-
-
-def slits(M, w, d, z0, h, every=4.0, skip_front=0.0):
-    """Rows of blue window slits round a block w x d, from z0 up h metres: short slits in pairs,
-    with armour between them. `skip_front`: leave that many metres at the front's top bare (for a
-    sign)."""
-    n = max(1, int(h // every))
-    for i in range(n):
-        z = z0 + every * (i + 0.5) - 0.3
-        for face, span in ((0, w), (1, d)):
-            k = max(1, int(span // 7))
-            seg = span * 0.8 / k
-            for j in range(k):
-                c = -span * 0.4 + seg * (j + 0.5)
-                for side in (-1, 1):
-                    if face == 0 and side == 1 and z > z0 + h - skip_front:
-                        continue
-                    half = (d if face == 0 else w) / 2 + 0.05
-                    if face == 0:
-                        box((seg * 0.7, 0.3, 0.55), (c, side * half, z), M["blue"])
-                    else:
-                        box((0.3, seg * 0.7, 0.55), (side * half, c, z), M["blue"])
-
-
-def pilasters(M, w, d, z0, h):
-    """Steel ribs up a block's corners."""
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            box((1.0, 1.0, h), (sx * (w / 2 - 0.2), sy * (d / 2 - 0.2), z0), M["steel"], bevel=0.15)
-
-
-def twin_turret(M, at, scale=1.0):
-    """The Compact's signature gun: two barrels on a round armoured base."""
-    s = scale
-    x, y, z = at
-    cyl(3.6 * s, 2.4 * s, (x, y, z), M["slate"], verts=16, bevel=0.2 * s)
-    cyl(3.9 * s, 0.4 * s, (x, y, z + 2.4 * s), M["hazard"], verts=16)
-    box((4.6 * s, 5.0 * s, 2.4 * s), (x, y - 0.4 * s, z + 2.8 * s), M["navy"], bevel=0.5 * s)
-    box((3.4 * s, 0.3 * s, 0.4 * s), (x, y + 2.15 * s, z + 4.1 * s), M["blue"], detail=s < 1.5)
-    for side in (-1, 1):
-        cyl(0.38 * s, 6.5 * s, (x + side * 0.9 * s, y + 4.5 * s, z + 3.9 * s), M["steel"], verts=10, rot=(math.pi / 2, 0, 0))
-        cyl(0.5 * s, 1.0 * s, (x + side * 0.9 * s, y + 2.4 * s, z + 3.9 * s), M["dark"], verts=10, rot=(math.pi / 2, 0, 0))
-    cyl(0.3 * s, 0.4 * s, (x, y - 2.2 * s, z + 5.2 * s), M["amber"], verts=8, detail=True)
-
 
 def compact_hall(M):
     """The Government Hall: a fortress keep of stepped blocks, crowned with spire towers."""
@@ -350,28 +161,80 @@ COMPACT = {
     "turret": (compact_turret, (1, 1), 8),
 }
 
-FACTIONS = {"compact": (compact_mats, COMPACT)}
+FACTIONS = {
+    "compact": (compact_mats, COMPACT),
+    "ashen": (kit.ashen_mats, {}),
+    "luminar": (kit.luminar_mats, {}),
+    "coma": (kit.coma_mats, {}),
+}
+for _faction, (_mats, _pieces) in FACTIONS.items():
+    _pieces.update(housing.pieces(_faction))
+
+
+def sheet(path, faction):
+    """One picture of all the faction's zone housing: the low-density lots in front, the
+    high-density ones behind, loaded back from the exported files."""
+    reset()
+    folder = os.path.join(kit.ROOT, "game", "city", faction)
+    for row, (name, pitch, y) in enumerate((("zone_low", 26.0, 34.0), ("zone_high", 36.0, -14.0))):
+        for v in range(1, housing.VARIANTS + 1):
+            before = set(bpy.data.objects)
+            bpy.ops.import_scene.gltf(filepath=os.path.join(folder, f"{name}_{v}.glb"))
+            for ob in set(bpy.data.objects) - before:
+                if ob.parent is None:
+                    ob.location.x -= (v - 3.5) * pitch  # the camera looks back along Y: number 1 on the left
+                    ob.location.y += y
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 32
+    scene.render.resolution_x, scene.render.resolution_y = 1800, 900
+    world = bpy.data.worlds.new("sky")
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.32, 0.4, 0.52, 1)
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.7
+    scene.world = world
+    bpy.ops.object.light_add(type="SUN", rotation=(math.radians(52), 0, math.radians(150)))
+    bpy.context.object.data.energy = 3.0
+    bpy.ops.mesh.primitive_plane_add(size=900, location=(0, 0, -0.05))
+    bpy.context.object.data.materials.append(kit.mat("ground", "#3a3f44", metal=0, rough=0.9))
+    bpy.ops.object.camera_add(location=(60, 235, 105))
+    cam = bpy.context.object
+    target = bpy.data.objects.new("target", None)
+    target.location = (0, 0, 30)
+    scene.collection.objects.link(target)
+    c = cam.constraints.new("TRACK_TO")
+    c.target = target
+    c.track_axis = "TRACK_NEGATIVE_Z"
+    c.up_axis = "UP_Y"
+    cam.data.lens = 34
+    scene.camera = cam
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
 
 
 def main(argv):
     args = argv[argv.index("--") + 1:] if "--" in argv else argv[1:]
-    render_dir = None
-    if "--render" in args:
-        i = args.index("--render")
-        render_dir = args[i + 1]
-        del args[i:i + 2]
-    only = args[1:] if len(args) > 1 else None
+    dirs = {}
+    for flag in ("--render", "--sheet"):
+        if flag in args:
+            i = args.index(flag)
+            dirs[flag] = args[i + 1]
+            del args[i:i + 2]
+            os.makedirs(dirs[flag], exist_ok=True)
+    only = args[1:]  # piece names, or a family: "zone" or "zone_low" builds every one of them
     for faction in args[:1] or list(FACTIONS):
         make_mats, pieces = FACTIONS[faction]
         for piece, (build, cells, height) in pieces.items():
-            if only and piece not in only:
+            if only and not any(piece == o or piece.startswith(o + "_") for o in only):
                 continue
             reset()
             build(make_mats())
             finish(faction, piece)
-            if render_dir:
-                os.makedirs(render_dir, exist_ok=True)
-                render(os.path.join(render_dir, f"{faction}_{piece}.png"), (cells[0] * CELL, cells[1] * CELL), height)
+            if "--render" in dirs:
+                render(os.path.join(dirs["--render"], f"{faction}_{piece}.png"), (cells[0] * CELL, cells[1] * CELL), height)
+        if "--sheet" in dirs:
+            sheet(os.path.join(dirs["--sheet"], f"{faction}_housing.png"), faction)
 
 
 if __name__ == "__main__":
