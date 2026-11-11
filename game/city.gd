@@ -12,10 +12,22 @@ extends "res://place.gd"
 ##   M                move the picked piece: it follows the mouse until you click
 ##   Delete / X       take the picked piece up
 ##   Right click      put the chosen piece down / let go of the picked one
+##   Ctrl+Z           undo the last placement, move, turn or take-up (a dragged road is one step)
 ##   W A S D, right drag   pan      Q / E   turn the view      Wheel   zoom      B / Esc   leave
 ## On a colony, a colony building (habitat, precinct, mine...) uses one the colony has in store, or
 ## builds a new one, paid for like on the Frontier screen's Colony page. Taking one up puts it back
 ## in store. A city whose colony collapsed and went to auction stands as ruins.
+##
+## Style: every city is built in its faction's look (the homeworld's owner, or the colony Founder's
+## faction). A piece's model is res://city/<faction>/<piece>.glb, made in Blender by
+## tools/blender/city_models.py, authored to its footprint with its front toward -Z. A piece with no
+## model for that faction yet uses the shared stand-in below.
+##
+## Drawing: pieces are not nodes. Every part of every model is drawn as one MultiMesh per piece type
+## per 200 m chunk of the city, so a full city of 4,000 pieces is a few hundred draw calls, chunks
+## off screen are culled, and small details stop drawing from far away.
+## The pieces themselves come from the server on request (city_get), not in every state: each state
+## only says when each city last changed.
 
 signal leave_city # the shuttle back up
 
@@ -25,6 +37,11 @@ const Terrain := preload("res://terrain.gd")
 const ARRIVAL_Z := 640.0 # the shuttle stop, just south of the grid
 const GROUND_PIECES := ["road", "plaza", "park", "pad"] # flat: you walk over them
 const GROUP_ORDER := ["Ground", "Civic", "Housing", "Industry", "Defence"]
+const STYLE_PATH := "res://city/%s/%s.glb"
+const CHUNK := 20 # cells on a side of a drawing chunk
+const SMALL_PART := 2.5 # metres: parts no bigger than this are details...
+const DETAIL_RANGE := 320.0 # ...drawn only this close
+const UNDO_STEPS := 100
 
 var can_build := false # set from the server's rules (see _may_build)
 var building := false # the builder is up
@@ -32,10 +49,16 @@ var building := false # the builder is up
 var _cell := 10.0
 var _half := 60
 var _catalog := {} # piece type -> {name, w, d, group, where}
-var _pieces := {} # piece id -> {"key", "node", "solid"}
+var _data := {} # this city as the server last sent it: {pieces, updated}
+var _asked := -1 # the stamp last asked for
+var _pieces := {} # piece id -> {"key", "type", "chunk", "xf", "solid"}
+var _parts := {} # piece type -> [{mesh, material, xf, small}]: its model, taken apart for drawing
+var _scenes := {} # glb path -> PackedScene (or null: none for this faction yet)
+var _batches := {} # "type@chunk" -> Node3D holding its MultiMeshInstance3Ds
 var _city_root: Node3D
 var _grid: MeshInstance3D
 var _paint := "teal"
+var _style := "" # the faction whose look the city is built in
 
 # The builder.
 var _cam: Camera3D
@@ -59,6 +82,14 @@ var _laying := false # left button held with a road or wall chosen
 var _last_laid := Vector2i(999999, 999999)
 var _clear_armed := 0.0
 var _copy_from: OptionButton
+var _tip: Label # beside the mouse: what the piece is, costs and adds, or why it can't go there
+var _perf: Label
+var _perf_wait := 0.0
+var _select: MeshInstance3D # over the picked piece
+var _undo := [] # [{"stroke", "ops": [{"op": "placed"|"moved"|"removed", ...}]}], newest last
+var _pending := {} # tag -> the undo op its city_result confirms
+var _stroke := 0 # one press of the mouse: a dragged road undoes as one
+var _tags := 0
 
 
 func _build() -> void:
@@ -69,14 +100,15 @@ func _build() -> void:
 	var homeworld := not WarInfo.planet(planet_id).is_empty()
 	var side = WarInfo.planet(planet_id).get("owner") if homeworld else _colony().get("faction")
 	if side != null and str(side) != "":
-		_paint = Models.paint(WarInfo.faction_color(str(side)), false)
+		_style = str(side)
+		_paint = Models.paint(WarInfo.faction_color(_style), false)
 	place_name = "The city on %s" % _world_name()
 	_build_world()
-	_refresh_city()
 	Net.state_changed.connect(_on_state)
 	Net.message.connect(_on_message)
 	Net.server_error.connect(_on_error)
 	_build_builder_ui()
+	_fetch()
 
 
 func _exit_tree() -> void:
@@ -131,7 +163,16 @@ func _may_build() -> bool:
 
 
 func _city() -> Dictionary:
-	return Net.state.get("cities", {}).get(planet_id, {})
+	return _data
+
+
+## Asks the server for this city when the state says it changed since we last asked.
+func _fetch() -> void:
+	var stamp := int(Net.state.get("cities", {}).get(planet_id, 0))
+	if stamp == _asked:
+		return
+	_asked = stamp
+	Net.send({"type": "city_get", "planet": planet_id})
 
 
 func _ruins() -> bool:
@@ -216,18 +257,27 @@ func _on_state(_s: Dictionary) -> void:
 	can_build = _may_build()
 	if building and not can_build:
 		set_building(false)
-	_refresh_city()
+	_fetch()
+	_refresh_city() # a colony may have fallen to ruins
 	if building:
 		_refresh_list()
 
 
 func _on_message(msg: Dictionary) -> void:
-	if str(msg.get("type", "")) != "city_result" or str(msg.get("planet", "")) != planet_id:
+	if str(msg.get("planet", "")) != planet_id:
 		return
-	if msg.get("built", false):
-		_set_status("Built and placed.")
-	elif str(msg.action) == "city_place":
-		_set_status("")
+	match str(msg.get("type", "")):
+		"city":
+			_data = {"pieces": msg.get("pieces", []), "updated": int(msg.get("updated", 0))}
+			_refresh_city()
+			if building:
+				_refresh_list()
+		"city_result":
+			_confirm(str(msg.get("tag", "")), msg)
+			if msg.get("built", false):
+				_set_status("Built and placed.")
+			elif str(msg.action) == "city_place":
+				_set_status("")
 
 
 func _on_error(reason: String) -> void:
@@ -235,10 +285,11 @@ func _on_error(reason: String) -> void:
 		_set_status(reason)
 
 
-## Every piece where the server has it: new ones built, moved or turned ones rebuilt, gone ones
-## taken away.
+## Every piece where the server has it: new ones added, moved or turned ones redone, gone ones
+## taken away; then each drawing batch they touched is redrawn.
 func _refresh_city() -> void:
 	var want := {}
+	var dirty := {}
 	var ruins := _ruins()
 	for p in _city().get("pieces", []):
 		var id := int(p.id)
@@ -247,21 +298,95 @@ func _refresh_city() -> void:
 		var have: Dictionary = _pieces.get(id, {})
 		if have.get("key", "") == key:
 			continue
+		if not have.is_empty():
+			dirty[have.batch] = true
 		_drop_piece(id)
-		_pieces[id] = _make_piece(p, key, ruins)
+		var made := _make_piece(p, key, ruins)
+		_pieces[id] = made
+		dirty[made.batch] = true
 	for id in _pieces.keys():
 		if not want.has(id):
+			dirty[_pieces[id].batch] = true
 			_drop_piece(id)
+	if not dirty.is_empty():
+		var by_batch := {}
+		for id in _pieces:
+			var b: String = _pieces[id].batch
+			if dirty.has(b):
+				if not by_batch.has(b):
+					by_batch[b] = []
+				by_batch[b].append(_pieces[id].xf)
+		for b in dirty:
+			_draw_batch(str(b), by_batch.get(b, []))
+	_mark_picked()
 
 
 func _drop_piece(id: int) -> void:
 	var have: Dictionary = _pieces.get(id, {})
 	if have.is_empty():
 		return
-	(have.node as Node).queue_free()
 	if have.solid:
 		(have.solid as Node).queue_free()
 	_pieces.erase(id)
+
+
+## Redraws one batch (one piece type in one chunk): a MultiMesh per part of the type's model.
+func _draw_batch(batch: String, xfs: Array) -> void:
+	var old: Node = _batches.get(batch)
+	if old:
+		old.queue_free()
+		_batches.erase(batch)
+	if xfs.is_empty():
+		return
+	var holder := Node3D.new()
+	holder.name = batch.replace("@", "_").replace(",", "_").replace("-", "m")
+	_city_root.add_child(holder)
+	_batches[batch] = holder
+	for part in _parts_of(batch.get_slice("@", 0)):
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = part.mesh
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, (xfs[i] as Transform3D) * (part.xf as Transform3D))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		if part.material:
+			mmi.material_override = part.material
+		if part.small:
+			mmi.visibility_range_end = DETAIL_RANGE
+			mmi.visibility_range_end_margin = 40.0
+			mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(mmi)
+
+
+## A piece type's model taken apart: every mesh in it, with its material and where it sits.
+func _parts_of(type: String) -> Array:
+	if _parts.has(type):
+		return _parts[type]
+	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
+	var model := _model(type, Vector2(float(info.w), float(info.d)) * _cell)
+	var out := []
+	_collect(model, Transform3D.IDENTITY, out)
+	model.free()
+	_parts[type] = out
+	return out
+
+
+func _collect(n: Node, xf: Transform3D, out: Array) -> void:
+	var here := xf * (n as Node3D).transform if n is Node3D else xf
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
+		var mi := n as MeshInstance3D
+		var mat: Material = mi.material_override
+		if mat == null and mi.mesh.get_surface_count() == 1:
+			mat = mi.get_surface_override_material(0)
+		var box := here * mi.mesh.get_aabb()
+		# A Blender model's small parts come joined in one mesh called "detail".
+		var small := box.get_longest_axis_size() <= SMALL_PART or str(mi.name).begins_with("detail")
+		out.append({"mesh": mi.mesh, "material": mat, "xf": here, "small": small})
+	for c in n.get_children():
+		_collect(c, here, out)
 
 
 ## A piece's width and depth in cells, as turned.
@@ -276,28 +401,42 @@ func _centre(type: String, x: int, z: int, rot: int) -> Vector3:
 	return Vector3((x + s.x * 0.5) * _cell, 0, (z + s.y * 0.5) * _cell)
 
 
+## A piece's place in the city: where it draws (its transform and batch) and what you bump into.
 func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
 	var type := str(p.type)
 	var rot := int(p.rot)
-	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
-	var root := Node3D.new()
-	root.position = _centre(type, int(p.x), int(p.z), rot)
-	root.rotation.y = rot * PI * 0.5
-	_city_root.add_child(root)
-	var model := _model(type, Vector2(float(info.w), float(info.d)) * _cell)
+	var x := int(p.x)
+	var z := int(p.z)
+	var centre := _centre(type, x, z, rot)
+	var basis := Basis(Vector3.UP, rot * PI * 0.5)
 	if ruins and not type in GROUND_PIECES:
-		model.scale *= Vector3(1.0, 0.3, 1.0) # tumbled down
-	root.add_child(model)
+		basis = basis * Basis.from_scale(Vector3(1.0, 0.3, 1.0)) # tumbled down
+	var batch := "%s@%d,%d" % [type, floori(float(x) / CHUNK), floori(float(z) / CHUNK)]
 	var solid: Node3D = null
 	if not type in GROUND_PIECES:
 		var s := _size(type, rot)
-		solid = _box(self, Vector3(s.x * _cell * 0.86, 30.0, s.y * _cell * 0.86), root.position + Vector3(0, 15.0, 0), Color(0, 0, 0), true)
+		solid = _box(self, Vector3(s.x * _cell * 0.86, 30.0, s.y * _cell * 0.86), centre + Vector3(0, 15.0, 0), Color(0, 0, 0), true)
 		solid.visible = false
-	return {"key": key, "node": root, "solid": solid}
+	return {"key": key, "type": type, "batch": batch, "xf": Transform3D(basis, centre), "solid": solid}
 
 
-## A piece's model, `foot` metres wide and deep (before turning), its origin on the ground.
+## The faction's Blender model of a piece, or null if it has none yet.
+func _style_model(type: String) -> Node3D:
+	if _style == "":
+		return null
+	var path := STYLE_PATH % [_style, type]
+	if not _scenes.has(path):
+		_scenes[path] = load(path) if ResourceLoader.exists(path) else null
+	var scene: PackedScene = _scenes[path]
+	return scene.instantiate() as Node3D if scene else null
+
+
+## A piece's model, `foot` metres wide and deep (before turning), its origin on the ground: the
+## faction's own, or the shared stand-in.
 func _model(type: String, foot: Vector2) -> Node3D:
+	var own := _style_model(type)
+	if own:
+		return own # authored to its footprint in Blender
 	var n := Node3D.new()
 	match type:
 		"road":
@@ -418,6 +557,7 @@ func set_building(on: bool) -> void:
 		_picked = -1
 		_moving = false
 		_laying = false
+		_tip.visible = false
 		_camera.make_current()
 		_mark_picked()
 
@@ -436,6 +576,16 @@ func _build_builder_ui() -> void:
 	_ghost.mesh = BoxMesh.new()
 	_ghost.visible = false
 	add_child(_ghost)
+	_select = MeshInstance3D.new()
+	_select.mesh = BoxMesh.new()
+	var sel := StandardMaterial3D.new()
+	sel.albedo_color = Color(0.45, 0.95, 1.0, 0.3)
+	sel.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sel.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sel.no_depth_test = true # seen through the buildings around it
+	_select.material_override = sel
+	_select.visible = false
+	add_child(_select)
 	_grid = _grid_mesh()
 	_grid.visible = false
 	add_child(_grid)
@@ -473,7 +623,7 @@ func _build_builder_ui() -> void:
 	scroll.add_child(_list)
 	var row := HBoxContainer.new()
 	col.add_child(row)
-	for e in [["Turn (R)", _turn], ["Move (M)", _start_move], ["Take up (X)", _take_up]]:
+	for e in [["Turn (R)", _turn], ["Move (M)", _start_move], ["Take up (X)", _take_up], ["Undo", _undo_last]]:
 		var b := Button.new()
 		b.text = e[0]
 		b.pressed.connect(e[1])
@@ -504,8 +654,18 @@ func _build_builder_ui() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_color_override("font_color", Color(1.0, 0.8, 0.45))
 	col.add_child(_status)
+	_perf = Label.new()
+	_perf.add_theme_color_override("font_color", Color(1, 1, 1, 0.5))
+	_perf.add_theme_font_size_override("font_size", 12)
+	col.add_child(_perf)
+	_tip = Label.new()
+	_tip.add_theme_color_override("font_outline_color", Color(0, 0, 0))
+	_tip.add_theme_constant_override("outline_size", 5)
+	_tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tip.visible = false
+	_ui.add_child(_tip)
 	var help := Label.new()
-	help.text = "Click: place or pick   Drag: lay roads and walls   R turn   M move   X take up   Right click: let go\nW A S D or right drag: pan   Q / E: turn the view   Wheel: zoom   B or Esc: leave"
+	help.text = "Click: place or pick   Drag: lay roads and walls   R turn   M move   X take up   Ctrl+Z undo   Right click: let go\nW A S D or right drag: pan   Q / E: turn the view   Wheel: zoom   B or Esc: leave"
 	help.anchor_top = 1.0
 	help.anchor_bottom = 1.0
 	help.offset_left = 16.0
@@ -620,17 +780,63 @@ func _piece(id: int) -> Dictionary:
 
 ## Whether a piece fits at cell (x, z): inside the city, on nobody else's cells.
 func _fits(type: String, x: int, z: int, rot: int, skip := -1) -> bool:
+	return _why_not(type, x, z, rot, skip) == ""
+
+
+## Why a piece can't go at cell (x, z), or "" if it can (the server checks again). `skip`: the
+## piece being moved, which costs nothing.
+func _why_not(type: String, x: int, z: int, rot: int, skip := -1) -> String:
 	var s := _size(type, rot)
 	if x < -_half or z < -_half or x + s.x > _half or z + s.y > _half:
-		return false
+		return "Outside the city"
 	var me := Rect2i(x, z, s.x, s.y)
 	for p in _city().get("pieces", []):
 		if int(p.id) == skip:
 			continue
 		var ps := _size(str(p.type), int(p.rot))
 		if me.intersects(Rect2i(int(p.x), int(p.z), ps.x, ps.y)):
-			return false
-	return true
+			return "%s is in the way" % _catalog.get(str(p.type), {}).get("name", "A piece")
+	if skip < 0:
+		return str(_offer(type).get("why", ""))
+	return ""
+
+
+## What placing a new piece takes and gives: {"cost", "adds"}, and "why" if it can't be had now.
+func _offer(type: String) -> Dictionary:
+	var info: Dictionary = _catalog.get(type, {})
+	var colony := _colony()
+	if colony.is_empty():
+		return {"cost": "", "adds": ""} # a homeworld: scenery
+	if str(info.get("where", "")) != "colony":
+		return {"cost": "free", "adds": ""}
+	var fbi: Dictionary = Net.catalog.get("frontier", {}).get("buildings", {}).get(type, {})
+	var adds := _adds(fbi)
+	var placed := 0
+	for p in _city().get("pieces", []):
+		if str(p.type) == type:
+			placed += 1
+	var spare := int(colony.colony.get("buildings", {}).get(type, 0)) - placed
+	if spare > 0:
+		return {"cost": "one from store (%d there)" % spare, "adds": adds}
+	var tier := int(fbi.get("tier", 0))
+	if int(colony.colony.get("tier", 0)) < tier:
+		return {"cost": "", "adds": adds, "why": "Unlocks at colony tier %d" % tier}
+	var cost := int(fbi.get("cost", 0))
+	var out := {"cost": "builds a new one for %s credits" % _money(cost), "adds": adds}
+	if int(_me().get("credits", 0)) < cost:
+		out.why = "Needs %s credits; you have %s" % [_money(cost), _credits()]
+	return out
+
+
+## What a colony building does for the colony, in a few words.
+func _adds(fbi: Dictionary) -> String:
+	if fbi.has("covers"):
+		return "keeps %s in hand for %s people" % [fbi.covers, _money(int(fbi.get("per", 0)))]
+	if fbi.has("houses"):
+		return "houses %s people" % _money(int(fbi.houses))
+	if fbi.has("makes"):
+		return "makes %s" % fbi.makes
+	return ""
 
 
 ## The cell under the mouse, on the ground.
@@ -673,14 +879,36 @@ func _update_ghost() -> void:
 	var at = _mouse_cell()
 	if type == "" or at == null or _mouse_over_ui():
 		_ghost.visible = false
+		_tip.visible = false
 		return
 	var c := _corner(type, _rot, at)
 	_hover = c
 	var s := _size(type, _rot)
 	(_ghost.mesh as BoxMesh).size = Vector3(s.x * _cell - 0.6, 4.0, s.y * _cell - 0.6)
 	_ghost.position = Vector3((c.x + s.x * 0.5) * _cell, 2.0, (c.y + s.y * 0.5) * _cell)
-	_ghost.material_override = _ghost_ok if _fits(type, c.x, c.y, _rot, _picked if _moving else -1) else _ghost_bad
+	var why := _why_not(type, c.x, c.y, _rot, _picked if _moving else -1)
+	_ghost.material_override = _ghost_ok if why == "" else _ghost_bad
 	_ghost.visible = true
+	_show_tip(type, why)
+
+
+## Beside the mouse: the piece, what it costs and adds, and in red why it can't go here.
+func _show_tip(type: String, why: String) -> void:
+	var label := str(_catalog.get(type, {}).get("name", type))
+	var lines := PackedStringArray(["Moving: " + label if _moving else label])
+	if not _moving:
+		var o := _offer(type)
+		var line := str(o.cost)
+		if str(o.adds) != "":
+			line = str(o.adds) if line == "" else line + " · " + str(o.adds)
+		if line != "":
+			lines.append(line)
+	if why != "":
+		lines.append(why)
+	_tip.text = "\n".join(lines)
+	_tip.add_theme_color_override("font_color", Color(1.0, 0.55, 0.5) if why != "" else Color(0.75, 1.0, 0.85))
+	_tip.position = get_viewport().get_mouse_position() + Vector2(20, 18)
+	_tip.visible = true
 
 
 func _mouse_over_ui() -> bool:
@@ -724,6 +952,10 @@ func _tick(delta: float) -> void:
 	_cam_target.z = clampf(_cam_target.z, -span, span)
 	_place_cam()
 	_update_ghost()
+	_perf_wait -= delta
+	if _perf_wait <= 0.0:
+		_perf_wait = 0.5
+		_perf.text = "%d pieces · %d fps · %d draw calls" % [_pieces.size(), int(Performance.get_monitor(Performance.TIME_FPS)), int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))]
 
 
 func _typing() -> bool:
@@ -742,6 +974,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _typing():
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_Z and (event.ctrl_pressed or event.meta_pressed):
+			_undo_last()
+			get_viewport().set_input_as_handled()
+			return
 		match event.physical_keycode:
 			KEY_B, KEY_ESCAPE:
 				set_building(false)
@@ -789,10 +1025,11 @@ func _click() -> void:
 	if _moving and _picked >= 0:
 		var p := _piece(_picked)
 		var c := _corner(str(p.type), _rot, at)
-		Net.send({"type": "city_move", "planet": planet_id, "id": _picked, "x": c.x, "z": c.y, "rot": _rot})
+		_send_city({"type": "city_move", "id": _picked, "x": c.x, "z": c.y, "rot": _rot}, _was(p))
 		_moving = false
 		return
 	if _choose != "":
+		_stroke += 1
 		_last_laid = Vector2i(999999, 999999)
 		_laying = _choose in ["road", "wall"]
 		_lay_here()
@@ -818,7 +1055,7 @@ func _lay_here() -> void:
 	_last_laid = c
 	if _laying and not _fits(_choose, c.x, c.y, _rot):
 		return
-	Net.send({"type": "city_place", "planet": planet_id, "piece": _choose, "x": c.x, "z": c.y, "rot": _rot})
+	_send_city({"type": "city_place", "piece": _choose, "x": c.x, "z": c.y, "rot": _rot}, {"op": "placed", "stroke": _stroke})
 
 
 func _let_go() -> void:
@@ -838,7 +1075,7 @@ func _turn() -> void:
 	if _picked >= 0 and not _moving:
 		var p := _piece(_picked)
 		if not p.is_empty():
-			Net.send({"type": "city_move", "planet": planet_id, "id": _picked, "x": int(p.x), "z": int(p.z), "rot": _rot})
+			_send_city({"type": "city_move", "id": _picked, "x": int(p.x), "z": int(p.z), "rot": _rot}, _was(p))
 
 
 func _start_move() -> void:
@@ -851,7 +1088,10 @@ func _start_move() -> void:
 func _take_up() -> void:
 	if _picked < 0:
 		return
-	Net.send({"type": "city_remove", "planet": planet_id, "id": _picked})
+	var p := _piece(_picked)
+	if not p.is_empty():
+		_stroke += 1
+		_send_city({"type": "city_remove", "id": _picked}, {"op": "removed", "stroke": _stroke, "id": _picked, "type": str(p.type), "x": int(p.x), "z": int(p.z), "rot": int(p.rot)})
 	_picked = -1
 	_moving = false
 	_mark_picked()
@@ -865,18 +1105,93 @@ func _clear_city() -> void:
 		return
 	_clear_armed = 0.0
 	Net.send({"type": "city_clear", "planet": planet_id})
-	_set_status("City cleared.")
+	_undo.clear()
+	_set_status("City cleared. This can't be undone.")
 
 
 func _copy_city() -> void:
 	if _copy_from == null or _copy_from.selected < 0:
 		return
 	Net.send({"type": "city_copy", "from": str(_copy_from.get_item_metadata(_copy_from.selected)), "planet": planet_id})
+	_undo.clear()
 	_set_status("Copied: this city now matches %s." % _copy_from.get_item_text(_copy_from.selected))
 
 
-## The picked piece glows a little, so you can see what R, M and X act on.
+## A light box over the picked piece, so you can see what R, M and X act on.
 func _mark_picked() -> void:
-	for id in _pieces:
-		var node: Node3D = _pieces[id].node
-		node.scale = Vector3.ONE * (1.04 if id == _picked else 1.0)
+	if _select == null:
+		return
+	var p := _piece(_picked) if _picked >= 0 else {}
+	if p.is_empty():
+		_select.visible = false
+		return
+	var s := _size(str(p.type), int(p.rot))
+	(_select.mesh as BoxMesh).size = Vector3(s.x * _cell + 0.8, 1.2, s.y * _cell + 0.8)
+	_select.position = _centre(str(p.type), int(p.x), int(p.z), int(p.rot)) + Vector3(0, 0.6, 0)
+	_select.visible = true
+
+
+# --- Undo -------------------------------------------------------------------------------------
+# Each change you make is remembered once the server confirms it (its city_result carries the tag
+# it was sent with). Ctrl+Z sends the opposite change. A colony building you paid for and then undo
+# goes back into the colony's store, like taking it up.
+
+## The undo step for moving or turning a piece: where it was.
+func _was(p: Dictionary) -> Dictionary:
+	_stroke += 1
+	return {"op": "moved", "stroke": _stroke, "id": int(p.id), "x": int(p.x), "z": int(p.z), "rot": int(p.rot)}
+
+
+func _send_city(msg: Dictionary, op: Dictionary) -> void:
+	msg.planet = planet_id
+	if not op.is_empty():
+		_tags += 1
+		msg.tag = str(_tags)
+		_pending[msg.tag] = op
+		if _pending.size() > 400: # refused ones never come back
+			_pending.erase(_pending.keys()[0])
+	Net.send(msg)
+
+
+func _confirm(tag: String, msg: Dictionary) -> void:
+	if not _pending.has(tag):
+		return
+	var op: Dictionary = _pending[tag]
+	_pending.erase(tag)
+	if op.op == "remap": # an undone take-up came back as a new piece: later steps follow it
+		for step in _undo:
+			for o in step.ops:
+				if int(o.get("id", -1)) == int(op.old):
+					o.id = int(msg.get("piece", -1))
+		return
+	if op.op == "placed":
+		op.id = int(msg.get("piece", -1))
+		op.built = msg.get("built", false)
+	if not _undo.is_empty() and _undo[-1].stroke == op.stroke:
+		_undo[-1].ops.append(op)
+	else:
+		_undo.append({"stroke": op.stroke, "ops": [op]})
+	if _undo.size() > UNDO_STEPS:
+		_undo.pop_front()
+
+
+func _undo_last() -> void:
+	if _undo.is_empty():
+		_set_status("Nothing to undo.")
+		return
+	var ops: Array = _undo.pop_back().ops
+	var paid := false
+	for i in range(ops.size() - 1, -1, -1):
+		var o: Dictionary = ops[i]
+		match str(o.op):
+			"placed":
+				paid = paid or o.get("built", false)
+				_send_city({"type": "city_remove", "id": o.id}, {})
+			"moved":
+				_send_city({"type": "city_move", "id": o.id, "x": o.x, "z": o.z, "rot": o.rot}, {})
+			"removed":
+				_send_city({"type": "city_place", "piece": o.type, "x": o.x, "z": o.z, "rot": o.rot}, {"op": "remap", "old": o.id})
+	_picked = -1
+	_moving = false
+	_mark_picked()
+	_set_status("Undone. The building you paid for is back in the colony's store." if paid else "Undone.")

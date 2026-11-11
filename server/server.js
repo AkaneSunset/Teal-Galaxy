@@ -175,11 +175,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
     const orders = O.viewFor(galaxy, faction, now());
     const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
-    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.view(galaxy, faction, now()), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.view(galaxy, faction, now()), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths(), cities: CI.stamps(galaxy) };
   }
 
   function adminView() {
-    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.adminView(galaxy), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.adminView(galaxy), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths(), cities: CI.stamps(galaxy) };
   }
 
   function stateFor(me) {
@@ -1024,6 +1024,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
         break;
       // The city builder: a Founder's colony city, or (admins) a homeworld's, piece by piece.
+      case 'city_get': { // anyone may look at any city, but the Coma's worlds are admins' alone
+        const id = String(msg.planet || '');
+        const closed = F.FACTIONS[W.planet(galaxy, id)?.owner]?.playable === false && !me.admin;
+        return send(ws, { type: 'city', ...CI.view(galaxy, closed ? '' : id), planet: id });
+      }
       case 'city_place':
         result = CI.place(galaxy, me, String(msg.planet || ''), String(msg.piece || ''), msg.x, msg.z, msg.rot, now());
         break;
@@ -1199,7 +1204,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         }
         return send(ws, { type: 'error', reason: `unknown message ${msg.type}` });
     }
-    if (result.ok && msg.type.startsWith('city_')) send(ws, { ...result, type: 'city_result', action: msg.type, planet: msg.planet });
+    if (result.ok && msg.type.startsWith('city_')) send(ws, { ...result, type: 'city_result', action: msg.type, planet: msg.planet, tag: String(msg.tag ?? '').slice(0, 32) });
     if (result.ok && (FRONTIER_MSGS.includes(msg.type) || msg.type === 'admin_intercept_result')) send(ws, { ...result, type: 'frontier_result', action: msg.type });
     if (result.ok) changed();
     else send(ws, { type: 'error', reason: result.reason });

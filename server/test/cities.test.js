@@ -79,3 +79,24 @@ test('a Founder builds their colony city with the colony buildings', () => {
   assert.strictEqual(CI.place(g, akane, planet, 'habitat', -20, -20, 0, 2).built, false);
   assert.strictEqual(c.colony.buildings.habitat, 2);
 });
+
+test('states carry each city stamp, and a city is fetched whole', () => {
+  const g = G.newGalaxy();
+  assert.deepStrictEqual(CI.view(g, 'anvil'), { planet: 'anvil', pieces: [], updated: 0 });
+  assert.strictEqual(g.cities?.anvil, undefined); // looking builds nothing
+  CI.place(g, ADMIN, 'anvil', 'road', 0, 0, 0, 7);
+  assert.deepStrictEqual(CI.stamps(g), { anvil: 7 });
+  assert.strictEqual(CI.view(g, 'anvil').pieces.length, 1);
+});
+
+test('a full city of roads lays out within the server budget', () => {
+  const g = G.newGalaxy();
+  const t0 = process.hrtime.bigint();
+  let n = 0;
+  for (let x = -CI.HALF; x < CI.HALF && n < 4000; x += 2)
+    for (let z = -CI.HALF; z < CI.HALF && n < 4000; z++) if (CI.place(g, ADMIN, 'bastion', 'road', x, z, 0, 1).ok) n++;
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.strictEqual(n, 4000);
+  assert.strictEqual(CI.place(g, ADMIN, 'bastion', 'road', 1, 1, 0, 1).ok, false); // full
+  assert.ok(ms < 1500, `4,000 placements took ${ms.toFixed(0)} ms`);
+});

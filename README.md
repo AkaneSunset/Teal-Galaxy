@@ -950,8 +950,12 @@ shuttle stop on the south edge; its console takes you back up. Everyone in a cit
 **Building.** Where you may build, press B (or use the CITY PLANNING console at the stop) for the
 builder: the view rises over the city, the pieces are down the right, and the grid shows.
 Click places the chosen piece (hold and drag to lay roads and walls), or picks a placed one: R turns
-it, M moves it, X takes it up. Right click lets go. W A S D or right drag pans, Q and E turn the view,
-the wheel zooms, and B or Esc leaves.
+it, M moves it, X takes it up. Ctrl+Z undoes your last change (a dragged road undoes as one). Right
+click lets go. W A S D or right drag pans, Q and E turn the view, the wheel zooms, and B or Esc leaves.
+Beside the mouse the chosen piece says what it costs (free, one from store, or a new one for so many
+credits) and what it adds to the colony, and turns red with the reason when it can't go there ("Mine
+is in the way", "Unlocks at colony tier 2", "Needs 25,000 credits"). The builder's corner shows the
+piece count, frame rate and draw calls.
 
 - **On a colony** only its Founder builds. The colony's buildings (habitat blocks, precincts,
   clinics, power plants, mines, foundries, smelters, works, reactors) are pieces: a building built on
@@ -962,13 +966,30 @@ the wheel zooms, and B or Esc leaves.
   ruins.
 - **On a homeworld** only admins build (start the server with `ADMIN_KEY` and the game with
   `--admin-key`, see Admins above). Every piece is offered and is scenery, tinted in the owning
-  faction's colour. "Copy city from" copies another homeworld's layout as a starting point, and
+  faction's look. "Copy city from" copies another homeworld's layout as a starting point, and
   "Clear the whole city" (pressed twice) empties it.
 
-Messages: `city_place {planet, piece, x, z, rot}`, `city_move {planet, id, x, z, rot}`,
-`city_remove {planet, id}`, `city_clear {planet}`, `city_copy {from, planet}` (admins). Each success
-answers `city_result`; cities are in the state as `cities[planetId].pieces`, and the pieces in the
-catalog as `cities`.
+**Faction styles.** Every city is built in its faction's look: the homeworld's owner, or the colony
+Founder's faction (Founders don't pick). The models are made in Blender by
+`tools/blender/city_models.py`, which writes `game/city/<faction>/<piece>.glb`; a piece with no model
+for its faction yet uses the shared stand-in. Each model is built to its footprint (one cell is 10 m),
+origin on the ground in the middle, front toward Blender's +Y (Godot's -Z), with its small parts
+joined into a "detail" mesh. To rebuild them, with Blender installed:
+`blender -b -P tools/blender/city_models.py -- compact` (or with the `bpy` module from pip:
+`python tools/blender/city_models.py compact`); add `--render DIR` for a picture of each piece. The
+Terran Compact has the Government Hall, Tower Block, High-rise, Road, Plaza, Wall and Turret so far.
+
+**Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
+each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop
+drawing past about 320 m. The server budget is checked by a test: a full 4,000-piece city lays out
+well within 1.5 s of placements.
+
+Messages: `city_get {planet}` answers `city {planet, pieces, updated}` (anyone may look at any city
+but the Coma's), `city_place {planet, piece, x, z, rot}`, `city_move {planet, id, x, z, rot}`,
+`city_remove {planet, id}`, `city_clear {planet}`, `city_copy {from, planet}` (admins). Each change may
+carry a `tag`, and each success answers `city_result` with it. The state carries only
+`cities[planetId]`, the time each city last changed, so a full city isn't sent in every state; apps ask
+again when it moves. The pieces are in the catalog as `cities`.
 
 ## The Frontier and terraforming
 

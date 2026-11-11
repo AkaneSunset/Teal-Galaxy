@@ -209,6 +209,21 @@ function copy(g: any, who: Who, from: string, to: string, now: number): Result {
   return { ok: true };
 }
 
+// What goes out in every state broadcast: each city's last change, not its pieces. A full city
+// is thousands of pieces, so apps ask for the one they stand in (city_get) and ask again when its
+// stamp moves.
+function stamps(g: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [id, c] of Object.entries(g.cities || {})) out[id] = (c as City).updated;
+  return out;
+}
+
+// One city as an app draws it (empty if nothing was ever built there).
+function view(g: any, planetId: string): { planet: string; pieces: Piece[]; updated: number } {
+  const c: City | undefined = Object.hasOwn(g.cities || {}, planetId) ? g.cities[planetId] : undefined;
+  return { planet: planetId, pieces: c?.pieces || [], updated: c?.updated || 0 };
+}
+
 const CATALOG = { cells: CITY_CELLS, cell: CELL_M, pieces: PIECES };
 
-module.exports = { CITY_CELLS, CELL_M, HALF, PIECES, CATALOG, isHomeworld, colonyCluster, refusal, city, size, fits, place, remove, move, clear, copy };
+module.exports = { CITY_CELLS, CELL_M, HALF, PIECES, CATALOG, isHomeworld, colonyCluster, refusal, city, size, fits, place, remove, move, clear, copy, stamps, view };
