@@ -29,6 +29,12 @@ extends "res://place.gd"
 ## Zones: a housing zone (low or high density) is dragged out like a road, a lot at a time. Each lot
 ## is drawn as one of the faction's looks for that density (res://city/<faction>/zone_low_<n>.glb),
 ## picked from the piece's id, so a zoned street is a mix of homes and everyone sees the same one.
+## Insides: a building whose faction has an inside for it (res://city/<faction>/inside_<piece>.glb,
+## or inside_<piece>_<n>.glb where there are several, made by tools/blender/interiors.py) has a door
+## at the middle of its front. Walk up, press F, and you stand inside; the door behind you leads back
+## out. An inside is built deep under its own building only while you are in it, so pilots who go
+## into the same building meet there (it is still the city's shared space), and the city above pays
+## nothing for it. The model says where its way out ("exit") and its lamps ("light...") are.
 ## The pieces themselves come from the server on request (city_get), not in every state: each state
 ## only says when each city last changed.
 
@@ -46,6 +52,11 @@ const CHUNK := 20 # cells on a side of a drawing chunk
 const SMALL_PART := 2.5 # metres: parts no bigger than this are details...
 const DETAIL_RANGE := 320.0 # ...drawn only this close
 const UNDO_STEPS := 100
+const INSIDE_PATH := "res://city/%s/inside_%s.glb"
+const INSIDE_AS := {"tower": "zone_high", "highrise": "zone_high", "habitat": "zone_high"} # whose inside a piece borrows
+const INSIDE_DEPTH := 400.0 # how far under the city the insides are built...
+const INSIDE_LEVELS := 40 # ...on this many levels, 100 m apart, by piece id
+const DOOR_REACH := 4.5
 
 var can_build := false # set from the server's rules (see _may_build)
 var building := false # the builder is up
@@ -59,6 +70,14 @@ var _pieces := {} # piece id -> {"key", "type", "chunk", "xf", "solid"}
 var _parts := {} # piece type -> [{mesh, material, xf, small}]: its model, taken apart for drawing
 var _scenes := {} # glb path -> PackedScene (or null: none for this faction yet)
 var _looks := {} # zone type -> how many looks the faction has for it
+var _insides := {} # piece type -> its insides' paths (empty: no going in)
+var _doors := {} # 10 m cell -> [ids of the pieces whose door stands in it]
+var _door: Marker3D # the one F-point for doors, kept on the door nearest you
+var _door_piece := -1
+var _inside := -1 # the piece you are inside, or -1 out in the city
+var _inside_root: Node3D
+var _inside_spawn: Marker3D
+var _inside_use := {} # the way out's entry in _uses
 var _batches := {} # "type@chunk" -> Node3D holding its MultiMeshInstance3Ds
 var _city_root: Node3D
 var _grid: MeshInstance3D
@@ -126,6 +145,8 @@ func _exit_tree() -> void:
 
 
 func _location() -> String:
+	if _inside >= 0:
+		return "inside the %s" % _piece_name(_inside)
 	return "builder (B)" if can_build and not building else ""
 
 
@@ -242,6 +263,8 @@ func _build_world() -> void:
 	var plan := stop + Vector3(-5.0, 0, -4.0)
 	_console(self, plan, Vector3(1, 0, 0), "CITY PLANNING", "Lay out the city\nPress F.", 1.6)
 	_use(self, plan + Vector3(0.7, 1.0, 0), _plan_prompt, _plan_use)
+	_use(self, Vector3(0, -9999, 0), _door_prompt, _enter_door) # moved to the nearest door as you walk
+	_door = _uses[-1].node
 	_light(self, plan + Vector3(0, 3.0, 0), Color(0.85, 0.92, 1.0), 0.8, 6.0)
 
 
@@ -323,6 +346,15 @@ func _refresh_city() -> void:
 				by_batch[b].append(_pieces[id].xf)
 		for b in dirty:
 			_draw_batch(str(b), by_batch.get(b, []))
+		_doors.clear()
+		for id in _pieces:
+			if _pieces[id].door != null:
+				var cell := _door_cell(_pieces[id].door)
+				if not _doors.has(cell):
+					_doors[cell] = []
+				_doors[cell].append(id)
+	if _inside >= 0 and not _pieces.has(_inside):
+		_leave_inside() # the building was taken up around you
 	_mark_picked()
 
 
@@ -441,7 +473,11 @@ func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
 		var s := _size(type, rot)
 		solid = _box(self, Vector3(s.x * _cell * 0.86, 30.0, s.y * _cell * 0.86), centre + Vector3(0, 15.0, 0), Color(0, 0, 0), true)
 		solid.visible = false
-	return {"key": key, "type": type, "batch": batch, "xf": Transform3D(basis, centre), "solid": solid}
+	var door = null
+	if not ruins and _inside_path(type, int(p.id)) != "":
+		var depth := float(_catalog.get(type, {}).get("d", 1)) * _cell
+		door = centre + Basis(Vector3.UP, rot * PI * 0.5) * Vector3(0, 1.2, -depth * 0.46)
+	return {"key": key, "type": type, "batch": batch, "xf": Transform3D(basis, centre), "solid": solid, "door": door}
 
 
 ## The faction's Blender model of a piece, or null if it has none yet.
@@ -572,10 +608,132 @@ func _bounds(n: Node, xf: Transform3D) -> AABB:
 	return out
 
 
+# --- Going inside -----------------------------------------------------------------------------
+
+## The inside a piece opens onto ("" if its faction has none for it): the piece's own, or the one
+## it borrows, and where there are several, always the same one for the same piece.
+func _inside_path(type: String, id: int) -> String:
+	if not _insides.has(type):
+		var found := []
+		var kind := str(INSIDE_AS.get(type, type))
+		if _style != "":
+			if ResourceLoader.exists(INSIDE_PATH % [_style, kind]):
+				found.append(INSIDE_PATH % [_style, kind])
+			while ResourceLoader.exists(INSIDE_PATH % [_style, "%s_%d" % [kind, found.size() + 1]]):
+				found.append(INSIDE_PATH % [_style, "%s_%d" % [kind, found.size() + 1]])
+		_insides[type] = found
+	var paths: Array = _insides[type]
+	return "" if paths.is_empty() else str(paths[((id * 2654435761) >> 12) % paths.size()])
+
+
+func _door_cell(at: Vector3) -> Vector2i:
+	return Vector2i(floori(at.x / 10.0), floori(at.z / 10.0))
+
+
+func _piece_name(id: int) -> String:
+	var type := str(_pieces.get(id, {}).get("type", ""))
+	return str(_catalog.get(type, {}).get("name", "building"))
+
+
+## Keeps the door F-point on the nearest door within reach, so thousands of doors cost one check.
+func _track_door() -> void:
+	_door_piece = -1
+	if _door == null or _player == null:
+		return
+	if _inside >= 0:
+		_door.position = Vector3(0, -9999, 0)
+		if _player.global_position.y < _inside_root.position.y - 25.0:
+			_stand_at(_inside_spawn) # fell out of the model: back to the door
+		return
+	var here := _player.global_position
+	var cell := _door_cell(here)
+	var best := DOOR_REACH
+	for dx in [-1, 0, 1]:
+		for dz in [-1, 0, 1]:
+			for id in _doors.get(cell + Vector2i(dx, dz), []):
+				var d: float = (_pieces[id].door as Vector3).distance_to(here + Vector3(0, 1.2, 0))
+				if d < best:
+					best = d
+					_door_piece = id
+	_door.position = _pieces[_door_piece].door if _door_piece >= 0 else Vector3(0, -9999, 0)
+
+
+func _door_prompt() -> String:
+	return "Press %s to go into the %s" % [_key(), _piece_name(_door_piece)] if _door_piece >= 0 else ""
+
+
+func _enter_door() -> void:
+	if _door_piece < 0 or _inside >= 0 or not _pieces.has(_door_piece):
+		return
+	var id := _door_piece
+	var scene := load(_inside_path(str(_pieces[id].type), id)) as PackedScene
+	if scene == null:
+		return
+	var xf: Transform3D = _pieces[id].xf
+	_inside_root = scene.instantiate() as Node3D
+	_inside_root.transform = Transform3D(Basis(Vector3.UP, xf.basis.get_euler().y), Vector3(xf.origin.x, -INSIDE_DEPTH - 100.0 * (id % INSIDE_LEVELS), xf.origin.z))
+	add_child(_inside_root)
+	_furnish(_inside_root)
+	_inside_spawn = Marker3D.new()
+	_inside_spawn.position = Vector3(0, 0.1, 0)
+	_inside_root.add_child(_inside_spawn)
+	_inside = id
+	_stand_at(_inside_spawn)
+	_say("You go into the %s." % _piece_name(id), 3.0)
+
+
+## Makes a loaded inside walkable: everything but its small details is solid, its lamps are lit,
+## and its "exit" leads back out.
+func _furnish(n: Node) -> void:
+	var label := str(n.name)
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh and not label.begins_with("detail"):
+		var body := StaticBody3D.new()
+		var shape := CollisionShape3D.new()
+		shape.shape = (n as MeshInstance3D).mesh.create_trimesh_shape()
+		body.add_child(shape)
+		n.add_child(body)
+	elif n is Node3D and label.begins_with("light"):
+		var high := (n as Node3D).position.y > 8.0
+		_light(n as Node3D, Vector3.ZERO, Color(0.85, 0.92, 1.0), 2.2 if high else 1.3, 34.0 if high else 12.0)
+	elif n is Node3D and label.begins_with("exit"):
+		_use(n as Node3D, Vector3.ZERO, func(): return "Press %s to go back out" % _key(), _leave_inside)
+		_inside_use = _uses[-1]
+	for c in n.get_children():
+		if not c is StaticBody3D:
+			_furnish(c)
+
+
+## Back out to the street in front of the building's door (or the shuttle stop, if it is gone).
+func _leave_inside() -> void:
+	if _inside < 0:
+		return
+	var id := _inside
+	_inside = -1
+	_uses.erase(_inside_use)
+	_inside_use = {}
+	_inside_root.queue_free()
+	_inside_root = null
+	_inside_spawn = null
+	if not _pieces.has(id) or _pieces[id].door == null:
+		_stand_at(_arrival)
+		_say("The building is gone: you are back at the shuttle stop.")
+		return
+	var xf: Transform3D = _pieces[id].xf
+	var front := Basis(Vector3.UP, xf.basis.get_euler().y) * Vector3(0, 0, -1)
+	var door: Vector3 = _pieces[id].door
+	_player.global_position = Vector3(door.x, 0.2, door.z) + front * 2.0
+	_player.velocity = Vector3.ZERO
+	_player.rotation.y = atan2(-front.x, -front.z)
+
+
+func _fall_limit() -> float:
+	return -1000000.0 if _inside >= 0 else -10.0
+
+
 # --- The builder ------------------------------------------------------------------------------
 
 func set_building(on: bool) -> void:
-	if on and not _may_build():
+	if on and (not _may_build() or _inside >= 0):
 		return
 	building = on
 	_ui.visible = on
@@ -969,6 +1127,7 @@ func _tick(delta: float) -> void:
 	if _clear_armed > 0.0:
 		_clear_armed -= delta
 	if not building:
+		_track_door()
 		return
 	var pan := Vector2.ZERO
 	if not _typing():
@@ -1006,7 +1165,7 @@ func _typing() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not building:
-		if can_build and not seated and not menu_open and not _paused.visible and not _chat.is_typing() \
+		if can_build and _inside < 0 and not seated and not menu_open and not _paused.visible and not _chat.is_typing() \
 				and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_B:
 			set_building(true)
 			get_viewport().set_input_as_handled()

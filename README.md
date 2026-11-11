@@ -993,6 +993,17 @@ Coma shells, floating homes and ringed domes, and twisting needles, stacked disc
 keeps. Zones are free and are scenery for now: on a colony they don't house anyone yet (habitat
 blocks do).
 
+**Going inside.** A building whose faction has an inside for it has a door at the middle of its
+front: walk up, press F, and you are inside; the door behind you leads back out. An inside is its
+own small place, built only while you are in it (deep under its building, so pilots who enter the
+same building meet there and the city above pays nothing for it). They are modelled in Blender by
+`tools/blender/interiors.py` as `game/city/<faction>/inside_<piece>.glb` (or `inside_<piece>_<n>.glb`
+for several): you come in at the model's origin, rooms are thick slabs the game makes solid (all but
+the "detail" mesh), and markers named `exit` and `light...` place the way out and the lamps. The
+Terran Compact has the Government Hall (gatehouse, great hall, council chamber), a barracks home
+for low-density lots and a flat block (lobby, corridor, a flat) for high-density lots, Tower Blocks,
+High-rises and Habitat blocks. Windows are light panels for now, with no view of the city.
+
 **Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
 each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop
 drawing past about 320 m. The server budget is checked by a test: a full 4,000-piece city lays out

@@ -20,12 +20,14 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 _mats = {}
 _parts = []  # (object, is_detail) for the piece being built
+_marks = []  # named points in it (an inside's way out, its lamps)
 
 
 def reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     _mats.clear()
     _parts.clear()
+    _marks.clear()
 
 
 def mat(name, rgb, emit=0.0, metal=0.55, rough=0.5):
@@ -112,7 +114,7 @@ def finish(faction, piece):
         ob.data.name = ob.name
         out.append(ob)
     bpy.ops.object.select_all(action="DESELECT")
-    for o in out:
+    for o in out + _marks:
         o.select_set(True)
     path = os.path.join(ROOT, "game", "city", faction, piece + ".glb")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -150,6 +152,70 @@ def render(path, foot, height):
     c.track_axis = "TRACK_NEGATIVE_Z"
     c.up_axis = "UP_Y"
     cam.data.lens = 40
+    scene.camera = cam
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+
+
+def marker(name, at):
+    """A named point exported with the piece: the game reads "exit" (the way out of an inside) and
+    "light..." (where it hangs a lamp)."""
+    ob = bpy.data.objects.new(name, None)
+    ob.location = at
+    bpy.context.scene.collection.objects.link(ob)
+    _marks.append(ob)
+    return ob
+
+
+def wall(a, b, z, h, m, gaps=(), t=0.4):
+    """A wall from `a` to `b` ((x, y) points, along X or along Y), z up to z + h, with doorways:
+    each gap is (how far along from `a` its middle is, its width, its height)."""
+    along_x = a[1] == b[1]
+    length = abs(b[0] - a[0]) + abs(b[1] - a[1])
+    sgn = 1 if (b[0] - a[0] if along_x else b[1] - a[1]) > 0 else -1
+
+    def seg(d0, d1, z0, hh):
+        if d1 - d0 < 0.01 or hh < 0.01:
+            return
+        mid = (d0 + d1) / 2
+        at = (a[0] + sgn * mid, a[1], z0) if along_x else (a[0], a[1] + sgn * mid, z0)
+        box((d1 - d0, t, hh) if along_x else (t, d1 - d0, hh), at, m)
+
+    pos = 0.0
+    for c, w, gh in sorted(gaps):
+        seg(pos, c - w / 2, z, h)
+        seg(c - w / 2, c + w / 2, z + gh, h - gh)  # over the doorway
+        pos = c + w / 2
+    seg(pos, length, z, h)
+
+
+def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
+    """A view from where you come in, lit by the piece's own lamps."""
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.device = "CPU"
+    scene.cycles.samples = 48
+    scene.render.resolution_x, scene.render.resolution_y = 1200, 700
+    world = bpy.data.worlds.new("dark")
+    world.use_nodes = True
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.02, 0.025, 0.035, 1)
+    scene.world = world
+    for mk in _marks:
+        if mk.name.startswith("light"):
+            bpy.ops.object.light_add(type="POINT", location=mk.location)
+            bpy.context.object.data.energy = 2500 if mk.location.z > 8 else 500
+            bpy.context.object.data.color = (0.85, 0.92, 1.0)
+            bpy.context.object.data.shadow_soft_size = 0.5
+    bpy.ops.object.camera_add(location=eye)
+    cam = bpy.context.object
+    target = bpy.data.objects.new("target", None)
+    target.location = look
+    scene.collection.objects.link(target)
+    c = cam.constraints.new("TRACK_TO")
+    c.target = target
+    c.track_axis = "TRACK_NEGATIVE_Z"
+    c.up_axis = "UP_Y"
+    cam.data.lens = lens
     scene.camera = cam
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)

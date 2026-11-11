@@ -12,7 +12,8 @@ Writes game/city/<faction>/<piece>.glb (Godot imports them; game/city.gd loads t
 --render also writes a PNG of each piece to DIR, for checking the look without the game.
 --sheet DIR writes one PNG per faction of all its zone housing side by side.
 
-kit.py holds the shared parts and export; housing.py the zone housing (many looks per faction).
+kit.py holds the shared parts and export; housing.py the zone housing (many looks per faction);
+interiors.py the insides of buildings (inside_<piece>.glb), which --render pictures from the door.
 """
 
 import math
@@ -23,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # noqa: E402
 import housing  # noqa: E402
+import interiors  # noqa: E402
 import kit  # noqa: E402
 from kit import CELL, box, compact_mats, cyl, finish, pilasters, render, reset, slits, text, twin_turret  # noqa: E402
 
@@ -169,6 +171,8 @@ FACTIONS = {
 }
 for _faction, (_mats, _pieces) in FACTIONS.items():
     _pieces.update(housing.pieces(_faction))
+    for _name, _build in interiors.INSIDES.get(_faction, {}).items():
+        _pieces[_name] = (_build, (1, 1), 6)
 
 
 def sheet(path, faction):
@@ -232,6 +236,9 @@ def main(argv):
             build(make_mats())
             finish(faction, piece)
             if "--render" in dirs:
+                if piece.startswith("inside_"):
+                    kit.render_inside(os.path.join(dirs["--render"], f"{faction}_{piece}.png"))
+                    continue
                 render(os.path.join(dirs["--render"], f"{faction}_{piece}.png"), (cells[0] * CELL, cells[1] * CELL), height)
         if "--sheet" in dirs:
             sheet(os.path.join(dirs["--sheet"], f"{faction}_housing.png"), faction)
