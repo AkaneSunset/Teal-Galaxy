@@ -16,6 +16,7 @@ kit.py holds the shared parts and export; housing.py the zone housing (many look
 interiors.py the insides of buildings (inside_<piece>.glb), which --render pictures from the door.
 """
 
+import glob
 import math
 import os
 import sys
@@ -175,18 +176,19 @@ for _faction, (_mats, _pieces) in FACTIONS.items():
         _pieces[_name] = (_build, (1, 1), 6)
 
 
-def sheet(path, faction):
-    """One picture of all the faction's zone housing: the low-density lots in front, the
-    high-density ones behind, loaded back from the exported files."""
+def sheet(path, faction, columns):
+    """One picture of the faction's zone housing, loaded back from the exported files: each column
+    is a (low-density piece, high-density piece) pair, the low lots in front, the high ones behind."""
     reset()
     folder = os.path.join(kit.ROOT, "game", "city", faction)
-    for row, (name, pitch, y) in enumerate((("zone_low", 26.0, 34.0), ("zone_high", 36.0, -14.0))):
-        for v in range(1, housing.VARIANTS + 1):
+    mid = (len(columns) - 1) / 2
+    for col, pair in enumerate(columns):
+        for name, pitch, y in zip(pair, (26.0, 36.0), (34.0, -14.0)):
             before = set(bpy.data.objects)
-            bpy.ops.import_scene.gltf(filepath=os.path.join(folder, f"{name}_{v}.glb"))
+            bpy.ops.import_scene.gltf(filepath=os.path.join(folder, f"{name}.glb"))
             for ob in set(bpy.data.objects) - before:
                 if ob.parent is None:
-                    ob.location.x -= (v - 3.5) * pitch  # the camera looks back along Y: number 1 on the left
+                    ob.location.x -= (col - mid) * pitch  # the camera looks back along Y: the first column on the left
                     ob.location.y += y
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -237,11 +239,17 @@ def main(argv):
             finish(faction, piece)
             if "--render" in dirs:
                 if piece.startswith("inside_"):
+                    kit.POSTERS = sorted(glob.glob(os.path.join(kit.ROOT, "game", "city", faction, "propaganda", "poster_*.png")))
                     kit.render_inside(os.path.join(dirs["--render"], f"{faction}_{piece}.png"))
                     continue
                 render(os.path.join(dirs["--render"], f"{faction}_{piece}.png"), (cells[0] * CELL, cells[1] * CELL), height)
-        if "--sheet" in dirs:
-            sheet(os.path.join(dirs["--sheet"], f"{faction}_housing.png"), faction)
+        if "--sheet" in dirs:  # every look at the top tier, then three looks growing through the tiers
+            top = housing.TIERS
+            sheet(os.path.join(dirs["--sheet"], f"{faction}_housing.png"), faction,
+                  [(f"zone_low_{v}_t{top}", f"zone_high_{v}_t{top}") for v in range(1, housing.VARIANTS + 1)])
+            for v in (1, 2, 3):
+                sheet(os.path.join(dirs["--sheet"], f"{faction}_tiers_{v}.png"), faction,
+                      [(f"zone_low_{v}_t{t}", f"zone_high_{v}_t{t}") for t in range(1, top + 1)])
 
 
 if __name__ == "__main__":

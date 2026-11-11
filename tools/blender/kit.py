@@ -21,6 +21,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _mats = {}
 _parts = []  # (object, is_detail) for the piece being built
 _marks = []  # named points in it (an inside's way out, its lamps)
+_screens = []  # the displays in it: meshes of their own, which the game puts pictures on
+POSTERS = []  # pictures to show on them in a render (the game chooses its own)
 
 
 def reset():
@@ -28,6 +30,7 @@ def reset():
     _mats.clear()
     _parts.clear()
     _marks.clear()
+    _screens.clear()
 
 
 def mat(name, rgb, emit=0.0, metal=0.55, rough=0.5):
@@ -114,7 +117,7 @@ def finish(faction, piece):
         ob.data.name = ob.name
         out.append(ob)
     bpy.ops.object.select_all(action="DESELECT")
-    for o in out + _marks:
+    for o in out + _marks + _screens:
         o.select_set(True)
     path = os.path.join(ROOT, "game", "city", faction, piece + ".glb")
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -167,6 +170,32 @@ def marker(name, at):
     return ob
 
 
+def display(M, at, facing, w=0.9, h=1.35, frame="dark", lamp="amber"):
+    """A display hung on a wall: `at` is the bottom centre of its screen, on the wall's face, and
+    `facing` the way it looks ("+x", "-x", "+y" or "-y"). The frame is detail. The screen is a mesh
+    of its own, "screen1", "screen2"..., mapped so a picture fills it upright: the game shows the
+    faction's propaganda on every mesh so named."""
+    n = {"+x": (1, 0), "-x": (-1, 0), "+y": (0, 1), "-y": (0, -1)}[facing]
+    r = (-n[1], n[0])  # to the right of someone looking at it
+    x, y, z = at
+    size = (w + 0.14, 0.08, h + 0.14) if n[0] == 0 else (0.08, w + 0.14, h + 0.14)
+    box(size, (x + n[0] * 0.04, y + n[1] * 0.04, z - 0.07), M[frame], detail=True)
+    box((0.22, 0.05, 0.05) if n[0] == 0 else (0.05, 0.22, 0.05), (x + n[0] * 0.05, y + n[1] * 0.05, z - 0.17), M[lamp], detail=True)
+    c = (x + n[0] * 0.085, y + n[1] * 0.085)
+    name = f"screen{len(_screens) + 1}"
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([(c[0] - r[0] * w / 2, c[1] - r[1] * w / 2, z), (c[0] + r[0] * w / 2, c[1] + r[1] * w / 2, z),
+                    (c[0] + r[0] * w / 2, c[1] + r[1] * w / 2, z + h), (c[0] - r[0] * w / 2, c[1] - r[1] * w / 2, z + h)], [], [(0, 1, 2, 3)])
+    uv = me.uv_layers.new(name="UVMap")
+    for i, at_uv in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
+        uv.data[i].uv = at_uv
+    me.materials.append(mat("screen", "#16304f", emit=1.0, metal=0.0))
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    _screens.append(ob)
+    return ob
+
+
 def wall(a, b, z, h, m, gaps=(), t=0.4):
     """A wall from `a` to `b` ((x, y) points, along X or along Y), z up to z + h, with doorways:
     each gap is (how far along from `a` its middle is, its width, its height)."""
@@ -200,6 +229,17 @@ def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.02, 0.025, 0.035, 1)
     scene.world = world
+    for i, ob in enumerate(_screens if POSTERS else []):  # a poster on every display
+        m = bpy.data.materials.new("poster")
+        m.use_nodes = True
+        b = m.node_tree.nodes["Principled BSDF"]
+        tex = m.node_tree.nodes.new("ShaderNodeTexImage")
+        tex.image = bpy.data.images.load(POSTERS[i % len(POSTERS)])
+        m.node_tree.links.new(tex.outputs["Color"], b.inputs["Base Color"])
+        m.node_tree.links.new(tex.outputs["Color"], b.inputs["Emission Color"])
+        b.inputs["Emission Strength"].default_value = 1.0
+        ob.data.materials.clear()
+        ob.data.materials.append(m)
     for mk in _marks:
         if mk.name.startswith("light"):
             bpy.ops.object.light_add(type="POINT", location=mk.location)

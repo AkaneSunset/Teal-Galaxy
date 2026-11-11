@@ -46,6 +46,7 @@ const Terrain := preload("res://terrain.gd")
 const ARRIVAL_Z := 640.0 # the shuttle stop, just south of the grid
 const GROUND_PIECES := ["road", "plaza", "park", "pad"] # flat: you walk over them
 const GROUP_ORDER := ["Ground", "Zones", "Civic", "Housing", "Industry", "Defence"]
+const NEED_NAMES := ["a road", "a power plant", "a precinct", "a clinic", "a park or plaza"] # in the order of a lot's `needs`
 const DRAG_PIECES := ["road", "wall", "zone_low", "zone_high"] # hold the button and drag to lay these
 const STYLE_PATH := "res://city/%s/%s.glb"
 const CHUNK := 20 # cells on a side of a drawing chunk
@@ -57,6 +58,8 @@ const INSIDE_AS := {"tower": "zone_high", "highrise": "zone_high", "habitat": "z
 const INSIDE_DEPTH := 400.0 # how far under the city the insides are built...
 const INSIDE_LEVELS := 40 # ...on this many levels, 100 m apart, by piece id
 const DOOR_REACH := 4.5
+const POSTER_PATH := "res://city/%s/propaganda/poster_%d.png" # the faction's propaganda, numbered from 1
+const POSTER_SECONDS := 14.0 # how long a display shows one before the next
 
 var can_build := false # set from the server's rules (see _may_build)
 var building := false # the builder is up
@@ -70,6 +73,7 @@ var _pieces := {} # piece id -> {"key", "type", "chunk", "xf", "solid"}
 var _parts := {} # piece type -> [{mesh, material, xf, small}]: its model, taken apart for drawing
 var _scenes := {} # glb path -> PackedScene (or null: none for this faction yet)
 var _looks := {} # zone type -> how many looks the faction has for it
+var _tiers := {} # the tier rules: {top, growHours, declineHours, services}
 var _insides := {} # piece type -> its insides' paths (empty: no going in)
 var _doors := {} # 10 m cell -> [ids of the pieces whose door stands in it]
 var _door: Marker3D # the one F-point for doors, kept on the door nearest you
@@ -78,6 +82,10 @@ var _inside := -1 # the piece you are inside, or -1 out in the city
 var _inside_root: Node3D
 var _inside_spawn: Marker3D
 var _inside_use := {} # the way out's entry in _uses
+var _posters = null # the faction's propaganda pictures, loaded the first time you go inside
+var _screens: Array[StandardMaterial3D] = [] # the displays in the inside you are in
+var _screen_turn := 0 # how many times they have changed picture
+var _screen_wait := 0.0
 var _batches := {} # "type@chunk" -> Node3D holding its MultiMeshInstance3Ds
 var _city_root: Node3D
 var _grid: MeshInstance3D
@@ -121,6 +129,7 @@ func _build() -> void:
 	_cell = float(cat.get("cell", 10))
 	_half = int(cat.get("cells", 120)) / 2
 	_catalog = cat.get("pieces", {})
+	_tiers = cat.get("tiers", {})
 	var homeworld := not WarInfo.planet(planet_id).is_empty()
 	var side = WarInfo.planet(planet_id).get("owner") if homeworld else _colony().get("faction")
 	if side != null and str(side) != "":
@@ -321,7 +330,7 @@ func _refresh_city() -> void:
 	var ruins := _ruins()
 	for p in _city().get("pieces", []):
 		var id := int(p.id)
-		var key := "%s:%d:%d:%d:%s" % [p.type, int(p.x), int(p.z), int(p.rot), ruins]
+		var key := "%s:%d:%d:%d:%s:%d" % [p.type, int(p.x), int(p.z), int(p.rot), ruins, int(p.get("tier", 1))]
 		want[id] = true
 		var have: Dictionary = _pieces.get(id, {})
 		if have.get("key", "") == key:
@@ -356,6 +365,8 @@ func _refresh_city() -> void:
 	if _inside >= 0 and not _pieces.has(_inside):
 		_leave_inside() # the building was taken up around you
 	_mark_picked()
+	if building and _picked >= 0 and str(_piece(_picked).get("type", "")).begins_with("zone_"):
+		_set_status(_picked_text()) # its tier and needs may have moved on
 
 
 func _drop_piece(id: int) -> void:
@@ -411,50 +422,30 @@ func _parts_of(look: String) -> Array:
 	return out
 
 
-## How a piece is drawn: its type, or for a zone lot one of the faction's looks for it
-## ("zone_low_3"), always the same one for the same piece.
-func _look(type: String, id: int) -> String:
+## How a piece is drawn: its type, or for a zone lot one of the faction's looks for it at the
+## lot's tier ("zone_low_3_t2"). The look is always the same one for the same piece, so a lot
+## keeps its character as it grows.
+func _look(type: String, id: int, tier := 1) -> String:
 	if not type.begins_with("zone_"):
 		return type
 	if not _looks.has(type):
 		var count := 0
-		while _style != "" and ResourceLoader.exists(STYLE_PATH % [_style, "%s_%d" % [type, count + 1]]):
+		while _style != "" and ResourceLoader.exists(STYLE_PATH % [_style, "%s_%d_t1" % [type, count + 1]]):
 			count += 1
 		_looks[type] = count
 	var n: int = _looks[type]
-	return type if n == 0 else "%s_%d" % [type, 1 + ((id * 2654435761) >> 8) % n]
+	if n == 0:
+		return type
+	return "%s_%d_t%d" % [type, 1 + ((id * 2654435761) >> 8) % n, clampi(tier, 1, int(_tiers.get("top", 5)))]
 
 
-## The piece type a look belongs to.
+## The piece type a look belongs to ("zone_low_3_t2" is a "zone_low").
 func _type_of(look: String) -> String:
-	return look if _catalog.has(look) else look.substr(0, look.rfind("_"))
+	var parts := look.split("_")
+	while parts.size() > 1 and not _catalog.has("_".join(parts)):
+		parts.remove_at(parts.size() - 1)
+	return "_".join(parts)
 
-
-func _collect(n: Node, xf: Transform3D, out: Array) -> void:
-	var here := xf * (n as Node3D).transform if n is Node3D else xf
-	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
-		var mi := n as MeshInstance3D
-		var mat: Material = mi.material_override
-		if mat == null and mi.mesh.get_surface_count() == 1:
-			mat = mi.get_surface_override_material(0)
-		var box := here * mi.mesh.get_aabb()
-		# A Blender model's small parts come joined in one mesh called "detail".
-		var small := box.get_longest_axis_size() <= SMALL_PART or str(mi.name).begins_with("detail")
-		out.append({"mesh": mi.mesh, "material": mat, "xf": here, "small": small})
-	for c in n.get_children():
-		_collect(c, here, out)
-
-
-## A piece's width and depth in cells, as turned.
-func _size(type: String, rot: int) -> Vector2i:
-	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
-	return Vector2i(int(info.d), int(info.w)) if rot % 2 == 1 else Vector2i(int(info.w), int(info.d))
-
-
-## The middle of a piece standing at cell (x, z), on the ground.
-func _centre(type: String, x: int, z: int, rot: int) -> Vector3:
-	var s := _size(type, rot)
-	return Vector3((x + s.x * 0.5) * _cell, 0, (z + s.y * 0.5) * _cell)
 
 
 ## A piece's place in the city: where it draws (its transform and batch) and what you bump into.
@@ -467,7 +458,7 @@ func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
 	var basis := Basis(Vector3.UP, rot * PI * 0.5)
 	if ruins and not type in GROUND_PIECES:
 		basis = basis * Basis.from_scale(Vector3(1.0, 0.3, 1.0)) # tumbled down
-	var batch := "%s@%d,%d" % [_look(type, int(p.id)), floori(float(x) / CHUNK), floori(float(z) / CHUNK)]
+	var batch := "%s@%d,%d" % [_look(type, int(p.id), int(p.get("tier", 1))), floori(float(x) / CHUNK), floori(float(z) / CHUNK)]
 	var solid: Node3D = null
 	if not type in GROUND_PIECES:
 		var s := _size(type, rot)
@@ -632,7 +623,8 @@ func _door_cell(at: Vector3) -> Vector2i:
 
 func _piece_name(id: int) -> String:
 	var type := str(_pieces.get(id, {}).get("type", ""))
-	return str(_catalog.get(type, {}).get("name", "building"))
+	var label := str(_catalog.get(type, {}).get("name", "building"))
+	return "%s, tier %d" % [label, int(_piece(id).get("tier", 1))] if type.begins_with("zone_") else label
 
 
 ## Keeps the door F-point on the nearest door within reach, so thousands of doors cost one check.
@@ -673,6 +665,9 @@ func _enter_door() -> void:
 	_inside_root = scene.instantiate() as Node3D
 	_inside_root.transform = Transform3D(Basis(Vector3.UP, xf.basis.get_euler().y), Vector3(xf.origin.x, -INSIDE_DEPTH - 100.0 * (id % INSIDE_LEVELS), xf.origin.z))
 	add_child(_inside_root)
+	_screens.clear()
+	_screen_turn = id # so next door's displays start on other pictures
+	_screen_wait = POSTER_SECONDS
 	_furnish(_inside_root)
 	_inside_spawn = Marker3D.new()
 	_inside_spawn.position = Vector3(0, 0.1, 0)
@@ -682,11 +677,35 @@ func _enter_door() -> void:
 	_say("You go into the %s." % _piece_name(id), 3.0)
 
 
+## The faction's propaganda, for the displays inside its buildings (none if it has made none).
+func _propaganda() -> Array:
+	if _posters == null:
+		_posters = []
+		while _style != "" and ResourceLoader.exists(POSTER_PATH % [_style, _posters.size() + 1]):
+			_posters.append(load(POSTER_PATH % [_style, _posters.size() + 1]))
+	return _posters
+
+
+## Puts each display on its picture: the displays in a room show different ones, and all move on
+## to the next together.
+func _show_posters() -> void:
+	var posters := _propaganda()
+	for i in _screens.size():
+		_screens[i].albedo_texture = posters[(_screen_turn + i) % posters.size()]
+
+
 ## Makes a loaded inside walkable: everything but its small details is solid, its lamps are lit,
-## and its "exit" leads back out.
+## its displays ("screen...") show the faction's propaganda, and its "exit" leads back out.
 func _furnish(n: Node) -> void:
 	var label := str(n.name)
-	if n is MeshInstance3D and (n as MeshInstance3D).mesh and not label.begins_with("detail"):
+	if n is MeshInstance3D and label.begins_with("screen"):
+		if not _propaganda().is_empty():
+			var lit := StandardMaterial3D.new()
+			lit.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED # a screen is its own light
+			(n as MeshInstance3D).material_override = lit
+			_screens.append(lit)
+			_show_posters()
+	elif n is MeshInstance3D and (n as MeshInstance3D).mesh and not label.begins_with("detail"):
 		var body := StaticBody3D.new()
 		var shape := CollisionShape3D.new()
 		shape.shape = (n as MeshInstance3D).mesh.create_trimesh_shape()
@@ -713,6 +732,7 @@ func _leave_inside() -> void:
 	_inside_use = {}
 	_inside_root.queue_free()
 	_inside_root = null
+	_screens.clear()
 	_inside_spawn = null
 	if not _pieces.has(id) or _pieces[id].door == null:
 		_stand_at(_arrival)
@@ -1103,6 +1123,7 @@ func _show_tip(type: String, why: String) -> void:
 			_look(type, 0) # counts the faction's looks for it
 			var looks := int(_looks.get(type, 0))
 			lines.append("Hold and drag to zone a street" + (": each lot gets one of %d homes" % looks if looks > 1 else ""))
+			lines.append("Homes grow through %d tiers as their needs are met" % int(_tiers.get("top", 5)))
 	if why != "":
 		lines.append(why)
 	_tip.text = "\n".join(lines)
@@ -1128,6 +1149,12 @@ func _tick(delta: float) -> void:
 		_clear_armed -= delta
 	if not building:
 		_track_door()
+		if not _screens.is_empty():
+			_screen_wait -= delta
+			if _screen_wait <= 0.0:
+				_screen_wait = POSTER_SECONDS
+				_screen_turn += 1
+				_show_posters()
 		return
 	var pan := Vector2.ZERO
 	if not _typing():
@@ -1238,8 +1265,9 @@ func _click() -> void:
 	_picked = _piece_at(Vector2i(floori(at.x), floori(at.y)))
 	if _picked >= 0:
 		_rot = int(_piece(_picked).rot)
-		var info: Dictionary = _catalog.get(str(_piece(_picked).type), {})
-		_set_status("%s picked: R turns it, M moves it, X takes it up." % info.get("name", "Piece"))
+		_set_status(_picked_text())
+		if str(_piece(_picked).get("type", "")).begins_with("zone_"):
+			Net.send({"type": "city_get", "planet": planet_id}) # how far it has grown since we last asked
 	else:
 		_set_status("")
 	_mark_picked()
@@ -1316,6 +1344,56 @@ func _copy_city() -> void:
 	Net.send({"type": "city_copy", "from": str(_copy_from.get_item_metadata(_copy_from.selected)), "planet": planet_id})
 	_undo.clear()
 	_set_status("Copied: this city now matches %s." % _copy_from.get_item_text(_copy_from.selected))
+
+
+## The status line for the picked piece; for a housing lot, its tier and what it needs next.
+func _picked_text() -> String:
+	var p := _piece(_picked)
+	var info: Dictionary = _catalog.get(str(p.get("type", "")), {})
+	var text := "%s picked: R turns it, M moves it, X takes it up." % info.get("name", "Piece")
+	if str(p.get("type", "")).begins_with("zone_"):
+		text += "\n" + _lot_text(p)
+	return text
+
+
+## A housing lot's tier, which way it is heading, and what would carry it a tier further: the
+## server's rule (cities.ts targetTier) put into words.
+func _lot_text(p: Dictionary) -> String:
+	var top := int(_tiers.get("top", 5))
+	var tier := int(p.get("tier", 1))
+	var target := int(p.get("target", tier))
+	var grow := float(p.get("grow", 0.0))
+	var text := "Tier %d of %d" % [tier, top]
+	if target > tier:
+		text += ", growing: %d%% of the way to tier %d" % [roundi(clampf(grow, 0.0, 1.0) * 100.0), tier + 1]
+	elif target < tier:
+		text += ", in decline: %d%% of the way down to tier %d" % [roundi(clampf(-grow, 0.0, 1.0) * 100.0), tier - 1]
+	elif tier >= top:
+		text += ", at its height"
+	else:
+		text += ", settled"
+	if target >= top:
+		return text + ". Every need is met."
+	var needs: Array = p.get("needs", [0, 0, 0, 0, 0])
+	var want := PackedStringArray()
+	match target:
+		1:
+			if float(needs[0]) <= 0.0:
+				want.append("a road at its edge")
+			if float(needs[1]) <= 0.0:
+				want.append("a power plant on its roads")
+		2:
+			for i in [2, 3]:
+				if float(needs[i]) <= 0.0:
+					want.append(NEED_NAMES[i] + " in reach by road")
+		_:
+			var bar := 0.5 if target == 3 else 0.8
+			if float(needs[4]) <= 0.0:
+				want.append("a park or plaza nearby")
+			for i in ([1, 2, 3] if target == 3 else [1, 2, 3, 4]):
+				if float(needs[i]) < bar and not (i == 4 and float(needs[i]) <= 0.0):
+					want.append("%s closer (it reaches here at %d%%, tier %d wants %d%%)" % [NEED_NAMES[i], roundi(float(needs[i]) * 100.0), target + 1, roundi(bar * 100.0)])
+	return "%s. For tier %d it needs %s." % [text, target + 1, " and ".join(want)]
 
 
 ## A light box over the picked piece, so you can see what R, M and X act on.

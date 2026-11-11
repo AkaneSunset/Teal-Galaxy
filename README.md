@@ -977,21 +977,43 @@ origin on the ground in the middle, front toward Blender's +Y (Godot's -Z), with
 joined into a "detail" mesh. To rebuild them, with Blender installed:
 `blender -b -P tools/blender/city_models.py -- compact` (or with the `bpy` module from pip:
 `python tools/blender/city_models.py compact`); add `--render DIR` for a picture of each piece, or
-`--sheet DIR` for one picture of the faction's zone housing. `kit.py` holds the shared parts and
-materials, `housing.py` the zone housing. The Terran Compact has the Government Hall, Tower Block,
+`--sheet DIR` for pictures of the faction's zone housing (every look, and three looks growing through
+their tiers). `kit.py` holds the shared parts and materials, `housing.py` the zone housing. The Terran Compact has the Government Hall, Tower Block,
 High-rise, Road, Plaza, Wall and Turret so far; all four factions have their zone housing.
 
 **Housing zones.** Low-density housing (a 2x2 lot) and High-density housing (3x3) are in the
 builder's Zones group. Hold the button and drag to zone a street, like laying a road: every lot that
-fits is placed. Each lot is drawn as one of its faction's homes for that density, six looks each
-(`zone_low_1.glb` ... `zone_high_6.glb`), picked from the piece's id so everyone sees the same
-street and a lot keeps its look when moved. The Compact get barracks rows, bunker houses and plate
+fits is placed. Each lot is drawn as one of its faction's homes for that density, six looks each,
+picked from the piece's id so everyone sees the same street and a lot keeps its look when moved. The Compact get barracks rows, bunker houses and plate
 huts, and stepped towers, twin slabs and court blocks; the Ashen hive clusters, pods on legs and
 thorn longhouses, and needles, spire knots, stacked hives and great hives; the Luminar spire
 clusters, chapel houses and terraces, and cathedral needles, blade pyramids and twin spires; the
 Coma shells, floating homes and ringed domes, and twisting needles, stacked discs and thorned
 keeps. Zones are free and are scenery for now: on a colony they don't house anyone yet (habitat
 blocks do).
+
+**Tiers.** The building on a housing lot grows as its occupants' needs are met, from tier 1 to 5,
+and slips back when they stop being met. The needs are a road at the lot's edge, and four services
+that reach it along the roads, at full strength close by and fading to nothing at their reach:
+
+| Need | From | Full strength within | Reaches |
+| --- | --- | --- | --- |
+| Power | Power plant | 300 m by road | 900 m |
+| Safety | Precinct | 150 m | 500 m |
+| Care | Clinic | 150 m | 500 m |
+| Leisure | Park or plaza | 60 m (or within two cells, road or no) | 240 m |
+
+Tier 2 needs a road and power; tier 3 a precinct and a clinic in reach as well; tier 4 leisure in
+reach, with power, safety and care at half strength or better; tier 5 all four at 80% or better. A
+lot climbs one tier for every 12 hours its needs carry it higher and slips one for every 24 hours
+they fall short (hours are `FR.hourMs`, so the test clock speeds them up). Distance is by road for
+now; traffic will slow it once people drive the roads. Each look is modelled at every tier
+(`zone_low_3_t1.glb` ... `zone_low_3_t5.glb`): tier 1 is the bare start (fewer units, a short tower,
+no trimmings), each tier adds height, units and ornament, and a post at the front of the lot wears
+the tier as lit marks. In the builder, pick a lot to read its tier, how far along it is and what
+the next tier needs; the door prompt gives the tier too. `city` pieces carry `tier`, `grow`
+(-1 to 1), `needs` ([road, power, safety, care, leisure], each 0 to 1) and `target` for zone lots,
+and the rule numbers are in the catalog as `cities.tiers`.
 
 **Going inside.** A building whose faction has an inside for it has a door at the middle of its
 front: walk up, press F, and you are inside; the door behind you leads back out. An inside is its
@@ -1003,6 +1025,16 @@ the "detail" mesh), and markers named `exit` and `light...` place the way out an
 Terran Compact has the Government Hall (gatehouse, great hall, council chamber), a barracks home
 for low-density lots and a flat block (lobby, corridor, a flat) for high-density lots, Tower Blocks,
 High-rises and Habitat blocks. Windows are light panels for now, with no view of the city.
+
+**Propaganda.** Every faction has four posters (`game/city/<faction>/propaganda/poster_<n>.png`,
+512 x 768): a monument, its emblem, its skyline by night and a notice. `tools/blender/propaganda.py`
+makes them: the buildings on them are the faction's own models rendered in Blender and cut down to
+flat inks, and the rest is drawn with Pillow (`python tools/blender/propaganda.py [faction]
+[--sheet DIR]`, after the models are built). They show on the displays in the common rooms of the
+faction's buildings: gatehouses, halls, lobbies, corridors, and over a home's mess table. A display
+is part of the inside's model (`kit.display`): a frame, and a mesh named `screen...` that the game
+puts the pictures on, each display starting on a different one and all moving on every 14 seconds.
+The displays are in every Compact inside; the other factions' posters are ready for their insides.
 
 **Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
 each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop

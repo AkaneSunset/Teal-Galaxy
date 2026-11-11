@@ -1250,6 +1250,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       if (C.tick(galaxy, now())) changed();
       if (O.tick(galaxy, pay, now())) changed();
       if (FR.tick(galaxy, now())) changed();
+      if (CI.tick(galaxy, now())) changed();
     } catch (err) {
       console.error('error in the galaxy tick:', err);
     }

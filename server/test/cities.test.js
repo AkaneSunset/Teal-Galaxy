@@ -112,3 +112,75 @@ test('housing zones are lots anyone may lay, on homeworlds and colonies', () => 
   assert.match(CI.place(g, ADMIN, 'bastion', 'zone_high', 1, 1, 0, 1).reason, /Low-density housing is in the way/);
   assert.ok(CI.place(g, ADMIN, 'bastion', 'zone_high', 4, 0, 0, 1).ok);
 });
+
+// A street along z = 0 from x = `from` to x = `to`, for the tier tests.
+function street(g, from, to) {
+  for (let x = from; x <= to; x++) assert.ok(CI.place(g, ADMIN, 'bastion', 'road', x, 0, 0, 1).ok);
+}
+const HOUR = FR.hourMs();
+const lotOf = (g, id) => CI.view(g, 'bastion').pieces.find((p) => p.id === id);
+
+test('a lot needs a road, then power, safety, care and leisure to carry it up the tiers', () => {
+  const g = G.newGalaxy();
+  const lot = CI.place(g, ADMIN, 'bastion', 'zone_low', -58, 1, 0, 1).piece;
+  assert.deepStrictEqual(lotOf(g, lot).needs, [0, 0, 0, 0, 0]);
+  assert.strictEqual(lotOf(g, lot).target, 1);
+  street(g, -58, 10);
+  assert.ok(CI.place(g, ADMIN, 'bastion', 'power', -54, 1, 0, 1).ok);
+  assert.deepStrictEqual(lotOf(g, lot).needs, [1, 1, 0, 0, 0]);
+  assert.strictEqual(lotOf(g, lot).target, 2);
+  assert.ok(CI.place(g, ADMIN, 'bastion', 'precinct', -50, 1, 0, 1).ok);
+  const far = CI.place(g, ADMIN, 'bastion', 'clinic', 2, 1, 0, 1).piece; // 59 cells off by road: out of reach
+  assert.ok(far);
+  assert.strictEqual(lotOf(g, lot).target, 2);
+  assert.ok(CI.move(g, ADMIN, 'bastion', far, -18, 1, 0, 2).ok); // 39 cells: in reach, but weak
+  assert.ok(lotOf(g, lot).needs[3] > 0 && lotOf(g, lot).needs[3] < 0.5);
+  assert.strictEqual(lotOf(g, lot).target, 3);
+  assert.ok(CI.move(g, ADMIN, 'bastion', far, -46, 1, 0, 3).ok);
+  assert.strictEqual(lotOf(g, lot).target, 3); // strong services, but nothing to do
+  assert.ok(CI.place(g, ADMIN, 'bastion', 'park', -58, 3, 0, 4).ok); // next door
+  assert.deepStrictEqual(lotOf(g, lot).needs, [1, 1, 1, 1, 1]);
+  assert.strictEqual(lotOf(g, lot).target, 5);
+});
+
+test('services reach along the roads, not through the air', () => {
+  const g = G.newGalaxy();
+  const lot = CI.place(g, ADMIN, 'bastion', 'zone_high', 0, 1, 0, 1).piece;
+  CI.place(g, ADMIN, 'bastion', 'road', 0, 0, 0, 1);
+  CI.place(g, ADMIN, 'bastion', 'power', 3, 1, 0, 1); // right beside the lot, on no road
+  assert.strictEqual(lotOf(g, lot).needs[1], 0);
+  for (let x = 1; x <= 4; x++) CI.place(g, ADMIN, 'bastion', 'road', x, 0, 0, 1);
+  assert.strictEqual(lotOf(g, lot).needs[1], 1);
+});
+
+test('lots climb a tier at a time while their needs are met, and slip back when they are not', () => {
+  const g = G.newGalaxy();
+  street(g, 0, 12);
+  const lot = CI.place(g, ADMIN, 'bastion', 'zone_low', 0, 1, 0, 1).piece;
+  const plant = CI.place(g, ADMIN, 'bastion', 'power', 3, 1, 0, 1).piece;
+  CI.place(g, ADMIN, 'bastion', 'precinct', 8, 1, 0, 1);
+  CI.place(g, ADMIN, 'bastion', 'clinic', 0, -3, 0, 1);
+  let now = 1000;
+  assert.strictEqual(CI.tick(g, now), false); // the first tick only starts the clock
+  now += (CI.GROW_HOURS / 2) * HOUR;
+  assert.strictEqual(CI.tick(g, now), false);
+  assert.strictEqual(lotOf(g, lot).tier, 1);
+  assert.strictEqual(lotOf(g, lot).grow, 0.5);
+  now += (CI.GROW_HOURS / 2) * HOUR;
+  assert.strictEqual(CI.tick(g, now), true);
+  assert.strictEqual(lotOf(g, lot).tier, 2);
+  assert.strictEqual(g.cities.bastion.updated, now); // the apps fetch the city again
+  now += CI.GROW_HOURS * HOUR;
+  CI.tick(g, now);
+  assert.strictEqual(lotOf(g, lot).tier, 3);
+  now += CI.GROW_HOURS * HOUR;
+  CI.tick(g, now);
+  assert.strictEqual(lotOf(g, lot).tier, 3); // no park: tier 3 is as far as these needs carry it
+  CI.remove(g, ADMIN, 'bastion', plant, now); // the power goes
+  assert.strictEqual(lotOf(g, lot).target, 1);
+  for (let i = 0; i < 4; i++) {
+    now += (CI.DECLINE_HOURS / 2) * HOUR;
+    CI.tick(g, now);
+  }
+  assert.strictEqual(lotOf(g, lot).tier, 1);
+});

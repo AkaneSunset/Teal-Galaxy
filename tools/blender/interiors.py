@@ -5,12 +5,14 @@ inside_<piece>_<n>.glb where a piece has several). You come in at the origin loo
 door back out is behind you, and the floor's top is z = 0. Rooms are built from thick slabs (floors,
 walls with doorways, ceilings) so the game can stand you on them and stop you at them: it makes
 everything but the "detail" mesh solid. Markers say where the way out is ("exit") and where the
-lamps hang ("light1", "light2"...).
+lamps hang ("light1", "light2"...). The common rooms (gatehouses, halls, lobbies, corridors, a
+home's mess) have displays on their walls (kit.display): the game shows the faction's propaganda
+on them (tools/blender/propaganda.py makes the pictures).
 """
 
 import math
 
-from kit import box, cyl, marker, ring, text, wall
+from kit import box, cyl, display, marker, ring, text, wall
 
 
 def shell(x0, x1, y0, y1, h, floor, ceil, z=0.0):
@@ -65,6 +67,8 @@ def compact_hall(M):
     way_out(M, 3)
     for s in (-1, 1):
         box((0.25, 7.5, 0.25), (s * 4.6, -1.5, 2.2), M["blue"])
+    for s in (-1, 1):  # displays either side of the way into the hall
+        display(M, (s * 4.0, -5.8, 1.3), "+y")
     marker("light1", (0, -1.5, 4.2))
     # The great hall.
     shell(-15, 15, -50, -6, 18, M["deck"], M["navy"])
@@ -89,6 +93,8 @@ def compact_hall(M):
             box((0.15, 3.2, 8.0), (s * 14.7, y, 6.0), M["slate"])
             box((0.1, 2.0, 0.5), (s * 14.6, y, 11.5), M["white"], detail=True)
             box((0.1, 1.2, 0.5), (s * 14.6, y, 10.5), M["white"], detail=True)
+            if i % 2 == 0:  # a display under every other banner
+                display(M, (s * 14.8, y, 1.5), "-x" if s > 0 else "+x", w=1.3, h=1.95)
     for i in range(5):  # benches either side of the aisle
         y = -12.0 - i * 5.0
         for s in (-1, 1):
@@ -152,6 +158,7 @@ def compact_home(M, mirror=1):
     box((1.2, 1.2, 1.0), (s * 3.5, -11.8, 0), M["steel"], bevel=0.08)
     box((1.0, 1.0, 0.9), (s * 3.3, -11.7, 1.0), M["slate"], bevel=0.08)
     box((1.2, 1.2, 1.0), (s * 1.9, -12.0, 0), M["steel"], bevel=0.08)
+    display(M, (-s * 4.8, -4.25, 1.15), "+x" if s > 0 else "-x", w=0.6, h=0.9)  # over the mess table
     marker("light1", (0, -3.5, 2.8))
     marker("light2", (0, -11.0, 2.8))
 
@@ -175,6 +182,9 @@ def compact_flats(M, mirror=1):
         box((0.1, 0.3, 0.2), (-s * 6.6, y, 3.2), M["amber"], detail=True)
     text("BLOCK B", 0.9, (-3.5, -9.75, 3.8), M["white"])
     box((6.0, 0.15, 0.25), (3.6, -9.7, 3.8), M["blue"])
+    for side in (-1, 1):  # displays either side of the corridor's mouth, and one by the desk
+        display(M, (side * 4.2, -9.8, 1.25), "+y")
+    display(M, (s * 6.8, -3.0, 1.3), "-x" if s > 0 else "+x")
     marker("light1", (0, -4.0, 4.3))
     # The corridor.
     shell(-1.6, 1.6, -32, -10, 3.0, M["deck"], M["slate"])
@@ -189,6 +199,8 @@ def compact_flats(M, mirror=1):
             box((0.12, 1.3, 2.2), (side * 1.38, y, 0), M["dark"])
             box((0.08, 0.5, 0.3), (side * 1.36, y + 1.0, 1.6), M["white"], detail=True)
         box((0.25, 1.2, 0.08), (0, y - 2.0, 2.9), M["blue"], detail=True)
+    for side, y in ((-1, -15.0), (1, -19.0), (-1, -23.0), (1, -27.0)):  # small displays between the doors
+        display(M, (side * 1.4, y, 1.15), "-x" if side > 0 else "+x", w=0.6, h=0.9)
     box((2.4, 0.12, 1.2), (0, -31.75, 1.2), M["blue"])  # the window at the corridor's end
     marker("light2", (0, -18.0, 2.6))
     marker("light3", (0, -27.0, 2.6))
