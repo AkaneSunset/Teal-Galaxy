@@ -1,0 +1,77 @@
+{
+	"_about": "Which texture set (game/textures/<set>) each material wears, and how many metres one tile spans. Groups: models (ships, base buildings, raid facilities and stand-ins, by models.gd material kind), place (walk-in rooms in stations, carriers and bases), and one per faction for its Blender city models and insides (by Blender material name). An entry is a set name, or {set, tile, glow}: glow is the colour its glow map lights up in (a material that glows already keeps its own colour).",
+	"sets": {
+		"hull_panels": 4.0,
+		"trim_plates": 2.0,
+		"brushed_steel": 2.0,
+		"deck_plate": 2.5,
+		"grip_dark": 1.0,
+		"glass": 3.0,
+		"window_lights": 3.0,
+		"light_panel": 1.0,
+		"rock": 8.0,
+		"ice": 5.0,
+		"armour_plate": 6.0,
+		"hazard_stripes": 2.0,
+		"ferrocrete": 6.0,
+		"chitin": 5.0,
+		"moss": 4.0,
+		"vein_glow": 3.0,
+		"ceramic_plates": 8.0,
+		"crystal": 2.0,
+		"gunmetal_traces": 6.0,
+		"hammered_gold": 1.5
+	},
+	"models": {
+		"teal": "hull_panels",
+		"teal_light": "hull_panels",
+		"paint": {"set": "hull_panels", "tile": 12.0},
+		"navy": "trim_plates",
+		"steel": "brushed_steel",
+		"ore": "brushed_steel",
+		"deck": "deck_plate",
+		"dark": "grip_dark",
+		"glass": "glass",
+		"window": "window_lights",
+		"amber": "light_panel",
+		"rock": "rock",
+		"ice": "ice"
+	},
+	"place": {
+		"floor": "deck_plate",
+		"wall": {"set": "trim_plates", "tile": 3.0},
+		"glass": "glass"
+	},
+	"compact": {
+		"navy": "armour_plate",
+		"slate": "armour_plate",
+		"steel": "brushed_steel",
+		"deck": "deck_plate",
+		"white": "ferrocrete",
+		"hazard": "hazard_stripes",
+		"dark": "grip_dark",
+		"blue": "window_lights",
+		"amber": "light_panel"
+	},
+	"ashen": {
+		"black": "chitin",
+		"char": {"set": "chitin", "tile": 3.0},
+		"moss": "moss",
+		"red": "vein_glow",
+		"core": "vein_glow"
+	},
+	"luminar": {
+		"pale": {"set": "ceramic_plates", "glow": "#4fd992"},
+		"grey": {"set": "ceramic_plates", "tile": 5.0, "glow": "#4fd992"},
+		"deck": "deck_plate",
+		"green": "light_panel",
+		"crystal": "crystal"
+	},
+	"coma": {
+		"gun": {"set": "gunmetal_traces", "glow": "#f0b545"},
+		"black": {"set": "gunmetal_traces", "tile": 4.0, "glow": "#f0b545"},
+		"goldm": "hammered_gold",
+		"gold": "light_panel",
+		"light": "light_panel"
+	}
+}

@@ -13,6 +13,8 @@ const STEEL := Color(0.5, 0.53, 0.58)
 const ROCK := Color(0.56, 0.63, 0.74)
 const SILVER := Color(0.86, 0.88, 0.92)
 
+const Surfaces := preload("res://surfaces.gd")
+
 static var _materials := {}
 
 ## Every ship has an exit ramp. Where each model's ramp folds out, in the model's own space: the hatch
@@ -96,6 +98,8 @@ static func material(kind: String) -> StandardMaterial3D:
 			m.emission_enabled = true
 			m.emission = Color(0.45, 0.85, 1.0)
 			m.emission_energy_multiplier = 1.4
+	# Its textures (panels, tread plate, brushed steel...), from res://textures/surfaces.json.
+	Surfaces.apply(m, "models", "paint" if kind.begins_with("paint:") else kind)
 	_materials[kind] = m
 	return m
 

@@ -447,6 +447,51 @@ func _type_of(look: String) -> String:
 	return "_".join(parts)
 
 
+## Gathers every mesh in a model with where it sits, for drawing in batches. A Blender model's
+## materials get their faction's textures (see surfaces.gd).
+func _collect(n: Node, xf: Transform3D, out: Array) -> void:
+	var here := xf * (n as Node3D).transform if n is Node3D else xf
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
+		var mi := n as MeshInstance3D
+		var mesh := _textured(mi.mesh)
+		var mat: Material = mi.material_override
+		if mat == null and mesh.get_surface_count() == 1:
+			mat = mi.get_surface_override_material(0)
+		var box := here * mesh.get_aabb()
+		# A Blender model's small parts come joined in one mesh called "detail".
+		var small := box.get_longest_axis_size() <= SMALL_PART or str(mi.name).begins_with("detail")
+		out.append({"mesh": mesh, "material": mat, "xf": here, "small": small})
+	for c in n.get_children():
+		_collect(c, here, out)
+
+
+## `mesh` with each of its materials swapped for the faction's textured one (a copy of the mesh,
+## or the mesh itself if none of them has textures listed).
+func _textured(mesh: Mesh) -> Mesh:
+	if not mesh is ArrayMesh:
+		return mesh
+	var copy: ArrayMesh = null
+	for i in mesh.get_surface_count():
+		var m := mesh.surface_get_material(i)
+		var dressed := Surfaces.shared(m, _style, m.resource_name if m else "")
+		if dressed != m:
+			if copy == null:
+				copy = mesh.duplicate() as ArrayMesh
+			copy.surface_set_material(i, dressed)
+	return copy if copy else mesh
+
+
+## A piece's width and depth in cells, as turned.
+func _size(type: String, rot: int) -> Vector2i:
+	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
+	return Vector2i(int(info.d), int(info.w)) if rot % 2 == 1 else Vector2i(int(info.w), int(info.d))
+
+
+## The middle of a piece standing at cell (x, z), on the ground.
+func _centre(type: String, x: int, z: int, rot: int) -> Vector3:
+	var s := _size(type, rot)
+	return Vector3((x + s.x * 0.5) * _cell, 0, (z + s.y * 0.5) * _cell)
+
 
 ## A piece's place in the city: where it draws (its transform and batch) and what you bump into.
 func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
@@ -694,10 +739,13 @@ func _show_posters() -> void:
 		_screens[i].albedo_texture = posters[(_screen_turn + i) % posters.size()]
 
 
-## Makes a loaded inside walkable: everything but its small details is solid, its lamps are lit,
-## its displays ("screen...") show the faction's propaganda, and its "exit" leads back out.
+## Makes a loaded inside walkable: its surfaces get their textures, everything but its small details
+## is solid, its lamps are lit, its displays ("screen...") show the faction's propaganda, and its
+## "exit" leads back out.
 func _furnish(n: Node) -> void:
 	var label := str(n.name)
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh and not label.begins_with("screen"):
+		(n as MeshInstance3D).mesh = _textured((n as MeshInstance3D).mesh) # the faction's textures
 	if n is MeshInstance3D and label.begins_with("screen"):
 		if not _propaganda().is_empty():
 			var lit := StandardMaterial3D.new()

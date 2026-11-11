@@ -204,6 +204,7 @@ def sheet(path, faction, columns):
     bpy.context.object.data.energy = 3.0
     bpy.ops.mesh.primitive_plane_add(size=900, location=(0, 0, -0.05))
     bpy.context.object.data.materials.append(kit.mat("ground", "#3a3f44", metal=0, rough=0.9))
+    kit.texture_scene(faction)
     bpy.ops.object.camera_add(location=(60, 235, 105))
     cam = bpy.context.object
     target = bpy.data.objects.new("target", None)

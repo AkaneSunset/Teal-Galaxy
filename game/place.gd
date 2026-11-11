@@ -25,6 +25,7 @@ extends Node3D
 
 const System := preload("res://teal_prime.gd")
 const Models := preload("res://models.gd")
+const Surfaces := preload("res://surfaces.gd")
 const ChatBox := preload("res://chat_box.gd")
 const WarInfo := preload("res://war_info.gd")
 const Walkers := preload("res://walkers.gd")
@@ -128,8 +129,10 @@ func _location() -> String:
 
 # --- Materials and building blocks ---------------------------------------------------------
 
-func _mat(colour: Color, glow := 0.0, alpha := 1.0) -> StandardMaterial3D:
-	var key := "%s/%s/%s" % [colour, glow, alpha]
+## A material in `colour`. `surface` names what it is ("floor", "wall"), which picks its textures
+## from res://textures/surfaces.json; glowing strips stay plain light.
+func _mat(colour: Color, glow := 0.0, alpha := 1.0, surface := "") -> StandardMaterial3D:
+	var key := "%s/%s/%s/%s" % [colour, glow, alpha, surface]
 	if _mats.has(key):
 		return _mats[key]
 	var m := StandardMaterial3D.new()
@@ -143,6 +146,8 @@ func _mat(colour: Color, glow := 0.0, alpha := 1.0) -> StandardMaterial3D:
 		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		m.roughness = 0.05
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if surface != "":
+		Surfaces.apply(m, "place", "glass" if alpha < 1.0 else surface)
 	_mats[key] = m
 	return m
 
@@ -151,7 +156,7 @@ func _mat(colour: Color, glow := 0.0, alpha := 1.0) -> StandardMaterial3D:
 func _box(parent: Node3D, size: Vector3, pos: Vector3, colour: Color, solid := true, glow := 0.0, alpha := 1.0, rot := Vector3.ZERO) -> Node3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
-	mesh.material = _mat(colour, glow, alpha)
+	mesh.material = _mat(colour, glow, alpha, Surfaces.box_surface(size, glow))
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	if alpha < 1.0:
@@ -177,7 +182,7 @@ func _cyl(parent: Node3D, radius: float, height: float, pos: Vector3, colour: Co
 	mesh.bottom_radius = radius
 	mesh.height = height
 	mesh.radial_segments = sides
-	mesh.material = _mat(colour, glow)
+	mesh.material = _mat(colour, glow, 1.0, "" if glow > 0.0 else "wall")
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	var node: Node3D = mi
