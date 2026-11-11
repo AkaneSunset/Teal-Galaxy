@@ -934,8 +934,9 @@ the carrier docks next.
 
 Cities are built on PC, with one city builder for two kinds of world: a Founder's terraformed
 Frontier world, and the factions' homeworlds (the capital worlds: Bastion, Anvil, Shade, Hollow,
-Radiance, Glimmer), which the game's admins lay out. The Coma Conglomerate is never playable and
-has no worlds players travel to, so it gets no cities and no building designs. The phone keeps its base and
+Radiance, Glimmer), which the game's admins lay out. The Coma Conglomerate is never playable: its
+space (Comae, with Nadir and Zenith) is closed to every player, and only admins jump there or land, to
+run server events. No player ever sees Coma cities. The phone keeps its base and
 outposts. A city is a 1.2 km square of 10 m cells (server/cities.ts); every piece covers a block of
 cells and can be turned a quarter at a time: roads, plazas and parks, towers and high-rises, civic
 buildings, industry, walls and turrets.

@@ -197,7 +197,7 @@ function createSpaces({ isStation, isSurface, isCity = () => false, berthsOpen =
       return { ok: true, copy: ONE_COPY };
     }
     if (kind === 'city') {
-      if (!isCity(id)) return fail('no such city');
+      if (!isCity(id, me)) return fail('no such city');
       return { ok: true, copy: ONE_COPY };
     }
     return fail('no such space');

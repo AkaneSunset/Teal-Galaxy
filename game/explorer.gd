@@ -2034,7 +2034,7 @@ func _request_frontier_jump(system_id: String) -> void:
 ## A homeworld (a capital world, whose city stands below) whose orbit you're in, or "".
 func _near_city() -> String:
 	for wp in WarInfo.planets_in(System.current):
-		if wp.get("capital", false) and System.distance(System.orbital_pos(str(wp.id)), _pos) < OVER_RANGE:
+		if wp.get("capital", false) and (Net.admin or str(wp.get("owner", "")) != "coma") and System.distance(System.orbital_pos(str(wp.id)), _pos) < OVER_RANGE:
 			return str(wp.id)
 	return ""
 

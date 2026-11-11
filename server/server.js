@@ -228,7 +228,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       return galaxy.system.planets.some((p) => p.id === id && p.kind !== 'satellite');
     },
     isSurface: (id) => galaxy.system.planets.some((p) => p.id === id),
-    isCity: (id) => CI.isHomeworld(galaxy, id) || !!CI.colonyCluster(galaxy, id),
+    isCity: (id, me) => (CI.isHomeworld(galaxy, id) && (me.admin || F.FACTIONS[W.planet(galaxy, id).owner]?.playable !== false)) || !!CI.colonyCluster(galaxy, id),
     berthsOpen: (id) => G.berthsOpen(galaxy, id),
     factionOf: (name) => (Object.hasOwn(galaxy.pilots, name) ? galaxy.pilots[name].faction ?? null : null),
     people: pilots,
@@ -415,6 +415,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     const target = wp ? wp.system : String(msg.system || '');
     const sys = W.system(galaxy, target) || (FR.isFrontierSystem(galaxy, target) ? { id: target, name: target } : null);
     if (!sys) return { ok: false, reason: 'no such system' };
+    // The Coma Conglomerate's space is for admins only: no player ever goes there.
+    if (sys.capitalOf && F.FACTIONS[sys.capitalOf]?.playable === false && !me.admin) return { ok: false, reason: `${sys.name} is closed space` };
     const t = now();
     if ((me.jumpUntil || 0) > t) return { ok: false, reason: 'the carrier is already jumping' };
     // The jump drive's range, in lanes from the system the carrier is in (orbital gates, in the

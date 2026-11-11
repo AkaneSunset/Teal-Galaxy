@@ -84,7 +84,7 @@ function colonyCluster(g: any, planetId: string): any {
 // Why `who` may not build here, or null: admins build on the homeworlds, a Founder on their own
 // living colony.
 function refusal(g: any, who: Who, planetId: string): string | null {
-  if (isHomeworld(g, planetId)) return who.admin ? null : "only the game's admins build on the homeworlds";
+  if (isHomeworld(g, planetId)) return who.admin ? null : "only the game's admins build on the homeworlds"; // the Coma's too, which only admins ever visit
   const c = colonyCluster(g, planetId);
   if (!c) return 'cities are built on terraformed worlds and the homeworlds';
   if (c.owner !== who.name) return 'only its Founder builds this city';
