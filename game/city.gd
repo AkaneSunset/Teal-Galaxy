@@ -447,6 +447,32 @@ func _type_of(look: String) -> String:
 	return "_".join(parts)
 
 
+func _collect(n: Node, xf: Transform3D, out: Array) -> void:
+	var here := xf * (n as Node3D).transform if n is Node3D else xf
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh:
+		var mi := n as MeshInstance3D
+		var mat: Material = mi.material_override
+		if mat == null and mi.mesh.get_surface_count() == 1:
+			mat = mi.get_surface_override_material(0)
+		var box := here * mi.mesh.get_aabb()
+		# A Blender model's small parts come joined in one mesh called "detail".
+		var small := box.get_longest_axis_size() <= SMALL_PART or str(mi.name).begins_with("detail")
+		out.append({"mesh": mi.mesh, "material": mat, "xf": here, "small": small})
+	for c in n.get_children():
+		_collect(c, here, out)
+
+
+## A piece's width and depth in cells, as turned.
+func _size(type: String, rot: int) -> Vector2i:
+	var info: Dictionary = _catalog.get(type, {"w": 1, "d": 1})
+	return Vector2i(int(info.d), int(info.w)) if rot % 2 == 1 else Vector2i(int(info.w), int(info.d))
+
+
+## The middle of a piece standing at cell (x, z), on the ground.
+func _centre(type: String, x: int, z: int, rot: int) -> Vector3:
+	var s := _size(type, rot)
+	return Vector3((x + s.x * 0.5) * _cell, 0, (z + s.y * 0.5) * _cell)
+
 
 ## A piece's place in the city: where it draws (its transform and batch) and what you bump into.
 func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
