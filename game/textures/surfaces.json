@@ -68,8 +68,8 @@
 		"crystal": "crystal"
 	},
 	"coma": {
-		"gun": {"set": "gunmetal_traces", "glow": "#f0b545"},
-		"black": {"set": "gunmetal_traces", "tile": 4.0, "glow": "#f0b545"},
+		"gun": {"set": "gunmetal_traces", "tile": 14.0, "glow": "#f0b545"},
+		"black": {"set": "gunmetal_traces", "tile": 9.0, "glow": "#f0b545"},
 		"goldm": "hammered_gold",
 		"gold": "light_panel",
 		"light": "light_panel"
