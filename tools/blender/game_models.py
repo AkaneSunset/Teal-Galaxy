@@ -80,6 +80,7 @@ class Node3D:
         self.children = []
         self.position = V()
         self.rotation_degrees = V()
+        self.rotation = V()  # radians; a script sets one or the other
         self.scale = V(1, 1, 1)
         self.name = ""
         self.material_override = None
@@ -230,7 +231,7 @@ def material(kind):
         return bpy.data.materials[kind]
     if kind.startswith("paint:"):
         h = kind[6:]
-        col, metal, rough, glow, alpha = Color(*(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))), 0.25, 0.45, 0.22, 1
+        col, metal, rough, glow, alpha = Color(*(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))), 0.25, 0.45, 0.22 / 3, 1
     else:
         col, metal, rough, glow, alpha = KINDS.get(kind, KINDS["teal"])
     m = bpy.data.materials.new(kind)
@@ -270,7 +271,7 @@ def _mesh(p):
 
 
 def _godot_xf(n):
-    r = n.rotation_degrees
+    r = n.rotation_degrees + n.rotation * (180 / math.pi)
     rot = Euler((math.radians(r.x), math.radians(r.y), math.radians(r.z)), "YXZ").to_matrix().to_4x4()
     s = Matrix.Diagonal((n.scale.x, n.scale.y, n.scale.z, 1.0))
     return Matrix.Translation(n.position.t()) @ rot @ s
