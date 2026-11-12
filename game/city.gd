@@ -55,8 +55,8 @@ const DETAIL_RANGE := 320.0 # ...drawn only this close
 const UNDO_STEPS := 100
 const INSIDE_PATH := "res://city/%s/inside_%s.glb"
 ## The lamps inside a faction's buildings: their colour, and how much brighter than the usual
-## (the Ashen light their black halls red). Any other faction has cool white ones.
-const INSIDE_LAMPS := {"ashen": [Color(1.0, 0.22, 0.14), 1.6]}
+## (the Ashen light their black halls red, the Coma theirs gold). Any other faction has cool white.
+const INSIDE_LAMPS := {"ashen": [Color(1.0, 0.22, 0.14), 1.6], "coma": [Color(1.0, 0.74, 0.36), 1.3]}
 const INSIDE_AS := {"tower": "zone_high", "highrise": "zone_high", "habitat": "zone_high"} # whose inside a piece borrows
 const INSIDE_DEPTH := 400.0 # how far under the city the insides are built...
 const INSIDE_LEVELS := 40 # ...on this many levels, 100 m apart, by piece id

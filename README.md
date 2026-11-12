@@ -1036,6 +1036,21 @@ furnace shaft with a bridge to its column, and one cell standing open). Their la
 `city_models.py ashen inside_hall --render DIR` pictures an inside from its door and from the
 views listed in `interiors.VIEWS` (`DRAFT=1` for a quick small one).
 
+The Coma Conglomerate's Government Hall is the **Data Spire** (`city/coma/hall.glb`): gunmetal limbs
+coiling up out of the ground into two horns, round ports in their flanks, a great hoop hung off the
+taller horn and a landing disc held out in front, all traced with gold light. Inside, the **Echo
+Archives** (a hall of alcoves with an echo hanging in each, and the displays) lead to the **core**:
+a column of light held in twisting limbs under a dome, a ramp winding one and a half turns up round
+it to a landing disc, and discs afloat on columns of light. Off the core are the **map chamber** (a
+web of light over a dais, with great hoops round it and horns bending over), the **lattice hall**
+(frames of light hung in the air, ribbons between them) and, straight on, the **well** (a pool of
+light with seven lamps standing in it and the Conglomerate's sign beyond). Their lamps are gold. A
+big inside like this is built room by room (`kit.room("core")`): each room is its own mesh and
+`detail_<room>`, so the game culls a room you cannot see and no mesh has more than eight lamps in
+reach, which is all the Compatibility renderer lights one mesh with. The limbs, ribs and strands
+are `kit.tube` (a shape swept smoothly through points); `round_room`, `dome`, `arc_wall`,
+`arched_wall`, `helix_ramp` and `saucer` make the rest.
+
 **Propaganda.** Every faction has four posters (`game/city/<faction>/propaganda/poster_<n>.png`,
 512 x 768): a monument, its emblem, its skyline by night and a notice. `tools/blender/propaganda.py`
 makes them: the buildings on them are the faction's own models rendered in Blender and cut down to
@@ -1044,7 +1059,8 @@ flat inks, and the rest is drawn with Pillow (`python tools/blender/propaganda.p
 faction's buildings: gatehouses, halls, lobbies, corridors, and over a home's mess table. A display
 is part of the inside's model (`kit.display`): a frame, and a mesh named `screen...` that the game
 puts the pictures on, each display starting on a different one and all moving on every 14 seconds.
-The displays are in every Compact and Ashen inside; the other factions' posters are ready for theirs.
+The displays are in every Compact and Ashen inside and in the Coma's Data Spire; the Luminar posters
+are ready for theirs.
 
 **Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
 each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop
@@ -1062,7 +1078,7 @@ again when it moves. The pieces are in the catalog as `cities`.
 
 Every model wears textures over its colours: the ships, the Builder's base buildings, raid and
 battle facilities, station and carrier rooms, and every faction's city buildings and insides. There
-are 24 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
+are 26 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
 a glow map for the ones that light up), all drawn procedurally by `tools/textures/make_textures.py`
 (`python tools/textures/make_textures.py [set ...] [--sheet FILE]`, needs numpy, scipy and Pillow):
 
@@ -1073,7 +1089,9 @@ a glow map for the ones that light up), all drawn procedurally by `tools/texture
   their insides black wall plating with cut corners and red slits, octagonal deck plates with light
   in some seams, ember grating over a fire, and machinery panels (louvres, conduit, status lights).
 - **Luminar Accord:** long tapering ceramic plates whose seams glow green, faceted crystal.
-- **Coma Conglomerate:** dark gunmetal engraved with circuit traces that glow gold, hammered gold.
+- **Coma Conglomerate:** dark gunmetal engraved with circuit traces that glow gold, hammered gold;
+  rib plating (flowing bands like the ribs of a shell, some toothed like a spine, light in some
+  grooves) for their limbs and inside walls, and liquid light for their wells.
 
 `game/textures/surfaces.json` says which material wears which set and how many metres one tile
 spans: by material kind for `models.gd` (ships, base buildings, stand-ins), floor/wall/glass for the

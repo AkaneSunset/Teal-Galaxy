@@ -27,7 +27,7 @@ import bpy  # noqa: E402
 import housing  # noqa: E402
 import interiors  # noqa: E402
 import kit  # noqa: E402
-from kit import CELL, box, compact_mats, cyl, finish, pilasters, render, reset, slits, text, twin_turret  # noqa: E402
+from kit import CELL, ball, box, compact_mats, cyl, finish, pilasters, render, reset, ring, saucer, slits, text, tube, twin_turret  # noqa: E402
 
 # --- The Terran Compact ----------------------------------------------------------------------------
 # Dark navy naval-industrial armour, chamfered blocks, blue window slits, amber work lights, huge
@@ -164,11 +164,98 @@ COMPACT = {
     "turret": (compact_turret, (1, 1), 8),
 }
 
+# --- The Coma Conglomerate ---------------------------------------------------------------------------
+# Nothing of theirs looks built: gunmetal limbs coil up out of the ground and into one another, gold
+# light runs along them, and discs and hoops hang off them. See the "Faction building designs" doc.
+
+def _hoop(R, r, at, m, rot=(0, 0, 0), squash=1.0, segs=28, minor=6, detail=False):
+    """A hoop of radius R (its band r thick, `squash` flattening the band) centred on `at`, turned
+    by `rot`: lying flat until turned."""
+    bpy.ops.mesh.primitive_torus_add(major_radius=R, minor_radius=r, major_segments=segs, minor_segments=minor, location=at, rotation=rot)
+    ob = bpy.context.object
+    ob.scale = (1.0, 1.0, squash)  # along its own axis; joining the piece bakes it in
+    return kit._keep(ob, m, detail)
+
+
+def coma_port(M, at, r, turn=0.0):
+    """A round port standing out of a limb's flank: a socket, its heavy rim, the dark inside and a
+    hoop of light. `at` is the middle of its mouth; it looks toward +Y, turned `turn` radians
+    about Z."""
+    x, y, z = at
+    out = (-math.sin(turn), math.cos(turn))
+    stand = (math.pi / 2, 0, turn)
+    cyl(r * 1.04, 3.2, (x - out[0] * 1.6, y - out[1] * 1.6, z), M["hide"], verts=20, rot=stand)
+    _hoop(r, r * 0.25, (x, y, z), M["hide"], rot=stand, segs=20)
+    cyl(r * 0.98, 0.1, (x + out[0] * 0.06, y + out[1] * 0.06, z), M["void"], verts=20, rot=stand)
+    _hoop(r * 0.56, 0.16, (x + out[0] * 0.16, y + out[1] * 0.16, z), M["aur"], rot=stand, segs=20, minor=4, detail=True)
+    _hoop(r * 0.24, 0.1, (x + out[0] * 0.16, y + out[1] * 0.16, z), M["aur"], rot=stand, segs=12, minor=4, detail=True)
+
+
+def coma_hall(M):
+    """The Data Spire: limbs of gunmetal coiling up out of the ground into two horns, round ports
+    in their flanks, a great hoop hung off the taller horn and a landing disc held out in front."""
+    def limb(pts, radii, lines=3, sides=10, twist=0.45, phase=0.5):
+        tube(pts, radii, M["hide"], sides=sides, steps=4, lines=[phase + k * math.tau / lines for k in range(lines)], line_m=M["aur"],
+             line_r=0.16, twist=twist)
+
+    ball(21, (0, 0, 0), M["hide"], sx=1.35, sy=1.0, sz=0.42, segs=18, rings=8, dome=True)  # the mound they rise from
+    # The two horns (seen from the front the taller stands in the middle, curling to the right).
+    limb([(3, -4, 0), (4, -5, 16), (6, -5, 32), (4, -4, 48), (-2, -2, 62), (-9, 0, 71), (-15, 2, 73), (-19, 3, 68)], [12, 11.5, 8.5, 6, 4.2, 2.6, 1.4, 0.4], lines=5)
+    limb([(-15, -6, 0), (-17, -7, 14), (-16, -6, 30), (-13, -5, 44), (-14, -3, 55), (-18, -1, 61), (-22, 0, 58)], [8.5, 8.5, 6.2, 4.2, 2.6, 1.4, 0.4], lines=4, phase=1.3)
+    # The lobes at their feet, and the limbs that climb and cross them.
+    limb([(20, 2, 0), (22, 3, 10), (20, 3, 20), (13, 0, 27), (7, -3, 30)], [9, 10.5, 9, 6, 4], lines=4)
+    limb([(-27, 2, 0), (-28, 3, 10), (-26, 2, 21), (-20, -2, 29), (-15, -5, 33)], [7, 9, 7.5, 5, 3.5], lines=4, phase=2.0)
+    limb([(-4, 8, 0), (-4, 10, 8), (-3, 7, 16), (0, 2, 22)], [8, 9, 6.5, 4], lines=3, phase=1.0)
+    limb([(8, -14, 0), (9, -15, 12), (7, -12, 26), (5, -8, 36)], [9, 8, 6, 4], lines=3, phase=3.0)
+    limb([(25, 9, 0), (27, 7, 14), (19, 3, 30), (9, 0, 41), (4, -2, 51)], [4.6, 4.2, 3.3, 2.5, 1.6], lines=2, sides=8, phase=0.9)
+    limb([(-20, 13, 0), (-22, 11, 10), (-14, 7, 22), (-4, 3, 31), (3, 0, 39)], [4.4, 3.9, 3.1, 2.3, 1.5], lines=2, sides=8, phase=2.2)
+    limb([(3, -3, 51), (-4, -4, 46.5), (-10, -4, 47), (-14, -4, 52)], [2.3, 1.6, 1.6, 2.1], lines=2, sides=8)  # a brace between the horns
+    coma_port(M, (21.5, 14.3, 11), 4.2, turn=-0.12)
+    coma_port(M, (-4, 19.6, 8.5), 3.3)
+    coma_port(M, (-27.5, 12.7, 12), 3.9, turn=0.12)
+    coma_port(M, (6.2, 4.6, 31), 2.9, turn=-0.05)
+    for k in range(9):  # roots, running out to the edge of the plot and curling
+        a = math.radians(30 + k * 40)
+        curl = 0.3 if k % 2 else -0.3
+        pts = [(math.cos(a + c) * r, math.sin(a + c) * r * 0.92, z) for r, z, c in ((11, 9.5, 0), (19, 7.5, curl * 0.3), (26.5, 3.2, curl * 0.7), (32.5, 0.2, curl))]
+        limb(pts, [3.4, 2.5, 1.7, 0.7], lines=2, sides=8, phase=1.6)
+    for a0, lean in ((70, 1), (110, -1)):  # and two that make the gate, over the way in
+        a = math.radians(a0)
+        pts = [(math.cos(a) * 9, 9 + math.sin(a) * 8, 12), (lean * 5.6, 24, 9.5), (lean * 4.6, 31, 5.5), (lean * 3.4, 34, 0)]
+        limb(pts, [2.6, 1.9, 1.3, 0.8], lines=2, sides=8, phase=0.2)
+    tube([(-3.4, 34, 0.5), (-3.8, 33.6, 4.6), (0, 33.2, 7.2), (3.8, 33.6, 4.6), (3.4, 34, 0.5)], 0.16, M["aur"], sides=4, steps=4, detail=True)
+    box((5.2, 17, 0.3), (0, 26, 0), M["black"])
+    for s in (-1, 1):
+        box((0.14, 17, 0.06), (s * 2.3, 26, 0.3), M["aur"], detail=True)
+    # The great hoop, hung off the taller horn, its front edge lifted.
+    tilt = (math.radians(10), math.radians(9), 0)
+    _hoop(15, 1.9, (20, -4, 43.5), M["hide"], rot=tilt, squash=0.42, segs=36)
+    for R in (16.95, 13.1):
+        _hoop(R, 0.14, (20, -4, 43.6), M["aur"], rot=tilt, segs=36, minor=4, detail=True)
+    for x, y, z0, z1 in ((31.5, 5.6, 43.5, 26), (23.9, 10.5, 45.5, 20), (16.1, 10.5, 46.5, 30), (34.1, 1.1, 42, 24)):  # strands hanging from it
+        tube([(x, y, z0), (x + 0.5, y + 0.6, (z0 + z1) / 2), (x - 0.4, y - 0.3, z1)], [0.22, 0.16, 0.06], M["hide"], sides=4, steps=2, detail=True)
+    # The landing disc, held out in front.
+    limb([(-5, 5, 13), (-8, 11, 16.5), (-9.5, 15.5, 18.3)], [3.6, 2.6, 2.0], lines=2, sides=8)
+    saucer(11.5, (-9.5, 18, 20), M["gun"], rim=1.0, under=3.2, foot=0.3, verts=28)
+    cyl(7.6, 0.6, (-9.5, 18, 20), M["gun"], verts=28)
+    cyl(4.4, 0.5, (-9.5, 18, 20.6), M["black"], verts=24)
+    for R, z in ((11.3, 20.02), (7.5, 20.62), (4.2, 21.12), (9.4, 20.02)):
+        ring(R, 0.12, (-9.5, 18, z), M["aur"], detail=True, segs=36)
+    ring(11.55, 0.1, (-9.5, 18, 19.5), M["aur"], detail=True, segs=36)
+    cyl(0.9, 0.25, (-9.5, 18, 21.1), M["light"], verts=12, detail=True)
+    for x, y, z0, drop in ((-20, 2, 58, 30), (-17, -1, 60, 24)):  # strands off the lesser horn
+        tube([(x, y, z0), (x - 2.5, y + 2, z0 - drop * 0.5), (x - 2.0, y + 3, z0 - drop)], [0.2, 0.15, 0.05], M["hide"], sides=4, steps=3, detail=True)
+
+
+COMA = {
+    "hall": (coma_hall, (7, 7), 76),
+}
+
 FACTIONS = {
     "compact": (compact_mats, COMPACT),
     "ashen": (kit.ashen_mats, {}),
     "luminar": (kit.luminar_mats, {}),
-    "coma": (kit.coma_mats, {}),
+    "coma": (kit.coma_mats, COMA),
 }
 for _faction, (_mats, _pieces) in FACTIONS.items():
     _pieces.update(housing.pieces(_faction))

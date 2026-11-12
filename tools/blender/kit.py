@@ -26,8 +26,19 @@ POSTERS = []  # pictures to show on them in a render (the game chooses its own)
 FACTION = ""  # whose piece was built last: renders dress it in that faction's textures
 
 
+_room = [""]  # the room of a big inside that the parts now being made belong to
+
+
+def room(name=""):
+    """Starts a room of a big inside: the parts made from here on are joined as "<name>" (solid)
+    and "detail_<name>" instead of with the rest, so that the game culls each room on its own and
+    lights it with its own lamps (older graphics cards light a mesh with its eight nearest only)."""
+    _room[0] = name
+
+
 def reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    _room[0] = ""
     _mats.clear()
     _parts.clear()
     _marks.clear()
@@ -61,6 +72,7 @@ def _keep(ob, m, detail, bevel=0.0):
         mod.limit_method = "ANGLE"
         bpy.context.view_layer.objects.active = ob
         bpy.ops.object.modifier_apply(modifier=mod.name)
+    ob["room"] = _room[0]
     _parts.append((ob, detail))
     return ob
 
@@ -103,20 +115,22 @@ def text(body, size, at, m, depth=0.15, detail=False):
 def finish(faction, piece):
     """Joins the parts into "<piece>" and "detail" and exports the glb."""
     out = []
-    for detail in (False, True):
-        obs = [o for o, d in _parts if d == detail]
-        if not obs:
-            continue
-        bpy.ops.object.select_all(action="DESELECT")
-        for o in obs:
-            o.select_set(True)
-        bpy.context.view_layer.objects.active = obs[0]
-        if len(obs) > 1:
-            bpy.ops.object.join()
-        ob = bpy.context.object
-        ob.name = "detail" if detail else piece
-        ob.data.name = ob.name
-        out.append(ob)
+    tagged = [(o, d, o["room"]) for o, d in _parts]  # read before joining: a joined part is gone
+    for where in dict.fromkeys(w for _, _, w in tagged):
+        for detail in (False, True):
+            obs = [o for o, d, w in tagged if d == detail and w == where]
+            if not obs:
+                continue
+            bpy.ops.object.select_all(action="DESELECT")
+            for o in obs:
+                o.select_set(True)
+            bpy.context.view_layer.objects.active = obs[0]
+            if len(obs) > 1:
+                bpy.ops.object.join()
+            ob = bpy.context.object
+            ob.name = ("detail_" + where if where else "detail") if detail else (where or piece)
+            ob.data.name = ob.name
+            out.append(ob)
     bpy.ops.object.select_all(action="DESELECT")
     for o in out + _marks + _screens:
         o.select_set(True)
@@ -162,6 +176,9 @@ def render(path, foot, height):
     scene.camera = cam
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+
+
+GLOW = {"coma": 0.9}  # how strongly a faction's lit lines show in a render (2 unless said here)
 
 
 def texture_scene(group):
@@ -245,7 +262,7 @@ def texture_scene(group):
             elif "glow" in e:
                 h = e["glow"]
                 colour = tuple((int(h[i:i + 2], 16) / 255.0) ** 2.2 for i in (1, 3, 5)) + (1.0,)  # as the game shows it
-                b.inputs["Emission Strength"].default_value = 2.0
+                b.inputs["Emission Strength"].default_value = GLOW.get(group, 2.0)
             else:
                 continue
             nt.links.new(multiply(colour, glow.outputs["Color"]), b.inputs["Emission Color"])
@@ -310,7 +327,7 @@ def wall(a, b, z, h, m, gaps=(), t=0.4):
 
 
 # What an inside's lamps give off in a render, by faction: (colour, how strong beside the usual).
-LAMPS = {"ashen": ((1.0, 0.1, 0.055), 1.1)}
+LAMPS = {"ashen": ((1.0, 0.1, 0.055), 1.1), "coma": ((1.0, 0.55, 0.16), 0.55)}
 
 
 def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17, views=()):
@@ -424,6 +441,178 @@ def ramp(w, run, rise, at, m, along="-y", detail=False):
     for f in ((0, 1, 3, 2), (0, 1, 5, 4), (2, 3, 5, 4), (0, 2, 4), (1, 3, 5)):
         bm.faces.new([v[i] for i in f])
     return _solid("ramp", bm, m, detail)
+
+
+def _spline(points, steps):
+    """Points along a smooth curve through `points`, `steps` to each stretch: [(how far along,
+    counted in points, where)]."""
+    P = [Vector(p) for p in points]
+    out = []
+    for i in range(len(P) - 1):
+        p0, p1, p2, p3 = P[max(i - 1, 0)], P[i], P[i + 1], P[min(i + 2, len(P) - 1)]
+        for k in range(steps):
+            t = k / steps
+            out.append((i + t, 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t ** 3)))
+    out.append((len(P) - 1.0, P[-1]))
+    return out
+
+
+def tube(points, radii, m, sides=8, steps=4, flat=1.0, detail=False, lines=(), line_m=None, line_r=0.1, twist=0.0, toward=None):
+    """A limb swept smoothly through `points`, as thick at each as `radii` says (one number for
+    the same all along): a tentacle, a horn, a rib, a strand of light. `flat` under 1 squeezes it
+    into a ribbon. `lines` are angles round it (radians) at which a thin line of `line_m` runs
+    along its skin, turning `twist` radians round it for every point passed; angle 0 is the side
+    facing the direction `toward` at the limb's start (any side, if that is left out)."""
+    if not isinstance(radii, (list, tuple)):
+        radii = [radii] * len(points)
+    path = _spline(points, steps)
+
+    def radius(u):
+        i = min(int(u), len(radii) - 2)
+        return radii[i] + (radii[i + 1] - radii[i]) * (u - i)
+
+    frames = []
+    n = None
+    for k, (u, c) in enumerate(path):
+        t = (path[min(k + 1, len(path) - 1)][1] - path[max(k - 1, 0)][1]).normalized()
+        if n is None:
+            n = Vector(toward) - Vector(toward).dot(t) * t if toward else t.cross(Vector((0, 0, 1)))
+            n = (n if n.length > 1e-3 else t.cross(Vector((1, 0, 0)))).normalized()
+        else:
+            n = (frames[-1][2].rotation_difference(t) @ n).normalized()
+        frames.append((u, c, t, n, t.cross(n)))
+    bm = bmesh.new()
+    rings = [[bm.verts.new(c + radius(u) * (math.cos(j * math.tau / sides) * n + math.sin(j * math.tau / sides) * flat * b)) for j in range(sides)]
+             for u, c, t, n, b in frames]
+    for r0, r1 in zip(rings, rings[1:]):
+        for j in range(sides):
+            bm.faces.new((r0[j], r0[(j + 1) % sides], r1[(j + 1) % sides], r1[j])).smooth = sides > 4  # rounded, not faceted
+    bm.faces.new(rings[0])
+    bm.faces.new(rings[-1])
+    ob = _solid("tube", bm, m, detail)
+    for a in lines:
+        skin = [c + (radius(u) + line_r * 0.4) * (math.cos(a + twist * u) * n + math.sin(a + twist * u) * flat * b) for u, c, t, n, b in frames]
+        tube(skin, line_r, line_m, sides=3, steps=1, detail=True)
+    return ob
+
+
+def arc_wall(c, r, a0, a1, z, h, m, t=0.6, segs=8, detail=False):
+    """A curved wall: part of a drum round `c` ((x, y)) from angle a0 to a1 (radians, anticlockwise
+    seen from above), its inner face `r` out, `t` thick, from z up to z + h."""
+    bm = bmesh.new()
+    angles = [a0 + (a1 - a0) * k / segs for k in range(segs + 1)]
+    loop = [(c[0] + r * math.cos(a), c[1] + r * math.sin(a)) for a in angles] + [(c[0] + (r + t) * math.cos(a), c[1] + (r + t) * math.sin(a)) for a in reversed(angles)]
+    low = [bm.verts.new((x, y, z)) for x, y in loop]
+    top = [bm.verts.new((x, y, z + h)) for x, y in loop]
+    n = len(loop)
+    for k in range(n):
+        bm.faces.new((low[k], low[(k + 1) % n], top[(k + 1) % n], top[k]))
+    for k in range(segs):  # the top and bottom, as strips (a curved outline is no single flat face)
+        bm.faces.new((top[k], top[k + 1], top[n - 2 - k], top[n - 1 - k]))
+        bm.faces.new((low[k], low[k + 1], low[n - 2 - k], low[n - 1 - k]))
+    return _solid("arc", bm, m, detail)
+
+
+def round_room(c, r, h, floor, walls, doors=(), z=0.0, segs=32, t=0.6, lid=None):
+    """A round room about `c` ((x, y)): its floor (a disc whose top is at z) and its wall, `r` out
+    and `h` high, with doorways: each is (the angle it lies at from the middle, its width, its
+    height). `lid` is a flat ceiling's material; leave it out under a dome, and `floor` (None)
+    where the room has a floor of its own making."""
+    if floor:
+        cyl(r + t, 0.4, (c[0], c[1], z - 0.4), floor, verts=segs)
+    if lid:
+        cyl(r + t, 0.4, (c[0], c[1], z + h), lid, verts=segs)
+    gaps = sorted(((a % math.tau, math.asin(min(1.0, w / 2 / r)), dh) for a, w, dh in doors))
+    if not gaps:
+        arc_wall(c, r, 0, math.tau, z, h, walls, t, segs)
+        return
+    for k, (a, half, dh) in enumerate(gaps):
+        nxt = gaps[(k + 1) % len(gaps)]
+        end = nxt[0] - nxt[1] + (math.tau if k == len(gaps) - 1 else 0)
+        span = end - (a + half)
+        arc_wall(c, r, a + half, end, z, h, walls, t, max(2, round(segs * span / math.tau)))
+        arc_wall(c, r, a - half, a + half, z + dh, h - dh, walls, t, 2)  # over the doorway
+
+
+def dome(c, r, z, rise, m, segs=24, rings=4, eye=0.0, detail=True):
+    """A dome seen from beneath (its faces look down and in): over a round room about `c`, springing
+    from radius `r` at height z and rising `rise`, open at the top to a hole `eye` across."""
+    bm = bmesh.new()
+    loops = []
+    for i in range(rings + 1):
+        a = (math.pi / 2) * i / rings
+        rr = max(eye / 2, r * math.cos(a)) if i < rings or eye > 0 else 0.0
+        zz = z + rise * math.sin(a)
+        if rr < 1e-6:
+            loops.append([bm.verts.new((c[0], c[1], zz))])
+        else:
+            loops.append([bm.verts.new((c[0] + rr * math.cos(k * math.tau / segs), c[1] + rr * math.sin(k * math.tau / segs), zz)) for k in range(segs)])
+    for lo, hi in zip(loops, loops[1:]):
+        for k in range(segs):
+            if len(hi) == 1:
+                bm.faces.new((lo[(k + 1) % segs], lo[k], hi[0]))
+            else:
+                bm.faces.new((lo[(k + 1) % segs], lo[k], hi[k], hi[(k + 1) % segs]))
+    me = bpy.data.meshes.new("dome")
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new("dome", me)
+    bpy.context.scene.collection.objects.link(ob)
+    return _keep(ob, m, detail)
+
+
+def helix_ramp(c, r0, r1, z0, z1, a0, a1, m, segs=48, thick=0.45, detail=False):
+    """A ramp winding round `c` ((x, y)) between radii r0 and r1, climbing from z0 at angle a0 to
+    z1 at angle a1 (radians: more than a full turn is fine), `thick` deep."""
+    bm = bmesh.new()
+    cuts = []
+    for k in range(segs + 1):
+        f = k / segs
+        a, zz = a0 + (a1 - a0) * f, z0 + (z1 - z0) * f
+        ca, sa = math.cos(a), math.sin(a)
+        cuts.append([bm.verts.new((c[0] + rr * ca, c[1] + rr * sa, zz + dz)) for rr, dz in ((r0, 0), (r1, 0), (r1, -thick), (r0, -thick))])
+    for p, q in zip(cuts, cuts[1:]):
+        for j in range(4):
+            bm.faces.new((p[j], p[(j + 1) % 4], q[(j + 1) % 4], q[j]))
+    bm.faces.new(cuts[0])
+    bm.faces.new(cuts[-1])
+    return _solid("helix", bm, m, detail)
+
+
+def arched_wall(a, b, z, h, m, arches=(), t=0.4):
+    """A wall from `a` to `b` ((x, y) points, along X or along Y) with oval openings standing on
+    the floor: each is (how far along from `a` its middle is, half its width, how high its middle
+    is, half its height). An opening taller than its middle is high is cut off flat at the floor."""
+    along_x = a[1] == b[1]
+    length = abs(b[0] - a[0]) + abs(b[1] - a[1])
+    sgn = 1 if (b[0] - a[0] if along_x else b[1] - a[1]) > 0 else -1
+    pts = [(0.0, 0.0)]  # the wall's outline, drawn round from its near bottom corner
+    for mid, rw, cz, rz in sorted(arches):
+        dip = math.asin(min(1.0, cz / rz))
+        run = [(mid + rw * math.cos(-dip + (math.pi + 2 * dip) * k / 14), max(0.0, cz + rz * math.sin(-dip + (math.pi + 2 * dip) * k / 14))) for k in range(15)]
+        pts += run[::-1]
+    pts += [(length, 0.0), (length, h), (0.0, h)]
+    bm = bmesh.new()
+
+    def place(d, zz, off):
+        return (a[0] + sgn * d, a[1] + off, z + zz) if along_x else (a[0] + off, a[1] + sgn * d, z + zz)
+
+    front = [bm.verts.new(place(d, zz, -t / 2)) for d, zz in pts]
+    back = [bm.verts.new(place(d, zz, t / 2)) for d, zz in pts]
+    n = len(pts)
+    bm.faces.new(front)
+    bm.faces.new(back)
+    for k in range(n):
+        bm.faces.new((front[k], front[(k + 1) % n], back[(k + 1) % n], back[k]))
+    return _solid("arched", bm, m, detail=False)
+
+
+def saucer(r, at, m, rim=0.5, under=1.6, foot=0.3, verts=20, detail=False):
+    """A disc that floats: a flat top at `at` (its middle), a rim `rim` deep, and a belly tapering
+    `under` below that to `foot` of its radius."""
+    x, y, z = at
+    cyl(r, rim, (x, y, z - rim), m, verts=verts, detail=detail)
+    cyl(r * foot, under, (x, y, z - rim - under), m, verts=verts, top=r * 0.96, detail=detail)
 
 
 def cone(r, h, at, m, verts=4, top=0.0, sx=1.0, sy=1.0, turn=0.0, detail=False):
@@ -607,4 +796,14 @@ def coma_mats():
         "gold": mat("gold", "#f0b545", emit=2.2),
         "goldm": mat("goldm", "#c9a04a", metal=1.0, rough=0.3),
         "light": mat("light", "#ffe9a8", emit=4.5),
+        # Their insides: ribbed gunmetal, deep gold light in lines, wells and columns.
+        "rib": mat("rib", "#1d1e24", metal=0.8, rough=0.3),
+        "hide": mat("hide", "#30333a", metal=0.8, rough=0.33),  # the skin of their great limbs
+        "deck": mat("deck", "#0d0e11", metal=0.75, rough=0.22),
+        "plate": mat("plate", "#2a2c33", metal=0.85, rough=0.25),  # gunmetal, its traces drawn finer for things seen close
+        "shell": mat("shell", "#111216", metal=0.7, rough=0.4),
+        "aur": mat("aur", "#ff6b08", emit=1.3),
+        "beam": mat("beam", "#ff800d", emit=1.7),
+        "pool": mat("pool", "#ff7a0a", emit=1.15),
+        "void": mat("void", "#020203", metal=0.0, rough=1.0),
     }

@@ -24,7 +24,9 @@
 		"black_plating": 6.0,
 		"black_deck": 5.0,
 		"ember_grate": 2.0,
-		"black_machinery": 4.0
+		"black_machinery": 4.0,
+		"rib_plating": 6.0,
+		"light_pool": 5.0
 	},
 	"models": {
 		"teal": "hull_panels",
@@ -95,6 +97,13 @@
 		"black": {"set": "gunmetal_traces", "tile": 9.0, "glow": "#f0b545"},
 		"goldm": "hammered_gold",
 		"gold": "light_panel",
-		"light": "light_panel"
+		"light": "light_panel",
+		"rib": {"set": "rib_plating", "tile": 6.0, "glow": "#f0a52a"},
+		"beam": {"set": "vein_glow", "tile": 5.0},
+		"pool": "light_pool",
+		"plate": {"set": "gunmetal_traces", "tile": 5.0, "glow": "#f0b545"},
+		"hide": {"set": "rib_plating", "tile": 9.0, "glow": "#f0a52a"},
+		"deck": {"set": "gunmetal_traces", "tile": 6.0},
+		"shell": {"set": "rib_plating", "tile": 9.0}
 	}
 }

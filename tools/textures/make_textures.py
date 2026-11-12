@@ -802,6 +802,42 @@ def gunmetal_traces(seed=29):
     save("gunmetal_traces", albedo, h, rough, glow=np.clip(lit * 1.3, 0, 1), strength=25)
 
 
+def rib_plating(seed=35):
+    """The Coma's inside walls: gunmetal laid in flowing bands like the ribs of a shell, a deep
+    groove between each, some bands toothed like a spine, with a fine line of light in some grooves
+    and short runs of circuit along the bands."""
+    r = rng(seed)
+    y, x = np.mgrid[0:N, 0:N] / N
+    bands = 10
+    v = (y + (fbm(2, seed, 3) - 0.5) * 0.16) * bands
+    f = v - np.floor(v)
+    band = np.floor(v).astype(int) % bands
+    ridge = np.sin(f * np.pi) ** 0.6
+    groove = np.clip(1 - np.minimum(f, 1 - f) / 0.07, 0, 1)
+    toothed = (r.random(bands) < 0.4)[band]
+    teeth = (0.5 + 0.5 * np.cos((x + (fbm(2, seed + 1, 2) - 0.5) * 0.05) * 2 * np.pi * 40)) ** 3
+    lit = (r.random(bands) < 0.22)[band]
+    line = blur(np.clip(1 - np.minimum(f, 1 - f) / 0.02, 0, 1) * lit * (noise(6, 1, seed + 2) > 0.35), 0.7)
+    run = (np.abs(f - 0.5) < 0.014) * (noise(14, bands, seed + 3) > 0.79) * ~toothed
+    pad = (np.abs(f - 0.5) < 0.045) * (noise(14, bands, seed + 3) > 0.79) * (noise(70, bands, seed + 4) > 0.84) * ~toothed
+    glow = np.clip(line + blur(np.maximum(run, pad).astype(float), 0.6), 0, 1)
+    brushed = fbm(2, seed + 5, 6, stretch=(1, 60))
+    h = 0.2 + ridge * 0.6 - toothed * teeth * ridge * 0.25 - glow * 0.1 + (brushed - 0.5) * 0.03
+    albedo = np.clip(0.8 + (brushed - 0.5) * 0.2 - groove * 0.5 - toothed * teeth * 0.2 + glow * 0.5, 0, 1)
+    rough = np.clip(0.42 + (brushed - 0.5) * 0.4 + groove * 0.3 + grime(seed + 6, 0.12, streaks=False), 0, 1)
+    save("rib_plating", albedo, h, rough, glow=glow, strength=38)
+
+
+def light_pool(seed=36):
+    """Liquid light: bright webs of ripple drifting over a glowing deep. The Coma's wells."""
+    def ripples(cells, s, width):  # bright threads where the noise crosses its middle
+        return np.clip(1 - np.abs(fbm(cells, s, 2) - 0.5) / width, 0, 1) ** 2
+
+    web = blur(ripples(5, seed, 0.022) * 0.75 + ripples(9, seed + 1, 0.02) * 0.5 + ripples(16, seed + 3, 0.02) * 0.3, 0.8)
+    glow = np.clip(0.4 + 0.2 * fbm(4, seed + 2, 4) + web, 0, 1)
+    save("light_pool", glow, 0.5 + web * 0.2, np.full((N, N), 0.12), glow=glow, strength=8)
+
+
 def hammered_gold(seed=30):
     """Hammered metal: a field of shallow dimples, bright on their rims."""
     near, d1, edge = voronoi(260, seed)
@@ -815,7 +851,7 @@ def hammered_gold(seed=30):
 SETS = {f.__name__: f for f in [hull_panels, trim_plates, brushed_steel, deck_plate, grip_dark, glass, window_lights,
                                 light_panel, rock, ice, armour_plate, hazard_stripes, ferrocrete, chitin, moss, vein_glow,
                                 black_plating, black_deck, ember_grate, black_machinery,
-                                ceramic_plates, crystal, gunmetal_traces, hammered_gold]}
+                                ceramic_plates, crystal, gunmetal_traces, hammered_gold, rib_plating, light_pool]}
 
 
 def sheet(path):
