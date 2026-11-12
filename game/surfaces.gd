@@ -7,6 +7,7 @@ extends RefCounted
 ## tools/textures/make_textures.py.
 ##   Surfaces.apply(material, "models", "teal")   # textures a material in place
 ##   Surfaces.shared(material, "compact", "navy") # a textured copy, one per group and name
+##   Surfaces.maps("battle", "compact")           # the maps themselves, for a shader of your own
 
 const TABLE := "res://textures/surfaces.json"
 const MAP := "res://textures/%s/%s.png"
@@ -45,6 +46,20 @@ static func _map(set_name: String, map: String) -> Texture2D:
 	if not _maps.has(path):
 		_maps[path] = load(path) if ResourceLoader.exists(path) else null
 	return _maps[path]
+
+
+## The maps listed for `name` in `group`, for a shader of your own (the battle units'):
+## {albedo, orm, glow (null if the set has none), tile}, or {} if none are listed or the set's
+## maps aren't there.
+static func maps(group: String, name: String) -> Dictionary:
+	var e := entry(group, name)
+	if e.is_empty():
+		return {}
+	var set_name := str(e["set"])
+	var albedo := _map(set_name, "albedo")
+	if albedo == null:
+		return {}
+	return {"albedo": albedo, "orm": _map(set_name, "orm"), "glow": _map(set_name, "glow"), "tile": float(e["tile"])}
 
 
 ## Gives `m` the textures listed for `name` in `group`. False (and `m` untouched) if none are listed

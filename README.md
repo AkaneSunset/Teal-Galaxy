@@ -1077,6 +1077,21 @@ Blender renders use the same maps (`kit.texture_scene`), so `--render` and `--sh
 too, for comparison): it reads their functions from `models.gd` and `base_models.gd` and builds them
 in Blender.
 
+**Sector battle units.** The units and structures of a sector battle are one model per type for
+every side, painted in the side's colour, so the textures are what tells the factions' armies apart
+up close: each side's units wear its faction's set on the painted hull (armour plate for the
+Compact, chitin for the Ashen, ceramic for the Luminar, traced gunmetal for the Coma, hull panels
+for the militia) and a second set on the unpainted frame, tracks and guns, listed under `battle` in
+`surfaces.json`. They draw with their own shader (`SHADER` in `game/battle/battle_models.gd`), kept
+cheap for older graphics cards: every face is flat, so the shader picks the axis a face looks along
+once per vertex and reads each map once per pixel (five look-ups: two albedos, two orm maps and the
+hull's glow map, whose lines light up in the side's colour), with no normal map. A side's units
+share one material, and `battle_units.gd` keeps one MultiMesh per unit type and side, so a battle
+draws at most twice the batches it did. Wrecks keep their side's textures, darkened.
+`tools/blender/battle_models.py OUT_DIR [faction ...] [army] [base] [tanks] [before] [clash]` renders
+them the same way: it reads the `match` block of `battle_models.gd`, builds each unit in Blender and
+lays the maps on by face as the shader does.
+
 ## The Frontier and terraforming
 
 A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in

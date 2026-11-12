@@ -1,7 +1,8 @@
 extends Node3D
-## Draws a sector battle's units and structures: one MultiMesh per type for the bodies, one per
-## turreted type for the turrets, drop pods coming down, wrecks where units fell, and selection
-## rings. Smooth with hundreds of units: nothing here is a node per unit.
+## Draws a sector battle's units and structures: one MultiMesh per type and side for the bodies,
+## one per turreted type and side for the turrets, drop pods coming down, wrecks where units fell,
+## and selection rings. Smooth with hundreds of units: nothing here is a node per unit. A side has
+## its own batches because each side's units wear its faction's textures (side_looks).
 ##
 ## The units themselves (Unit below) live in the battle view, which fills them from the server's
 ## snapshots; update() places every one of them each frame, between its last two snapshots.
@@ -65,18 +66,18 @@ class Batch:
 
 var terrain: Node3D # battle_terrain.gd
 var side_colours := {"a": Color.WHITE, "d": Color.WHITE} # linear
+var side_looks := {"a": "", "d": ""} # each side's faction ("militia" for none): the textures its units wear
 var show_units := true
 
-var _bodies := {} # type -> Batch
-var _tops := {} # type -> Batch
-var _pods: Batch
+var _bodies := {} # "type/side" -> Batch
+var _tops := {} # "type/side" -> Batch
+var _pods := {} # side -> Batch
 var _rings: Batch
-var _wrecks: Array = [] # {"type", "xform", "top", "t"}
+var _wrecks: Array = [] # {"type", "side", "xform", "top", "t"}
 var _clock := 0.0
 
 
 func _ready() -> void:
-	_pods = _batch(Models.model("pod").body, Models.material())
 	var ring_mat := ShaderMaterial.new()
 	ring_mat.shader = load("res://battle/battle_fx.gd").glow_shader()
 	_rings = _batch(_ring_mesh(), ring_mat)
@@ -101,16 +102,29 @@ func _batch(mesh: Mesh, mat: Material) -> Batch:
 	return b
 
 
-func _body(type: String) -> Batch:
-	if not _bodies.has(type):
-		_bodies[type] = _batch(Models.model(type).body, Models.material())
-	return _bodies[type]
+## The material a side's units draw with: its faction's textures.
+func _material(side: String) -> ShaderMaterial:
+	return Models.material(str(side_looks.get(side, "")))
 
 
-func _top(type: String) -> Batch:
-	if not _tops.has(type):
-		_tops[type] = _batch(Models.model(type).top, Models.material())
-	return _tops[type]
+func _body(type: String, side: String) -> Batch:
+	var key := type + "/" + side
+	if not _bodies.has(key):
+		_bodies[key] = _batch(Models.model(type).body, _material(side))
+	return _bodies[key]
+
+
+func _top(type: String, side: String) -> Batch:
+	var key := type + "/" + side
+	if not _tops.has(key):
+		_tops[key] = _batch(Models.model(type).top, _material(side))
+	return _tops[key]
+
+
+func _pod_batch(side: String) -> Batch:
+	if not _pods.has(side):
+		_pods[side] = _batch(Models.model("pod").body, _material(side))
+	return _pods[side]
 
 
 func _put(b: Batch, xform: Transform3D, custom: Color) -> void:
@@ -146,7 +160,8 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 		b.count = 0
 	for b in _tops.values():
 		b.count = 0
-	_pods.count = 0
+	for b in _pods.values():
+		b.count = 0
 	_rings.count = 0
 	var turn := 1.0 - exp(-9.0 * delta)
 	for u: Unit in units.values():
@@ -188,11 +203,11 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 		var custom: Color = side_colours.get(u.side, Color.WHITE)
 		if now - u.hit_at < 0.08: # a flash of white when hit
 			custom = custom.lerp(Color(2, 2, 2), 0.5)
-		_put(_body(u.type), xf, custom)
+		_put(_body(u.type, u.side), xf, custom)
 		var m: Dictionary = Models.model(u.type)
 		if m.top:
 			var top_basis := basis * Basis(Vector3.UP, u.top_yaw - u.yaw)
-			_put(_top(u.type), Transform3D(top_basis.scaled(Vector3(scale, scale * y_scale, scale)), xf * (m.top_at as Vector3)), custom)
+			_put(_top(u.type, u.side), Transform3D(top_basis.scaled(Vector3(scale, scale * y_scale, scale)), xf * (m.top_at as Vector3)), custom)
 		if selected.has(u.id):
 			var r := u.radius * (1.5 if u.kind != "structure" else 1.2)
 			var ring_at := Vector3(u.pos.x, terrain.height(g.x, g.y) + 0.4, u.pos.z)
@@ -202,7 +217,8 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 		b.inst.multimesh.visible_instance_count = b.count
 	for b in _tops.values():
 		b.inst.multimesh.visible_instance_count = b.count
-	_pods.inst.multimesh.visible_instance_count = _pods.count
+	for b in _pods.values():
+		b.inst.multimesh.visible_instance_count = b.count
 	_rings.inst.multimesh.visible_instance_count = _rings.count
 
 
@@ -217,7 +233,7 @@ func _pod(u: Unit, now: float) -> void:
 		return
 	var up := pod_height(u, now)
 	var xf := Transform3D(Basis(Vector3.UP, _clock * 2.0 + u.id), u.pos + Vector3(0, up, 0))
-	_put(_pods, xf, side_colours.get(u.side, Color.WHITE))
+	_put(_pod_batch(u.side), xf, side_colours.get(u.side, Color.WHITE))
 
 
 ## A land unit leans with the slope it stands on.
@@ -250,7 +266,7 @@ func add_wreck(u: Unit) -> void:
 	var top := Transform3D()
 	if m.top:
 		top = Transform3D(basis * Basis(Vector3.UP, u.top_yaw - u.yaw + 0.6), xf * (m.top_at as Vector3))
-	_wrecks.append({"type": u.type, "xform": xf, "top": top, "t": _clock})
+	_wrecks.append({"type": u.type, "side": u.side, "xform": xf, "top": top, "t": _clock})
 	if _wrecks.size() > 160:
 		_wrecks.pop_front()
 
@@ -265,11 +281,11 @@ func _draw_wrecks() -> void:
 		var sink := maxf(0.0, age - (WRECK_S - 5.0)) * 0.8
 		var xf: Transform3D = w.xform
 		xf.origin.y -= sink
-		_put(_body(w.type), xf, Color(0.35, 0.33, 0.3, 0.5))
+		_put(_body(w.type, w.side), xf, Color(0.35, 0.33, 0.3, 0.5))
 		if Models.model(w.type).top:
 			var t: Transform3D = w.top
 			t.origin.y -= sink
-			_put(_top(w.type), t, Color(0.35, 0.33, 0.3, 0.5))
+			_put(_top(w.type, w.side), t, Color(0.35, 0.33, 0.3, 0.5))
 
 
 ## A flat ring one metre across, for the selection rings.

@@ -1,5 +1,5 @@
 {
-	"_about": "Which texture set (game/textures/<set>) each material wears, and how many metres one tile spans. Groups: models (ships, base buildings, raid facilities and stand-ins, by models.gd material kind), place (walk-in rooms in stations, carriers and bases), and one per faction for its Blender city models and insides (by Blender material name). An entry is a set name, or {set, tile, glow}: glow is the colour its glow map lights up in (a material that glows already keeps its own colour).",
+	"_about": "Which texture set (game/textures/<set>) each material wears, and how many metres one tile spans. Groups: models (ships, base buildings, raid facilities and stand-ins, by models.gd material kind), place (walk-in rooms in stations, carriers and bases), and one per faction for its Blender city models and insides (by Blender material name). battle is the sector battle units: what each side's painted hull wears, by its faction (militia for a side with none), and <faction>_frame what its unpainted frame, tracks and guns wear. An entry is a set name, or {set, tile, glow}: glow is the colour its glow map lights up in (a material that glows already keeps its own colour).",
 	"sets": {
 		"hull_panels": 4.0,
 		"trim_plates": 2.0,
@@ -41,6 +41,18 @@
 		"floor": "deck_plate",
 		"wall": {"set": "trim_plates", "tile": 3.0},
 		"glass": "glass"
+	},
+	"battle": {
+		"militia": {"set": "hull_panels", "tile": 3.0},
+		"militia_frame": {"set": "brushed_steel", "tile": 1.5},
+		"compact": {"set": "armour_plate", "tile": 3.0},
+		"compact_frame": {"set": "brushed_steel", "tile": 1.5},
+		"ashen": {"set": "chitin", "tile": 2.5},
+		"ashen_frame": {"set": "chitin", "tile": 1.5},
+		"luminar": {"set": "ceramic_plates", "tile": 2.5},
+		"luminar_frame": {"set": "trim_plates", "tile": 1.5},
+		"coma": {"set": "gunmetal_traces", "tile": 4.0},
+		"coma_frame": {"set": "hammered_gold", "tile": 1.0}
 	},
 	"compact": {
 		"navy": "armour_plate",
