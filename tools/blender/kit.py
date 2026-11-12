@@ -23,6 +23,7 @@ _parts = []  # (object, is_detail) for the piece being built
 _marks = []  # named points in it (an inside's way out, its lamps)
 _screens = []  # the displays in it: meshes of their own, which the game puts pictures on
 POSTERS = []  # pictures to show on them in a render (the game chooses its own)
+FACTION = ""  # whose piece was built last: renders dress it in that faction's textures
 
 
 def reset():
@@ -119,6 +120,8 @@ def finish(faction, piece):
     bpy.ops.object.select_all(action="DESELECT")
     for o in out + _marks + _screens:
         o.select_set(True)
+    global FACTION
+    FACTION = faction
     path = os.path.join(ROOT, "game", "city", faction, piece + ".glb")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", use_selection=True, export_apply=True, export_yup=True)
@@ -143,6 +146,7 @@ def render(path, foot, height):
     bpy.context.object.data.energy = 3.0
     bpy.ops.mesh.primitive_plane_add(size=max(foot) * 4, location=(0, 0, -0.05))
     bpy.context.object.data.materials.append(mat("ground", "#3a3f44", metal=0, rough=0.9))
+    texture_scene(FACTION)
     span = max(max(foot), height)
     d = span * 1.75
     bpy.ops.object.camera_add(location=(d * 0.62, d * 0.85, height * 0.5 + span * 0.45))
@@ -158,6 +162,93 @@ def render(path, foot, height):
     scene.camera = cam
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+
+
+def texture_scene(group):
+    """Dresses every material in the scene with its textures from game/textures, the way the game
+    does (game/surfaces.gd): the set listed for the material's name in surfaces.json under `group`
+    (a faction, or "models"), projected from the three axes in the object's own space. For renders
+    only: the exported models stay plain and the game adds the textures itself."""
+    import json
+    import re
+    tex_dir = os.path.join(ROOT, "game", "textures")
+    with open(os.path.join(tex_dir, "surfaces.json")) as f:
+        table = json.load(f)
+    entries = table.get(group, {})
+    for m in bpy.data.materials:
+        name = re.sub(r"\.\d+$", "", m.name).split(":")[0]
+        e = entries.get(name)
+        if e is None or not m.use_nodes or m.get("textured"):
+            continue
+        e = {"set": e} if isinstance(e, str) else e
+        folder = os.path.join(tex_dir, e["set"])
+        if not os.path.exists(os.path.join(folder, "albedo.png")):
+            continue
+        m["textured"] = True
+        tile = e.get("tile", table["sets"].get(e["set"], 4.0))
+        nt = m.node_tree
+        b = next(n for n in nt.nodes if n.type == "BSDF_PRINCIPLED")
+        coord = nt.nodes.new("ShaderNodeTexCoord")
+        mapping = nt.nodes.new("ShaderNodeMapping")
+        mapping.inputs["Scale"].default_value = (1 / tile,) * 3
+        nt.links.new(coord.outputs["Object"], mapping.inputs["Vector"])
+
+        def tex(map_name, colour):
+            path = os.path.join(folder, map_name + ".png")
+            if not os.path.exists(path):
+                return None
+            t = nt.nodes.new("ShaderNodeTexImage")
+            t.image = bpy.data.images.load(path, check_existing=True)
+            t.image.colorspace_settings.name = "sRGB" if colour else "Non-Color"
+            t.projection = "BOX"
+            t.projection_blend = 0.25
+            nt.links.new(mapping.outputs["Vector"], t.inputs["Vector"])
+            return t
+
+        def multiply(a, b_socket_or_value):
+            mix = nt.nodes.new("ShaderNodeMix")
+            mix.data_type = "RGBA"
+            mix.blend_type = "MULTIPLY"
+            mix.inputs["Factor"].default_value = 1.0
+            if isinstance(a, tuple):
+                mix.inputs[6].default_value = a
+            else:
+                nt.links.new(a, mix.inputs[6])
+            nt.links.new(b_socket_or_value, mix.inputs[7])
+            return mix.outputs[2]
+
+        def scale(socket, value):
+            mm = nt.nodes.new("ShaderNodeMath")
+            mm.operation = "MULTIPLY"
+            nt.links.new(socket, mm.inputs[0])
+            mm.inputs[1].default_value = value
+            return mm.outputs[0]
+
+        albedo, orm, glow = tex("albedo", True), tex("orm", False), tex("glow", False)
+        sep = nt.nodes.new("ShaderNodeSeparateColor")
+        nt.links.new(orm.outputs["Color"], sep.inputs["Color"])
+        base = tuple(b.inputs["Base Color"].default_value)
+        nt.links.new(multiply(multiply(base, albedo.outputs["Color"]), sep.outputs["Red"]), b.inputs["Base Color"])
+        rough = min(1.0, b.inputs["Roughness"].default_value * 1.25)
+        nt.links.new(scale(sep.outputs["Green"], rough), b.inputs["Roughness"])
+        nt.links.new(scale(sep.outputs["Blue"], b.inputs["Metallic"].default_value), b.inputs["Metallic"])
+        # The game reads the normal map; with no UVs to give it a tangent here, bump from the albedo.
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = 0.35
+        bump.inputs["Distance"].default_value = 0.02
+        nt.links.new(albedo.outputs["Color"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], b.inputs["Normal"])
+        if glow:
+            strength = b.inputs["Emission Strength"].default_value
+            if strength > 0:
+                colour = tuple(b.inputs["Emission Color"].default_value)
+            elif "glow" in e:
+                h = e["glow"]
+                colour = tuple(int(h[i:i + 2], 16) / 255.0 for i in (1, 3, 5)) + (1.0,)
+                b.inputs["Emission Strength"].default_value = 2.0
+            else:
+                continue
+            nt.links.new(multiply(colour, glow.outputs["Color"]), b.inputs["Emission Color"])
 
 
 def marker(name, at):
@@ -240,6 +331,7 @@ def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
         b.inputs["Emission Strength"].default_value = 1.0
         ob.data.materials.clear()
         ob.data.materials.append(m)
+    texture_scene(FACTION)
     for mk in _marks:
         if mk.name.startswith("light"):
             bpy.ops.object.light_add(type="POINT", location=mk.location)

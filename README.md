@@ -1048,6 +1048,35 @@ carry a `tag`, and each success answers `city_result` with it. The state carries
 `cities[planetId]`, the time each city last changed, so a full city isn't sent in every state; apps ask
 again when it moves. The pieces are in the catalog as `cities`.
 
+## Textures
+
+Every model wears textures over its colours: the ships, the Builder's base buildings, raid and
+battle facilities, station and carrier rooms, and every faction's city buildings and insides. There
+are 20 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
+a glow map for the ones that light up), all drawn procedurally by `tools/textures/make_textures.py`
+(`python tools/textures/make_textures.py [set ...] [--sheet FILE]`, needs numpy, scipy and Pillow):
+
+- **Shared:** painted hull panels, trim plates with vents, brushed steel, tread-plate deck, dark
+  hex grip, canopy glass, window panes (lit room by room), louvred light panels, rock and ice.
+- **Terran Compact:** heavy bolted armour plate with stencilled idents, hazard chevrons, ferrocrete.
+- **Ashen Collective:** domed chitin scales with sutures, swamp moss, glowing red veins.
+- **Luminar Accord:** long tapering ceramic plates whose seams glow green, faceted crystal.
+- **Coma Conglomerate:** dark gunmetal engraved with circuit traces that glow gold, hammered gold.
+
+`game/textures/surfaces.json` says which material wears which set and how many metres one tile
+spans: by material kind for `models.gd` (ships, base buildings, stand-ins), floor/wall/glass for the
+plain boxes of walk-in rooms, and by Blender material name for each faction's city models.
+`game/surfaces.gd` applies them: the maps are laid on from the three axes in the model's own space,
+so no model needs UVs, textures move with ships, and the Blender models stay plain (the game
+textures them as it loads them). The albedo is grey detail multiplied by the material's colour, so
+one set serves every faction colour. The maps are 512 px, compressed for the GPU on import.
+
+Blender renders use the same maps (`kit.texture_scene`), so `--render` and `--sheet` from
+`city_models.py` show the buildings textured. `tools/blender/game_models.py OUT_DIR [ships] [base]
+[close] [plain]` renders the code-built ships and base buildings textured (with `plain`, untextured
+too, for comparison): it reads their functions from `models.gd` and `base_models.gd` and builds them
+in Blender.
+
 ## The Frontier and terraforming
 
 A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in
