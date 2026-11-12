@@ -20,7 +20,11 @@
 		"ceramic_plates": 8.0,
 		"crystal": 2.0,
 		"gunmetal_traces": 6.0,
-		"hammered_gold": 1.5
+		"hammered_gold": 1.5,
+		"black_plating": 6.0,
+		"black_deck": 5.0,
+		"ember_grate": 2.0,
+		"black_machinery": 4.0
 	},
 	"models": {
 		"teal": "hull_panels",
@@ -70,7 +74,14 @@
 		"char": {"set": "chitin", "tile": 3.0},
 		"moss": "moss",
 		"red": "vein_glow",
-		"core": "vein_glow"
+		"core": "vein_glow",
+		"plate": {"set": "black_plating", "tile": 6.0, "glow": "#ff2a1c"},
+		"floor": {"set": "black_deck", "tile": 5.0, "glow": "#ff2a1c"},
+		"frame": {"set": "black_machinery", "tile": 4.0, "glow": "#ff2a1c"},
+		"grate": {"set": "ember_grate", "tile": 2.0, "glow": "#ff3a1c"},
+		"strip": "light_panel",
+      "ember": "vein_glow",
+		"hazard": "hazard_stripes"
 	},
 	"luminar": {
 		"pale": {"set": "ceramic_plates", "glow": "#4fd992"},

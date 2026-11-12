@@ -560,6 +560,157 @@ def vein_glow(seed=26):
     save("vein_glow", glow, h, np.full((N, N), 0.45), glow=glow, strength=30)
 
 
+# The Ashen's insides: black plating cut at angles, lit red from slits, seams and the furnaces below.
+
+def plates(seed, grid, sizes, chamfer, tall=False):
+    """Rectangular panels with their corners cut off at 45 degrees (the Ashen's angular plating).
+    Returns (ids, d, rects, lx, ly, w, h): d is how many pixels each pixel lies inside its own
+    panel's cut outline, lx/ly its place in the panel from the panel's corner, w/h the panel's size,
+    all per pixel. `chamfer` is the cut's size as a part of the panel's shorter side."""
+    ids, rects = panels(seed, grid, sizes, tall)
+    u = N // grid
+    d = np.zeros((N, N))
+    lx = np.zeros((N, N))
+    ly = np.zeros((N, N))
+    pw = np.ones((N, N))
+    ph = np.ones((N, N))
+    for k, (x, y, w, h) in enumerate(rects):
+        ys = np.arange(y * u, (y + h) * u) % N
+        xs = np.arange(x * u, (x + w) * u) % N
+        yy, xx = np.meshgrid(np.arange(h * u), np.arange(w * u), indexing="ij")
+        own = ids[np.ix_(ys, xs)] == k  # a panel shrunk to fit keeps only its own cells
+        ex = np.minimum(xx, w * u - 1 - xx)
+        ey = np.minimum(yy, h * u - 1 - yy)
+        c = chamfer * min(w, h) * u
+        inside = np.minimum(np.minimum(ex, ey), (ex + ey - c) / np.sqrt(2))
+        for target, value in ((d, inside), (lx, xx), (ly, yy), (pw, np.full(xx.shape, w * u)), (ph, np.full(xx.shape, h * u))):
+            region = target[np.ix_(ys, xs)]
+            region[own] = value[own]
+            target[np.ix_(ys, xs)] = region
+    return ids, d, rects, lx, ly, pw, ph
+
+
+def groove(d, at, width=1.6):
+    """A thin line cut round every panel, `at` pixels in from its outline."""
+    return np.clip(1 - np.abs(d - at) / width, 0, 1)
+
+
+def black_plating(seed=31):
+    """The Ashen's inside walls: black plates with their corners cut, a line or two scored round
+    each, bolts in the cuts, louvres in some, and here and there a slit that glows."""
+    r = rng(seed)
+    ids, d, rects, lx, ly, pw, ph = plates(seed, 8, [1, 2, 2, 3, 4], 0.22)
+    n = len(rects)
+    plate = np.clip(d / 5.0, 0, 1) ** 0.7
+    score = groove(d, 16) + groove(d, 24) * (r.random(n) < 0.5)[ids]
+    step = (r.random(n) < 0.35)[ids] * np.clip((d - 34) / 3, 0, 1) * 0.25  # a raised middle on some
+    h = plate * (0.7 + r.random(n)[ids] * 0.1) - score * 0.18 + step
+    # Louvres: a block of slots across the middle of some wide plates.
+    kind = r.random(n)[ids]
+    cx, cy = lx - pw / 2, ly - ph / 2
+    in_block = (np.abs(cx) < pw * 0.28) & (np.abs(cy) < ph * 0.22) & (d > 30)
+    louvre = in_block & (kind < 0.22) & (np.sin(ly * np.pi / 7.0) > 0.2)
+    h = np.where(louvre, h - 0.35, h)
+    # Slits: one long thin light across a plate, or up it.
+    across = (np.abs(cy) < 3.5) & (np.abs(cx) < pw * 0.32) & (kind > 0.74) & (kind < 0.9) & (d > 20)
+    up = (np.abs(cx) < 3.5) & (np.abs(cy) < ph * 0.3) & (kind >= 0.9) & (d > 20)
+    slit = (across | up).astype(float)
+    housing = blur(slit, 5) > 0.02
+    h = np.where(housing, h - 0.12, h)
+    h = np.where(slit > 0, h - 0.3, h)
+    for (x, y, w, hh) in rects:  # a bolt in each cut corner
+        u = N // 8
+        c = 0.22 * min(w, hh) * u * 0.62
+        for sx, sy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            stamp(h, x * u + (c if sx == 0 else w * u - c), y * u + (c if sy == 0 else hh * u - c), 3.5, 1.0)
+    h += fbm(96, seed, 3) * 0.015
+    brushed = fbm(3, seed + 1, 5, stretch=(1, 40))
+    edge_wear = np.clip(1 - d / 4.0, 0, 1) * np.clip((fbm(40, seed + 3, 4) - 0.45) * 3, 0, 1)
+    dirt = grime(seed + 5, 0.22) + cavity(h, 5) * 0.45
+    albedo = np.clip(0.86 + r.normal(0, 0.035, n)[ids] + (brushed - 0.5) * 0.1 - dirt - score * 0.3 + edge_wear * 0.25
+                     - louvre * 0.45 + slit * 0.3, 0, 1)
+    rough = np.clip(0.5 + (brushed - 0.5) * 0.35 + dirt * 0.5 - edge_wear * 0.25, 0, 1)
+    glow = np.clip(blur(slit, 0.8) * 1.2, 0, 1)
+    save("black_plating", albedo, h, rough, glow=glow, strength=42)
+
+
+def black_deck(seed=32):
+    """The Ashen's floors: big plates with cut corners, scored twice round, worn glossy where feet
+    go, with red light leaking up through some of the seams."""
+    r = rng(seed)
+    ids, d, rects, lx, ly, pw, ph = plates(seed, 4, [1, 1, 2], 0.3)
+    n = len(rects)
+    plate = np.clip(d / 6.0, 0, 1) ** 0.6
+    score = groove(d, 22, 2.0) + groove(d, 34, 1.4)
+    tread = 0.5 + 0.5 * np.sin((lx + ly) * np.pi / 9.0) * np.sin((lx - ly) * np.pi / 9.0)  # a fine diamond grip
+    grip = (d > 44) & (r.random(n) < 0.6)[ids]
+    h = plate * 0.75 - score * 0.16 + np.where(grip, tread * 0.05, 0.0)
+    u = N // 4
+    for (x, y, w, hh) in rects:
+        for i in range(w * 4 + 1):  # bolts along the top and bottom edges
+            px = x * u + 30 + (w * u - 60) * i / (w * 4)
+            stamp(h, px, y * u + 12, 3.5, 0.95)
+            stamp(h, px, (y + hh) * u - 12, 3.5, 0.95)
+    h += fbm(96, seed, 3) * 0.012
+    scuff = np.clip((fbm(5, seed + 2, 5, stretch=(1, 3)) - 0.5) * 3.5, 0, 1)
+    dirt = grime(seed + 5, 0.2, streaks=False) + cavity(h, 6) * 0.5
+    albedo = np.clip(0.84 + r.normal(0, 0.03, n)[ids] - dirt - score * 0.3 + scuff * 0.12, 0, 1)
+    rough = np.clip(0.62 - scuff * 0.3 + dirt * 0.5, 0, 1)
+    lit = (r.random(n) < 0.13)[ids]  # the plates whose seams leak light
+    seam = np.clip(1 - np.abs(d - 1.0) / 2.5, 0, 1) * lit * (0.55 + 0.45 * fbm(8, seed + 7, 3))
+    save("black_deck", albedo, h, rough, glow=np.clip(blur(seam, 0.7) * 1.3, 0, 1), strength=38)
+
+
+def ember_grate(seed=33):
+    """Grating over a furnace: a mesh of flat bars in a heavier frame, the fire showing through."""
+    yy, xx = np.mgrid[0:N, 0:N]
+    cell, frame = N // 16, N // 4
+    bar = (np.minimum(xx % cell, cell - xx % cell) < 5) | (np.minimum(yy % (cell * 2), cell * 2 - yy % (cell * 2)) < 4)
+    beam = (np.minimum(xx % frame, frame - xx % frame) < 14) | (np.minimum(yy % frame, frame - yy % frame) < 14)
+    solid = (bar | beam).astype(float)
+    h = blur(solid, 1.2) * 0.7 + beam * 0.3
+    fire = 0.45 + 0.55 * norm01(fbm(5, seed, 5) + fbm(20, seed + 1, 3) * 0.4)
+    glow = np.clip((1 - blur(solid, 1.0)) * fire, 0, 1)
+    wear = np.clip((fbm(30, seed + 2, 4) - 0.5) * 3, 0, 1)
+    albedo = np.clip(solid * (0.8 + wear * 0.15) + (1 - solid) * 0.12, 0, 1)
+    rough = np.clip(0.55 - wear * 0.2 + (1 - solid) * 0.4, 0, 1)
+    save("ember_grate", albedo, h, rough, glow=glow, strength=55)
+
+
+def black_machinery(seed=34):
+    """Machine faces for pillars, tanks and engines: small panels of louvres, ribbed conduit, hatches
+    and status lights, packed tight."""
+    r = rng(seed)
+    ids, d, rects, lx, ly, pw, ph = plates(seed, 16, [1, 2, 2, 3, 4], 0.12, tall=True)
+    n = len(rects)
+    kind = r.random(n)[ids]
+    plate = np.clip(d / 3.5, 0, 1) ** 0.7
+    h = plate * (0.55 + r.random(n)[ids] * 0.3)
+    inner = d > 9
+    louvre = inner & (kind < 0.25) & (np.sin(ly * np.pi / 5.0) > 0.1)
+    rib = np.where(inner & (kind >= 0.25) & (kind < 0.5), 0.5 + 0.5 * np.cos(lx * np.pi / 6.0), 0.0)  # conduit running up
+    hatch = groove(d, 12, 1.4) * ((kind >= 0.5) & (kind < 0.78))
+    h = np.where(louvre, h - 0.3, h) + rib * 0.22 - hatch * 0.15
+    lamp = np.zeros((N, N))
+    u = N // 16
+    for k, (x, y, w, hh) in enumerate(rects):
+        v = r.random()
+        if v < 0.16 and w >= 2:  # a row of status lights
+            for i in range(int(r.integers(2, 5))):
+                stamp(lamp, x * u + 16 + i * 14, y * u + hh * u * 0.5, 3.2, 1.0, dome=False)
+        elif v < 0.24 and hh >= 2:  # a short upright light bar
+            x0, y0 = int(x * u + w * u * 0.5), int(y * u + hh * u * 0.3)
+            lamp[np.ix_(np.arange(y0, y0 + int(hh * u * 0.4)) % N, np.arange(x0 - 2, x0 + 3) % N)] = 1
+        for sx in (0, 1):
+            for sy in (0, 1):
+                stamp(h, x * u + (8 if sx == 0 else w * u - 8), y * u + (8 if sy == 0 else hh * u - 8), 2.4, 1.0)
+    h = np.where(lamp > 0, h - 0.1, h) + fbm(96, seed, 3) * 0.015
+    dirt = grime(seed + 5, 0.25) + cavity(h, 4) * 0.55
+    albedo = np.clip(0.84 + r.normal(0, 0.05, n)[ids] - dirt - louvre * 0.4 + rib * 0.08 - hatch * 0.25 + lamp * 0.3, 0, 1)
+    rough = np.clip(0.5 + dirt * 0.5 - rib * 0.15, 0, 1)
+    save("black_machinery", albedo, h, rough, glow=np.clip(blur(lamp, 0.7) * 1.3, 0, 1), strength=42)
+
+
 # Luminar Accord: pale ceramic in long tapering plates, green light in every seam.
 
 def ceramic_plates(seed=27):
@@ -663,6 +814,7 @@ def hammered_gold(seed=30):
 
 SETS = {f.__name__: f for f in [hull_panels, trim_plates, brushed_steel, deck_plate, grip_dark, glass, window_lights,
                                 light_panel, rock, ice, armour_plate, hazard_stripes, ferrocrete, chitin, moss, vein_glow,
+                                black_plating, black_deck, ember_grate, black_machinery,
                                 ceramic_plates, crystal, gunmetal_traces, hammered_gold]}
 
 

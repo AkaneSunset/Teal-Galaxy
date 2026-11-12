@@ -54,6 +54,9 @@ const SMALL_PART := 2.5 # metres: parts no bigger than this are details...
 const DETAIL_RANGE := 320.0 # ...drawn only this close
 const UNDO_STEPS := 100
 const INSIDE_PATH := "res://city/%s/inside_%s.glb"
+## The lamps inside a faction's buildings: their colour, and how much brighter than the usual
+## (the Ashen light their black halls red). Any other faction has cool white ones.
+const INSIDE_LAMPS := {"ashen": [Color(1.0, 0.22, 0.14), 1.6]}
 const INSIDE_AS := {"tower": "zone_high", "highrise": "zone_high", "habitat": "zone_high"} # whose inside a piece borrows
 const INSIDE_DEPTH := 400.0 # how far under the city the insides are built...
 const INSIDE_LEVELS := 40 # ...on this many levels, 100 m apart, by piece id
@@ -761,7 +764,8 @@ func _furnish(n: Node) -> void:
 		n.add_child(body)
 	elif n is Node3D and label.begins_with("light"):
 		var high := (n as Node3D).position.y > 8.0
-		_light(n as Node3D, Vector3.ZERO, Color(0.85, 0.92, 1.0), 2.2 if high else 1.3, 34.0 if high else 12.0)
+		var lamp: Array = INSIDE_LAMPS.get(_style, [Color(0.85, 0.92, 1.0), 1.0])
+		_light(n as Node3D, Vector3.ZERO, lamp[0], (2.2 if high else 1.3) * float(lamp[1]), 34.0 if high else 12.0)
 	elif n is Node3D and label.begins_with("exit"):
 		_use(n as Node3D, Vector3.ZERO, func(): return "Press %s to go back out" % _key(), _leave_inside)
 		_inside_use = _uses[-1]

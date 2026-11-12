@@ -241,7 +241,8 @@ def main(argv):
             if "--render" in dirs:
                 if piece.startswith("inside_"):
                     kit.POSTERS = sorted(glob.glob(os.path.join(kit.ROOT, "game", "city", faction, "propaganda", "poster_*.png")))
-                    kit.render_inside(os.path.join(dirs["--render"], f"{faction}_{piece}.png"))
+                    views = interiors.VIEWS.get(faction, {}).get(piece, ())
+                    kit.render_inside(os.path.join(dirs["--render"], f"{faction}_{piece}.png"), views=views)
                     continue
                 render(os.path.join(dirs["--render"], f"{faction}_{piece}.png"), (cells[0] * CELL, cells[1] * CELL), height)
         if "--sheet" in dirs:  # every look at the top tier, then three looks growing through the tiers

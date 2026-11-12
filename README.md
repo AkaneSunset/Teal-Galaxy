@@ -1026,6 +1026,16 @@ Terran Compact has the Government Hall (gatehouse, great hall, council chamber),
 for low-density lots and a flat block (lobby, corridor, a flat) for high-density lots, Tower Blocks,
 High-rises and Habitat blocks. Windows are light panels for now, with no view of the city.
 
+The Ashen Collective's insides are black plating cut at angles and lit red, from slits in the walls,
+seams in the floor and the furnaces under it: the Furnace Court for the Government Hall (a
+gatehouse, then a hall with a furnace hatch in the floor, piers, side galleries up ramps, a gantry
+and the great furnace on its dais), a brood den for low-density lots (stacked sleeping cells, a
+hearth under a hood, a store) and a spire atrium for high-density lots (galleries of cells round a
+furnace shaft with a bridge to its column, and one cell standing open). Their lamps are red
+(`INSIDE_LAMPS` in `game/city.gd`); the galleries above the atrium floor are for looking at.
+`city_models.py ashen inside_hall --render DIR` pictures an inside from its door and from the
+views listed in `interiors.VIEWS` (`DRAFT=1` for a quick small one).
+
 **Propaganda.** Every faction has four posters (`game/city/<faction>/propaganda/poster_<n>.png`,
 512 x 768): a monument, its emblem, its skyline by night and a notice. `tools/blender/propaganda.py`
 makes them: the buildings on them are the faction's own models rendered in Blender and cut down to
@@ -1034,7 +1044,7 @@ flat inks, and the rest is drawn with Pillow (`python tools/blender/propaganda.p
 faction's buildings: gatehouses, halls, lobbies, corridors, and over a home's mess table. A display
 is part of the inside's model (`kit.display`): a frame, and a mesh named `screen...` that the game
 puts the pictures on, each display starting on a different one and all moving on every 14 seconds.
-The displays are in every Compact inside; the other factions' posters are ready for their insides.
+The displays are in every Compact and Ashen inside; the other factions' posters are ready for theirs.
 
 **Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
 each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop
@@ -1052,14 +1062,16 @@ again when it moves. The pieces are in the catalog as `cities`.
 
 Every model wears textures over its colours: the ships, the Builder's base buildings, raid and
 battle facilities, station and carrier rooms, and every faction's city buildings and insides. There
-are 20 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
+are 24 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
 a glow map for the ones that light up), all drawn procedurally by `tools/textures/make_textures.py`
 (`python tools/textures/make_textures.py [set ...] [--sheet FILE]`, needs numpy, scipy and Pillow):
 
 - **Shared:** painted hull panels, trim plates with vents, brushed steel, tread-plate deck, dark
   hex grip, canopy glass, window panes (lit room by room), louvred light panels, rock and ice.
 - **Terran Compact:** heavy bolted armour plate with stencilled idents, hazard chevrons, ferrocrete.
-- **Ashen Collective:** domed chitin scales with sutures, swamp moss, glowing red veins.
+- **Ashen Collective:** domed chitin scales with sutures, swamp moss, glowing red veins; and for
+  their insides black wall plating with cut corners and red slits, octagonal deck plates with light
+  in some seams, ember grating over a fire, and machinery panels (louvres, conduit, status lights).
 - **Luminar Accord:** long tapering ceramic plates whose seams glow green, faceted crystal.
 - **Coma Conglomerate:** dark gunmetal engraved with circuit traces that glow gold, hammered gold.
 

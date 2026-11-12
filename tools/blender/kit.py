@@ -244,7 +244,7 @@ def texture_scene(group):
                 colour = tuple(b.inputs["Emission Color"].default_value)
             elif "glow" in e:
                 h = e["glow"]
-                colour = tuple(int(h[i:i + 2], 16) / 255.0 for i in (1, 3, 5)) + (1.0,)
+                colour = tuple((int(h[i:i + 2], 16) / 255.0) ** 2.2 for i in (1, 3, 5)) + (1.0,)  # as the game shows it
                 b.inputs["Emission Strength"].default_value = 2.0
             else:
                 continue
@@ -309,13 +309,21 @@ def wall(a, b, z, h, m, gaps=(), t=0.4):
     seg(pos, length, z, h)
 
 
-def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
-    """A view from where you come in, lit by the piece's own lamps."""
+# What an inside's lamps give off in a render, by faction: (colour, how strong beside the usual).
+LAMPS = {"ashen": ((1.0, 0.1, 0.055), 1.1)}
+
+
+def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17, views=()):
+    """A view from where you come in, lit by the piece's own lamps. `views` are more (eye, look,
+    lens) to picture after it, written beside it as <path>_2.png, _3.png..."""
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
-    scene.cycles.samples = 48
-    scene.render.resolution_x, scene.render.resolution_y = 1200, 700
+    draft = bool(os.environ.get("DRAFT"))  # a quick look while a room is being laid out
+    scene.cycles.samples = 12 if draft else 48
+    scene.render.resolution_x, scene.render.resolution_y = (600, 350) if draft else (1200, 700)
+    if FACTION in LAMPS:  # keep a coloured light its colour instead of washing it toward white
+        scene.view_settings.view_transform = "Standard"
     world = bpy.data.worlds.new("dark")
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.02, 0.025, 0.035, 1)
@@ -335,8 +343,9 @@ def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
     for mk in _marks:
         if mk.name.startswith("light"):
             bpy.ops.object.light_add(type="POINT", location=mk.location)
-            bpy.context.object.data.energy = 2500 if mk.location.z > 8 else 500
-            bpy.context.object.data.color = (0.85, 0.92, 1.0)
+            colour, strength = LAMPS.get(FACTION, ((0.85, 0.92, 1.0), 1.0))
+            bpy.context.object.data.energy = (2500 if mk.location.z > 8 else 500) * strength
+            bpy.context.object.data.color = colour
             bpy.context.object.data.shadow_soft_size = 0.5
     bpy.ops.object.camera_add(location=eye)
     cam = bpy.context.object
@@ -351,6 +360,70 @@ def render_inside(path, eye=(0.0, -0.5, 1.7), look=(0.0, -20.0, 2.5), lens=17):
     scene.camera = cam
     scene.render.filepath = path
     bpy.ops.render.render(write_still=True)
+    for n, (eye, look, lens) in enumerate(views):
+        cam.location = eye
+        target.location = look
+        cam.data.lens = lens
+        scene.render.filepath = path.replace(".png", f"_{n + 2}.png")
+        bpy.ops.render.render(write_still=True)
+
+
+def _solid(name, bm, m, detail):
+    """A part from a bmesh, its faces turned outward (the game's collision is one-sided)."""
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    return _keep(ob, m, detail)
+
+
+def slab_with_hole(size, r, h, at, m, verts=8, hole=(0.0, 0.0), detail=False):
+    """A slab `size` (x, y) across and `h` thick, its bottom centre at `at`, with a `verts`-sided
+    hole of radius `r` through it, `hole` from its middle: the floor round a pit, a gallery round a
+    shaft. The hole's flats face along the axes."""
+    bm = bmesh.new()
+    x, y, z = at
+    outer = [bm.verts.new((x + sx * size[0] / 2, y + sy * size[1] / 2, z + h)) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    turn = math.pi / verts
+    inner = [bm.verts.new((x + hole[0] + r * math.cos(turn + k * math.tau / verts), y + hole[1] + r * math.sin(turn + k * math.tau / verts), z + h)) for k in range(verts)]
+    edges = [bm.edges.new((outer[i], outer[(i + 1) % 4])) for i in range(4)]
+    edges += [bm.edges.new((inner[i], inner[(i + 1) % verts])) for i in range(verts)]
+    bmesh.ops.triangle_fill(bm, use_beauty=True, edges=edges)
+    down = bmesh.ops.extrude_face_region(bm, geom=bm.faces[:])
+    bmesh.ops.translate(bm, vec=(0, 0, -h), verts=[v for v in down["geom"] if isinstance(v, bmesh.types.BMVert)])
+    return _solid("slab", bm, m, detail)
+
+
+def collar(r0, r1, h, at, m, verts=8, detail=False):
+    """A hollow drum: a wall from radius r0 out to r1, `h` high, its bottom centre at `at` (a
+    shaft's lining, a platform round a column). Its flats face along the axes."""
+    bm = bmesh.new()
+    x, y, z = at
+    turn = math.pi / verts
+    rings = [[bm.verts.new((x + r * math.cos(turn + k * math.tau / verts), y + r * math.sin(turn + k * math.tau / verts), zz)) for k in range(verts)]
+             for r, zz in ((r0, z), (r1, z), (r1, z + h), (r0, z + h))]
+    for a, b in zip(rings, rings[1:] + rings[:1]):
+        for k in range(verts):
+            bm.faces.new((a[k], a[(k + 1) % verts], b[(k + 1) % verts], b[k]))
+    return _solid("collar", bm, m, detail)
+
+
+def ramp(w, run, rise, at, m, along="-y", detail=False):
+    """A solid wedge to walk up: `w` wide, climbing `rise` over `run` metres toward `along` ("+x",
+    "-x", "+y" or "-y"), the middle of its low edge at `at`."""
+    d = {"+x": (1, 0), "-x": (-1, 0), "+y": (0, 1), "-y": (0, -1)}[along]
+    x, y, z = at
+
+    def p(u, v, zz):
+        return (x + d[0] * u - d[1] * v, y + d[1] * u + d[0] * v, z + zz)
+
+    bm = bmesh.new()
+    v = [bm.verts.new(q) for q in (p(0, -w / 2, 0), p(0, w / 2, 0), p(run, -w / 2, 0), p(run, w / 2, 0), p(run, -w / 2, rise), p(run, w / 2, rise))]
+    for f in ((0, 1, 3, 2), (0, 1, 5, 4), (2, 3, 5, 4), (0, 2, 4), (1, 3, 5)):
+        bm.faces.new([v[i] for i in f])
+    return _solid("ramp", bm, m, detail)
 
 
 def cone(r, h, at, m, verts=4, top=0.0, sx=1.0, sy=1.0, turn=0.0, detail=False):
@@ -504,6 +577,14 @@ def ashen_mats():
         "red": mat("red", "#e0453c", emit=2.4),
         "core": mat("core", "#ff3a22", emit=4.0),
         "moss": mat("moss", "#1b231c", metal=0.0, rough=0.6),
+        # Their insides: black plating cut at angles, lit red from slits and from the furnaces below.
+        "plate": mat("plate", "#101116", metal=0.6, rough=0.42),
+        "floor": mat("floor", "#14151a", metal=0.5, rough=0.45),
+        "frame": mat("frame", "#1a1b21", metal=0.6, rough=0.4),
+        "grate": mat("grate", "#2a1210", metal=0.4, rough=0.5),
+        "strip": mat("strip", "#ff0903", emit=2.4),
+        "ember": mat("ember", "#ff1305", emit=3.0),
+        "hazard": mat("hazard", "#c9a227", metal=0.2, rough=0.6),
     }
 
 
