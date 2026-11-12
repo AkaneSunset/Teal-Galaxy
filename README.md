@@ -1092,6 +1092,13 @@ draws at most twice the batches it did. Wrecks keep their side's textures, darke
 them the same way: it reads the `match` block of `battle_models.gd`, builds each unit in Blender and
 lays the maps on by face as the shader does.
 
+**Map terminal (a look, not in the game yet).** `tools/blender/map_terminal.py OUT_DIR [samples=N]
+[glb]` models and renders a holographic map station: a projector on a dais throwing a wireframe map
+of a ring station into the air (rooms as boxes, corridors as lines, the lift shaft as a beam, an
+amber route, markers), in a dark chamber with reflecting pools whose floor and walls wear the deck
+and trim sets. The map is built from the `STATION` table, so a real station's or city's layout
+could feed it. With `glb` it also exports the terminal and hologram.
+
 ## The Frontier and terraforming
 
 A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in
