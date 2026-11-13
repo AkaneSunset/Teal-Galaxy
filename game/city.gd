@@ -75,6 +75,7 @@ var _asked := -1 # the stamp last asked for
 var _pieces := {} # piece id -> {"key", "type", "chunk", "xf", "solid"}
 var _parts := {} # piece type -> [{mesh, material, xf, small}]: its model, taken apart for drawing
 var _scenes := {} # glb path -> PackedScene (or null: none for this faction yet)
+var _solids := {} # look -> [[middle, size]]: what stands in the way on a flat piece (see _solids_of)
 var _looks := {} # zone type -> how many looks the faction has for it
 var _tiers := {} # the tier rules: {top, growHours, declineHours, services}
 var _insides := {} # piece type -> its insides' paths (empty: no going in)
@@ -512,11 +513,33 @@ func _make_piece(p: Dictionary, key: String, ruins: bool) -> Dictionary:
 		var s := _size(type, rot)
 		solid = _box(self, Vector3(s.x * _cell * 0.86, 30.0, s.y * _cell * 0.86), centre + Vector3(0, 15.0, 0), Color(0, 0, 0), true)
 		solid.visible = false
+	elif not ruins and not _solids_of(_look(type, int(p.id))).is_empty():
+		# A flat piece you walk over, but with something standing on it (a park's monument): walls
+		# round just those parts, where its model marks them.
+		solid = Node3D.new()
+		add_child(solid)
+		for sb in _solids_of(_look(type, int(p.id))):
+			_box(solid, sb[1], centre + basis * (sb[0] as Vector3), Color(0, 0, 0), true).visible = false
 	var door = null
 	if not ruins and _inside_path(type, int(p.id)) != "":
 		var depth := float(_catalog.get(type, {}).get("d", 1)) * _cell
 		door = centre + Basis(Vector3.UP, rot * PI * 0.5) * Vector3(0, 1.2, -depth * 0.46)
 	return {"key": key, "type": type, "batch": batch, "xf": Transform3D(basis, centre), "solid": solid, "door": door}
+
+
+## Where a flat piece's model stands in the way: [[middle, size]] of a box for each "solid..."
+## marker in it (a box its scale's size), so you walk round a park's monument, not through it.
+func _solids_of(look: String) -> Array:
+	if not _solids.has(look):
+		var out := []
+		var model := _style_model(look)
+		if model:
+			for c in model.find_children("solid*", "", true, false):
+				if c is Node3D:
+					out.append([(c as Node3D).position, ((c as Node3D).scale * 2.0).abs()])
+			model.free()
+		_solids[look] = out
+	return _solids[look]
 
 
 ## The faction's Blender model of a piece, or null if it has none yet.

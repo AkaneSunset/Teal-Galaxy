@@ -67,6 +67,9 @@
 		"deck": "deck_plate",
 		"white": "ferrocrete",
 		"hazard": "hazard_stripes",
+		"leaf": {"set": "moss", "tile": 2.0},
+		"bark": {"set": "rock", "tile": 2.0},
+		"stone": {"set": "ferrocrete", "tile": 4.0},
 		"dark": "grip_dark",
 		"blue": "window_lights",
 		"amber": "light_panel"
@@ -83,7 +86,10 @@
 		"grate": {"set": "ember_grate", "tile": 2.0, "glow": "#ff3a1c"},
 		"strip": "light_panel",
       "ember": "vein_glow",
-		"hazard": "hazard_stripes"
+		"hazard": "hazard_stripes",
+		"leaf": {"set": "moss", "tile": 2.0},
+		"bark": {"set": "rock", "tile": 2.0},
+		"stone": {"set": "ferrocrete", "tile": 4.0}
 	},
 	"luminar": {
 		"pale": {"set": "ceramic_plates", "glow": "#4fd992"},
