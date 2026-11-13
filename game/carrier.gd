@@ -340,10 +340,13 @@ func _build_command_deck() -> void:
 	for k in 4:
 		var a := k * TAU / 4.0 + PI / 4.0
 		var at := c + Vector3(cos(a), 0, sin(a)) * 6.8
-		_console(self, at, (c - at).normalized(), ["HIGH COMMAND", "FLEET", "DRONE CONTROL", "GALAXY MAP"][k], ["Orders", "Carrier group", "Drones ready", "FTL jump ready"][k], 1.6)
+		_console(self, at, (c - at).normalized(), ["HIGH COMMAND", "FRONTIER", "DRONE CONTROL", "GALAXY MAP"][k], ["Orders", "Clusters and colonies", "Drones ready", "FTL jump ready"][k], 1.6)
 		if k == 0:
 			# High Command: your faction's orders (explorer.gd, orders_view.gd).
 			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), func(): return "High Command: press %s for your faction's orders" % _key(), func(): service.emit("orders"))
+		if k == 1:
+			# The Frontier: clusters, the Terraformer, colonies and their cities (explorer.gd, frontier_panel.gd).
+			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), func(): return "Frontier: press %s for your clusters, Terraformer and colonies" % _key(), func(): service.emit("frontier"))
 		if k == 3:
 			# The galaxy map: jump the carrier to any system or planet (explorer.gd, jump_panel.gd).
 			_use(self, at + (c - at).normalized() * 1.2 + Vector3(0, 1.0, 0), _jump_prompt, func(): service.emit("jump"))

@@ -578,11 +578,14 @@ their credits. Builders of the same faction find it under **Jobs** and fill as m
 from stock, paid their share of the reward as they go; the goods go in the pilot's hold. The pilot can
 cancel it and get back whatever hasn't been paid.
 
-**War supply and War Merit.** The War screen's **Supply** tab gives goods from stock to your faction's
-war supply in your system, which sector battles will spend. When your faction is in a campaign on a
-planet of your system, pick the front the goods go to (*For the front at*): they count for it in its
-[war-supply ledger](#war-supply-on-the-fronts), and your account takes your faction's side there. Each unit earns War Merit by its value
-(metal 2, ice 3, any other item what it's worth), and Merit ranks make your outposts produce more:
+**War goods, War Merit and the front.** The War screen's **Supply** tab sends finished war goods from
+stock to your faction's **stockpile on a front**: a planet of your system whose campaign your faction is
+in (pick it under *Front*). Only finished goods go: landers, hauler hulls, drone chassis, weapon systems,
+fuel cells, missiles, torpedoes, strategic warheads, sensor modules, shell and slug crates. Metal, ice,
+ores and materials such as alloy and isotope cells stay for building. The goods count for the front in
+its [war-supply ledger](#war-supply-on-the-fronts), and your account takes your faction's side there.
+What they do in battle is under [War goods at the front](#war-goods-at-the-front). Each unit earns War
+Merit by its value, and Merit ranks make your outposts produce more:
 
 | Rank | War Merit | Outposts produce |
 | --- | --- | --- |
@@ -591,6 +594,38 @@ planet of your system, pick the front the goods go to (*For the front at*): they
 | Quartermaster | 2000 | 4% more |
 | Provisioner | 8000 | 6% more |
 | War Industrialist | 25000 | 8% more |
+
+### War goods at the front
+
+What Builders' outposts make is what the big fights use (`server/stockpile.ts`). Each faction keeps a
+stockpile of war goods on each front, filled from the Supply tab, and it **empties when the front's
+weekly campaign ends**: every campaign is supplied afresh. Every lot remembers the Builder who sent it.
+
+A **Supremacy** or **Sector Defense** match takes a **war chest** from its side's stockpile as each pilot
+joins: up to `warChest.perPilot` of each good the mode uses, per pilot (1 lander, 1 hauler, 1 drone
+chassis, 1 weapon system, 20 fuel cells, 2 missiles, 1 sensor module, 2 shell crates and 5 slug crates),
+times the side's underdog multiplier, and one strategic warhead a match. Torpedoes wait for a mode that
+uses them. Sector Defense, always against AI,
+draws half that; AI troops draw nothing. When the match ends, **half of what it didn't use comes back**
+(rounded up), the rest lost in transit. Sector Battles, Space Battles and Facility Battles don't use
+war goods.
+
+| Good | Supremacy | Sector Defense |
+| --- | --- | --- |
+| Lander chassis | A forward drop ship 45 s into each ground phase, short of the nearest point you don't hold: respawn there until the ground is won | One more shared life |
+| Hauler hull | One more boarding shuttle, mid-field | |
+| Drone chassis | 4 more fodder bots for your side, all match | A sentry drone over the middle that fires on the waves until the set ends |
+| Weapon system | A railgun at your drop ship with the front-supply drop | One more rocket launcher in the end-of-set drop |
+| Fuel cells | 5 s more boarding window for every 10, up to 15 s | |
+| Missile | A rocket launcher at your drop ship with the front-supply drop | A rocket launcher in every drop |
+| Strategic warhead | A breaching charge: the first blast door aboard goes as you board | The first Warlord is taken out as it lands |
+| Sensor module | A Sensor Array sweep at the start of each ground phase | Scouts a set: the next wave's makeup in every break |
+| Shell crate | An Orbital Barrage for the pilot who brought it | 80 damage to every enemy as a wave lands |
+| Slug crate | | One more ammo crate in each drop |
+
+Every use is in the match feed with the Builder's name ("a Rocket launcher from Akane"). When the match
+ends, each Builder whose goods were used gets an alert of what they did and the result, and goods used
+by the winning side earn `warChest.usedWinMerit` (25%) of their value again in War Merit.
 
 ### The Coma Conglomerate: admins and the AI director
 
@@ -894,6 +929,263 @@ the hall has nine at a time, and DOCK CONTROL by the entrance shows the next nin
 Walk through one to visit that carrier; the same gate, or the shuttle console on its Hangar Deck, takes
 you back. If its owner undocks with you aboard, you ride along as crew, and you can only step off where
 the carrier docks next.
+
+## Cities
+
+Cities are built on PC, with one city builder for two kinds of world: a Founder's terraformed
+Frontier world, and the factions' homeworlds (the capital worlds: Bastion, Anvil, Shade, Hollow,
+Radiance, Glimmer), which the game's admins lay out. The Coma Conglomerate is never playable: its
+space (Comae, with Nadir and Zenith) is closed to every player, and only admins jump there or land, to
+run server events. No player ever sees Coma cities. The phone keeps its base and
+outposts. A city is a 1.2 km square of 10 m cells (server/cities.ts); every piece covers a block of
+cells and can be turned a quarter at a time: roads, plazas and parks, towers and high-rises, civic
+buildings, industry, walls and turrets.
+
+**Getting there.** Fly into a homeworld's orbit (no station there: capital worlds can't be attacked)
+and press F to take a lander down. A colony's city is reached from the Frontier screen (the FRONTIER
+console on your carrier's Command Deck, or Frontier on the ship's menu): on its system, "Go down to
+your city" on the Colony page, or "Visit the city" on the Trade page. You arrive on foot at the
+shuttle stop on the south edge; its console takes you back up. Everyone in a city walks it together.
+
+**Building.** Where you may build, press B (or use the CITY PLANNING console at the stop) for the
+builder: the view rises over the city, the pieces are down the right, and the grid shows.
+Click places the chosen piece (hold and drag to lay roads and walls), or picks a placed one: R turns
+it, M moves it, X takes it up. Ctrl+Z undoes your last change (a dragged road undoes as one). Right
+click lets go. W A S D or right drag pans, Q and E turn the view, the wheel zooms, and B or Esc leaves.
+Beside the mouse the chosen piece says what it costs (free, one from store, or a new one for so many
+credits) and what it adds to the colony, and turns red with the reason when it can't go there ("Mine
+is in the way", "Unlocks at colony tier 2", "Needs 25,000 credits"). The builder's corner shows the
+piece count, frame rate and draw calls.
+
+- **On a colony** only its Founder builds. The colony's buildings (habitat blocks, precincts,
+  clinics, power plants, mines, foundries, smelters, works, reactors) are pieces: a building built on
+  the Colony page waits in store until placed, and placing one with none in store builds it there,
+  paid and tier-locked the same way. Taking one up puts it back in store; it still counts. Roads,
+  plazas, parks, towers and walls are free. Homeworld-only pieces (the Government Hall, Star Port,
+  Carrier Dock...) aren't offered. A colony that collapses and goes to auction leaves its city as
+  ruins.
+- **On a homeworld** only admins build (start the server with `ADMIN_KEY` and the game with
+  `--admin-key`, see Admins above). Every piece is offered and is scenery, tinted in the owning
+  faction's look. "Copy city from" copies another homeworld's layout as a starting point, and
+  "Clear the whole city" (pressed twice) empties it.
+
+**Faction styles.** Every city is built in its faction's look: the homeworld's owner, or the colony
+Founder's faction (Founders don't pick). The models are made in Blender by
+`tools/blender/city_models.py`, which writes `game/city/<faction>/<piece>.glb`; a piece with no model
+for its faction yet uses the shared stand-in. Each model is built to its footprint (one cell is 10 m),
+origin on the ground in the middle, front toward Blender's +Y (Godot's -Z), with its small parts
+joined into a "detail" mesh. To rebuild them, with Blender installed:
+`blender -b -P tools/blender/city_models.py -- compact` (or with the `bpy` module from pip:
+`python tools/blender/city_models.py compact`); add `--render DIR` for a picture of each piece, or
+`--sheet DIR` for pictures of the faction's zone housing (every look, and three looks growing through
+their tiers). `kit.py` holds the shared parts and materials, `housing.py` the zone housing. The Terran Compact has the Government Hall, Tower Block,
+High-rise, Road, Plaza, Wall and Turret so far; all four factions have their zone housing.
+
+**Housing zones.** Low-density housing (a 2x2 lot) and High-density housing (3x3) are in the
+builder's Zones group. Hold the button and drag to zone a street, like laying a road: every lot that
+fits is placed. Each lot is drawn as one of its faction's homes for that density, six looks each,
+picked from the piece's id so everyone sees the same street and a lot keeps its look when moved. The Compact get barracks rows, bunker houses and plate
+huts, and stepped towers, twin slabs and court blocks; the Ashen hive clusters, pods on legs and
+thorn longhouses, and needles, spire knots, stacked hives and great hives; the Luminar spire
+clusters, chapel houses and terraces, and cathedral needles, blade pyramids and twin spires; the
+Coma shells, floating homes and ringed domes, and twisting needles, stacked discs and thorned
+keeps. Zones are free and are scenery for now: on a colony they don't house anyone yet (habitat
+blocks do).
+
+**Tiers.** The building on a housing lot grows as its occupants' needs are met, from tier 1 to 5,
+and slips back when they stop being met. The needs are a road at the lot's edge, and four services
+that reach it along the roads, at full strength close by and fading to nothing at their reach:
+
+| Need | From | Full strength within | Reaches |
+| --- | --- | --- | --- |
+| Power | Power plant | 300 m by road | 900 m |
+| Safety | Precinct | 150 m | 500 m |
+| Care | Clinic | 150 m | 500 m |
+| Leisure | Park or plaza | 60 m (or within two cells, road or no) | 240 m |
+
+Tier 2 needs a road and power; tier 3 a precinct and a clinic in reach as well; tier 4 leisure in
+reach, with power, safety and care at half strength or better; tier 5 all four at 80% or better. A
+lot climbs one tier for every 12 hours its needs carry it higher and slips one for every 24 hours
+they fall short (hours are `FR.hourMs`, so the test clock speeds them up). Distance is by road for
+now; traffic will slow it once people drive the roads. Each look is modelled at every tier
+(`zone_low_3_t1.glb` ... `zone_low_3_t5.glb`): tier 1 is the bare start (fewer units, a short tower,
+no trimmings), each tier adds height, units and ornament, and a post at the front of the lot wears
+the tier as lit marks. In the builder, pick a lot to read its tier, how far along it is and what
+the next tier needs; the door prompt gives the tier too. `city` pieces carry `tier`, `grow`
+(-1 to 1), `needs` ([road, power, safety, care, leisure], each 0 to 1) and `target` for zone lots,
+and the rule numbers are in the catalog as `cities.tiers`.
+
+**Going inside.** A building whose faction has an inside for it has a door at the middle of its
+front: walk up, press F, and you are inside; the door behind you leads back out. An inside is its
+own small place, built only while you are in it (deep under its building, so pilots who enter the
+same building meet there and the city above pays nothing for it). They are modelled in Blender by
+`tools/blender/interiors.py` as `game/city/<faction>/inside_<piece>.glb` (or `inside_<piece>_<n>.glb`
+for several): you come in at the model's origin, rooms are thick slabs the game makes solid (all but
+the "detail" mesh), and markers named `exit` and `light...` place the way out and the lamps. The
+Terran Compact has the Government Hall (gatehouse, great hall, council chamber), a barracks home
+for low-density lots and a flat block (lobby, corridor, a flat) for high-density lots, Tower Blocks,
+High-rises and Habitat blocks. Windows are light panels for now, with no view of the city.
+
+The Ashen Collective's insides are black plating cut at angles and lit red, from slits in the walls,
+seams in the floor and the furnaces under it: the Furnace Court for the Government Hall (a
+gatehouse, then a hall with a furnace hatch in the floor, piers, side galleries up ramps, a gantry
+and the great furnace on its dais), a brood den for low-density lots (stacked sleeping cells, a
+hearth under a hood, a store) and a spire atrium for high-density lots (galleries of cells round a
+furnace shaft with a bridge to its column, and one cell standing open). Their lamps are red
+(`INSIDE_LAMPS` in `game/city.gd`); the galleries above the atrium floor are for looking at.
+`city_models.py ashen inside_hall --render DIR` pictures an inside from its door and from the
+views listed in `interiors.VIEWS` (`DRAFT=1` for a quick small one).
+
+The Coma Conglomerate's Government Hall is the **Data Spire** (`city/coma/hall.glb`): gunmetal limbs
+coiling up out of the ground into two horns, round ports in their flanks, a great hoop hung off the
+taller horn and a landing disc held out in front, all traced with gold light. Inside, the **Echo
+Archives** (a hall of alcoves with an echo hanging in each, and the displays) lead to the **core**:
+a column of light held in twisting limbs under a dome, a ramp winding one and a half turns up round
+it to a landing disc, and discs afloat on columns of light. Off the core are the **map chamber** (a
+web of light over a dais, with great hoops round it and horns bending over), the **lattice hall**
+(frames of light hung in the air, ribbons between them) and, straight on, the **well** (a pool of
+light with seven lamps standing in it and the Conglomerate's sign beyond). Their lamps are gold. A
+big inside like this is built room by room (`kit.room("core")`): each room is its own mesh and
+`detail_<room>`, so the game culls a room you cannot see and no mesh has more than eight lamps in
+reach, which is all the Compatibility renderer lights one mesh with. The limbs, ribs and strands
+are `kit.tube` (a shape swept smoothly through points); `round_room`, `dome`, `arc_wall`,
+`arched_wall`, `helix_ramp` and `saucer` make the rest.
+
+The Coma's **Power Plant** (`city/coma/power.glb`) is a swollen dome between two long lobes, round
+ports in their faces, gold seams over them, hoops held up on arms of light, and a ring of glowing
+pillars round the front. Inside (`inside_power.glb`), a passage leads to the **reactor hall**: a
+cluster of black spires veined with gold on a stepped dais, the great one throwing a beam up to the
+dome's crown, columns of light round the hall, discs afloat and gold lines swirling out over the
+floor. Through a short way on the right is the **pylon gallery**: four spires hung in the air over
+beams of light, strung together and to the heart held in hoops in the middle. The Power Plant is
+a colony piece in the catalog, so a Coma city only shows it if an admin places one.
+
+**Propaganda.** Every faction has four posters (`game/city/<faction>/propaganda/poster_<n>.png`,
+512 x 768): a monument, its emblem, its skyline by night and a notice. `tools/blender/propaganda.py`
+makes them: the buildings on them are the faction's own models rendered in Blender and cut down to
+flat inks, and the rest is drawn with Pillow (`python tools/blender/propaganda.py [faction]
+[--sheet DIR]`, after the models are built). They show on the displays in the common rooms of the
+faction's buildings: gatehouses, halls, lobbies, corridors, and over a home's mess table. A display
+is part of the inside's model (`kit.display`): a frame, and a mesh named `screen...` that the game
+puts the pictures on, each display starting on a different one and all moving on every 14 seconds.
+The displays are in every Compact and Ashen inside and in the Coma's Data Spire; the Luminar posters
+are ready for theirs.
+
+**Drawing.** A city's pieces are drawn as one MultiMesh per piece type per 200 m chunk (not a node
+each), so a full city is a few hundred draw calls, chunks off screen are culled, and small details stop
+drawing past about 320 m. The server budget is checked by a test: a full 4,000-piece city lays out
+well within 1.5 s of placements.
+
+Messages: `city_get {planet}` answers `city {planet, pieces, updated}` (anyone may look at any city
+but the Coma's), `city_place {planet, piece, x, z, rot}`, `city_move {planet, id, x, z, rot}`,
+`city_remove {planet, id}`, `city_clear {planet}`, `city_copy {from, planet}` (admins). Each change may
+carry a `tag`, and each success answers `city_result` with it. The state carries only
+`cities[planetId]`, the time each city last changed, so a full city isn't sent in every state; apps ask
+again when it moves. The pieces are in the catalog as `cities`.
+
+## Textures
+
+Every model wears textures over its colours: the ships, the Builder's base buildings, raid and
+battle facilities, station and carrier rooms, and every faction's city buildings and insides. There
+are 26 tileable sets in `game/textures/<set>/` (albedo, normal, orm = occlusion/roughness/metal, and
+a glow map for the ones that light up), all drawn procedurally by `tools/textures/make_textures.py`
+(`python tools/textures/make_textures.py [set ...] [--sheet FILE]`, needs numpy, scipy and Pillow):
+
+- **Shared:** painted hull panels, trim plates with vents, brushed steel, tread-plate deck, dark
+  hex grip, canopy glass, window panes (lit room by room), louvred light panels, rock and ice.
+- **Terran Compact:** heavy bolted armour plate with stencilled idents, hazard chevrons, ferrocrete.
+- **Ashen Collective:** domed chitin scales with sutures, swamp moss, glowing red veins; and for
+  their insides black wall plating with cut corners and red slits, octagonal deck plates with light
+  in some seams, ember grating over a fire, and machinery panels (louvres, conduit, status lights).
+- **Luminar Accord:** long tapering ceramic plates whose seams glow green, faceted crystal.
+- **Coma Conglomerate:** dark gunmetal engraved with circuit traces that glow gold, hammered gold;
+  rib plating (flowing bands like the ribs of a shell, some toothed like a spine, light in some
+  grooves) for their limbs and inside walls, and liquid light for their wells.
+
+`game/textures/surfaces.json` says which material wears which set and how many metres one tile
+spans: by material kind for `models.gd` (ships, base buildings, stand-ins), floor/wall/glass for the
+plain boxes of walk-in rooms, and by Blender material name for each faction's city models.
+`game/surfaces.gd` applies them: the maps are laid on from the three axes in the model's own space,
+so no model needs UVs, textures move with ships, and the Blender models stay plain (the game
+textures them as it loads them). The albedo is grey detail multiplied by the material's colour, so
+one set serves every faction colour. The maps are 512 px, compressed for the GPU on import.
+
+Blender renders use the same maps (`kit.texture_scene`), so `--render` and `--sheet` from
+`city_models.py` show the buildings textured. `tools/blender/game_models.py OUT_DIR [ships] [base]
+[close] [plain]` renders the code-built ships and base buildings textured (with `plain`, untextured
+too, for comparison): it reads their functions from `models.gd` and `base_models.gd` and builds them
+in Blender.
+
+**Sector battle units.** The units and structures of a sector battle are one model per type for
+every side, painted in the side's colour, so the textures are what tells the factions' armies apart
+up close: each side's units wear its faction's set on the painted hull (armour plate for the
+Compact, chitin for the Ashen, ceramic for the Luminar, traced gunmetal for the Coma, hull panels
+for the militia) and a second set on the unpainted frame, tracks and guns, listed under `battle` in
+`surfaces.json`. They draw with their own shader (`SHADER` in `game/battle/battle_models.gd`), kept
+cheap for older graphics cards: every face is flat, so the shader picks the axis a face looks along
+once per vertex and reads each map once per pixel (five look-ups: two albedos, two orm maps and the
+hull's glow map, whose lines light up in the side's colour), with no normal map. A side's units
+share one material, and `battle_units.gd` keeps one MultiMesh per unit type and side, so a battle
+draws at most twice the batches it did. Wrecks keep their side's textures, darkened.
+`tools/blender/battle_models.py OUT_DIR [faction ...] [army] [base] [tanks] [before] [clash]` renders
+them the same way: it reads the `match` block of `battle_models.gd`, builds each unit in Blender and
+lays the maps on by face as the shader does.
+
+**Map terminal (a look, not in the game yet).** `tools/blender/map_terminal.py OUT_DIR [samples=N]
+[glb]` models and renders a holographic map station: a projector on a dais throwing a wireframe map
+of a ring station into the air (rooms as boxes, corridors as lines, the lift shaft as a beam, an
+amber route, markers), in a dark chamber with reflecting pools whose floor and walls wear the deck
+and trim sets. The map is built from the `STATION` table, so a real station's or city's layout
+could feed it. With `glb` it also exports the terminal and hologram.
+
+## The Frontier and terraforming
+
+A PC loop of its own, outside the conquest game (server: `server/frontier.ts`; numbers in
+`tunables.json` under `frontier`). The design is in the "Terraforming ship design" doc. The server
+side is in; the Godot screens for it come next, so for now it's played through the messages below.
+
+- **Star clusters.** Each faction claims a region of Frontier space past Marrow Reach (Compact,
+  Collective) or The Drift (Luminar, Coma): a gate system, four levels of deep space three systems
+  wide, and its pool of about 13 billion clusters (some 400 billion systems in all). A pilot leases
+  the next cluster from their faction's pool (`frontier_lease_cluster`, 250,000 credits, one-off):
+  5 to 10 systems with 1 to 3 barren planets each, theirs for good unless the account is deleted,
+  they sell it back (`frontier_sell_back`), or its colony collapses. That pilot is its **Founder**.
+- **Surveys.** Three scans from around a planet's orbit (`frontier_survey`, points 0 to 2) grade its
+  size, core, ice and atmosphere. Any pilot of the faction can do it; the one who finishes is the
+  world's Pathfinder. Only the faction sees the grades.
+- **The Terraformer** (`frontier_lease_ship`, 400,000 credits) leaves from the faction's shipyard (its
+  capital system) with the Atmosphere Processor on board. The Founder picks a surveyed target
+  (`frontier_target`) and jumps it one lane at a time (`frontier_jump`, 6 hours apart) through the
+  region into the cluster, then establishes it in orbit (`frontier_establish`): the start point, after
+  which it's the system's permanent orbital hub. Every week before that costs a 25,000 credit renewal
+  fee; a Founder who can't pay loses the Terraformer lease.
+- **The hunt.** A Terraformer is never announced: other factions don't see it in the state. A Data
+  shard or Security dossier from a raid stash, decoded (`frontier_decode`), names a faction's leased
+  Terraformers and their clusters, never where they are. Each jump leaves a trace in the system it
+  left for 12 hours; scanning the system your carrier is in (`frontier_scan`) shows those traces' lanes
+  and finds any enemy Terraformer there. A faction that has found one can intercept it in its system
+  (`frontier_intercept`). A lost interception destroys it. Until the Intercept match is built, an admin
+  settles one with `admin_intercept_result`. Pilots of its own faction can escort it (`frontier_escort`).
+  Fleet carriers can jump into the Frontier (the region's systems and leased clusters count as lanes).
+- **The three stages.** Atmosphere (3 days: fuel and isotope cells), water (3 days: ice) and biosphere
+  (4 days: alloy plates and exotic matter), each scaled by the survey grades. Each needs its engine,
+  bought at the shipyard (`frontier_engine`) and delivered to fit it. Any pilot of the faction delivers
+  to the bar (`frontier_deliver`, from cargo or hold) and the Founder pays them 80% of each unit's
+  value. A stage ends when its bar is full and its time is up; a won attack on the engine
+  (`stageSetback`, for the Supremacy and Sector Defense hooks to come) takes a quarter of its bar.
+- **The colony.** The world starts at 500 people with a habitat block, precinct, clinic and power
+  plant. The Founder builds more (`frontier_build`); population tiers at 2,000, 8,000 and 25,000
+  unlock the foundry, the smelter and electronics works, and the isotope reactor. Precincts (crime),
+  clinics (services) and power plants each cover so many people: covered, the colony grows to its
+  housing; short, it shrinks. At zero the Founder has a week to resettle (`frontier_resettle`), or
+  the cluster goes to auction (`frontier_auction_buy`), its buildings left as ruins.
+- **Exports.** Pilots buy the colony's products at the source (`frontier_buy`, credits to the
+  Founder); the Founder sells to the galactic market (`frontier_export`, 60% of value); and Hauler
+  missions (`frontier_haul`, then `frontier_haul_deliver` at the station) carry goods to a contested
+  world's orbital station, where they sell at full value: half to the hauler, half to the Founder,
+  and each one adds 1% to the colony's export profits (up to 50%).
+
+Time runs 336 times faster in the demo war (a week in half an hour).
 
 ## Sector battles
 

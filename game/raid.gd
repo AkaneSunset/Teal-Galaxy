@@ -346,6 +346,8 @@ func _box(size: Vector3, pos: Vector3, look: Variant, solid := true, glow := fal
 			mat.emission_enabled = true
 			mat.emission = look
 			mat.emission_energy_multiplier = 1.5
+		else:
+			Models.Surfaces.apply(mat, "place", Models.Surfaces.box_surface(size, 0.0)) # floors and walls get textures
 		mesh.material = mat
 		mi.mesh = mesh
 	mi.visible = not hidden

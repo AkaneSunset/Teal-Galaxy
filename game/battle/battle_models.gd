@@ -8,6 +8,9 @@ extends RefCounted
 ## parts glow in it, and GLOW parts glow in their own colour (mass cores, lights). The custom
 ## data's alpha darkens a whole instance (wrecks) and turns its glow off.
 ##
+## Each side's units also wear its faction's textures (see material()): armour plate for the
+## Compact, chitin for the Ashen, ceramic for the Luminar, traced gunmetal for the Coma.
+##
 ## A type may have a `top` (a turret) that turns on its own: drawn with its own MultiMesh at
 ## `top_at` above the unit's origin, yawed toward what it shoots at.
 
@@ -31,44 +34,104 @@ const AIR_HEIGHT := 18.0
 const SHADER := """
 shader_type spatial;
 render_mode cull_disabled;
+// What a side's units wear (see material()): `hull_*` on the painted parts, `frame_*` on the plain
+// ones, a tile `*_tile` metres across. Left unset, the units are plain paint as before.
+uniform sampler2D hull_albedo : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform sampler2D hull_orm : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform sampler2D hull_glow : hint_default_black, filter_linear_mipmap, repeat_enable;
+uniform sampler2D frame_albedo : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform sampler2D frame_orm : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform float hull_tile = 3.0;
+uniform float frame_tile = 1.5;
+uniform float lift = 1.0; // the albedo maps are a little under white: brings the paint back up
+uniform float rough = 0.55;
+uniform float lines = 0.0; // how brightly the hull's glow map lights up, in the side's colour
 varying vec4 tint;
+varying vec2 face;
 void vertex() {
 	tint = INSTANCE_CUSTOM;
+	// Every face is flat, so its texture is laid on from whichever axis it faces most, here, once
+	// per vertex: no UVs in the meshes, and one look-up per map for each pixel.
+	vec3 n = abs(NORMAL);
+	face = VERTEX.zy;
+	if (n.y >= n.x && n.y >= n.z) {
+		face = VERTEX.xz;
+	} else if (n.z > n.x) {
+		face = VERTEX.xy;
+	}
 }
 void fragment() {
 	float m = COLOR.a;
 	vec3 base = COLOR.rgb;
 	vec3 col = base;
 	vec3 emit = vec3(0.0);
+	vec2 hull_uv = face / hull_tile;
+	vec2 frame_uv = face / frame_tile;
+	vec3 hull = texture(hull_albedo, hull_uv).rgb * lift;
+	vec3 hull_o = texture(hull_orm, hull_uv).rgb;
+	float hull_g = texture(hull_glow, hull_uv).r;
+	vec3 frame = texture(frame_albedo, frame_uv).rgb * lift;
+	vec3 frame_o = texture(frame_orm, frame_uv).rgb;
+	vec3 orm = vec3(1.0);
 	if (m > 0.85) {
-		col = tint.rgb * (0.75 + base.g * 1.6);
+		col = tint.rgb * (0.75 + base.g * 1.6) * hull * hull_o.r;
+		emit = tint.rgb * hull_g * lines;
+		orm = hull_o;
 	} else if (m > 0.6) {
 		col = tint.rgb;
 		emit = tint.rgb * 2.4;
 	} else if (m > 0.35) {
 		emit = base * 2.6;
+	} else {
+		col = base * frame * frame_o.r;
+		orm = frame_o;
 	}
 	float alive = step(0.99, tint.a);
 	ALBEDO = col * mix(0.22, 1.0, alive);
 	// A little light of its own, so the side away from the sun still reads as painted.
 	EMISSION = emit * alive + col * 0.12 * alive;
-	ROUGHNESS = 0.55;
-	METALLIC = 0.1;
+	ROUGHNESS = min(1.0, rough * orm.g);
+	METALLIC = 0.1 * orm.b;
 }
 """
 
+const Surfaces := preload("res://surfaces.gd")
+
 static var _cache := {}
-static var _material: ShaderMaterial
+static var _shader: Shader
+static var _materials := {} # look -> ShaderMaterial
 
 
-## The material every unit MultiMesh draws with.
-static func material() -> ShaderMaterial:
-	if _material == null:
-		var sh := Shader.new()
-		sh.code = SHADER
-		_material = ShaderMaterial.new()
-		_material.shader = sh
-	return _material
+## The material a side's unit MultiMeshes draw with. `look` is the side's faction ("militia" for a
+## side with none): its units wear the textures listed for it under "battle" in
+## res://textures/surfaces.json, the painted hull one set and the plain frame another. One shader
+## for all of them; with no look, or none listed, plain paint.
+static func material(look := "") -> ShaderMaterial:
+	if _materials.has(look):
+		return _materials[look]
+	if _shader == null:
+		_shader = Shader.new()
+		_shader.code = SHADER
+	var m := ShaderMaterial.new()
+	m.shader = _shader
+	var hull: Dictionary = Surfaces.maps("battle", look) if look != "" else {}
+	if not hull.is_empty():
+		m.set_shader_parameter("hull_albedo", hull["albedo"])
+		m.set_shader_parameter("hull_orm", hull["orm"])
+		m.set_shader_parameter("hull_tile", hull["tile"])
+		if hull["glow"] != null:
+			m.set_shader_parameter("hull_glow", hull["glow"])
+			m.set_shader_parameter("lines", 1.6)
+		# The maps sit under white (about 0.7 once read as colour) and their roughness around 0.8.
+		m.set_shader_parameter("lift", 1.3)
+		m.set_shader_parameter("rough", 0.69)
+		var frame: Dictionary = Surfaces.maps("battle", look + "_frame")
+		if not frame.is_empty():
+			m.set_shader_parameter("frame_albedo", frame["albedo"])
+			m.set_shader_parameter("frame_orm", frame["orm"])
+			m.set_shader_parameter("frame_tile", frame["tile"])
+	_materials[look] = m
+	return m
 
 
 ## How much bigger a unit of a higher tier is drawn: "tank_t3" is a Tank Mk III.

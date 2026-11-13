@@ -46,6 +46,15 @@ const SCHEMA: Spec = {
     receiptsKept: int(1, 1000),
     historyKept: int(0, 100), // past campaigns' totals kept per front
   },
+  warChest: {
+    // Of each war good, the most a side's chest takes from its front's stockpile for each pilot who
+    // joins a match (stockpile.ts); 0 never draws it.
+    perPilot: Object.fromEntries(['lander_frame', 'hauler', 'drone_frame', 'weapon', 'fuel', 'missile', 'torpedo', 'warhead', 'sensor', 'shells', 'slugs'].map((k) => [k, int(0, 1000)])),
+    warheadsPerMatch: int(0, 10), // strategic warheads a side may bring to one match
+    returnShare: num(0, 1), // what a match didn't use goes back to the stockpile at this share, rounded up
+    defenseShare: num(0, 1), // Sector Defense (always against AI) draws this much of perPilot
+    usedWinMerit: num(0, 10), // War Merit for a Builder's goods used in a won match, as a share of their value
+  },
   accounts: {
     charactersMax: int(1, 100),
     nameMax: int(3, 64),
@@ -57,6 +66,39 @@ const SCHEMA: Spec = {
   },
   titles: {
     points: num(1, 1_000_000), // a pilot's points won in one mode for a planet in one campaign to earn its title
+  },
+  frontier: {
+    clusterLease: int(0, 100_000_000), // credits: a star cluster, a one-off purchase
+    shipLease: int(0, 100_000_000), // credits: a Terraformer
+    renewalFee: int(0, 100_000_000), // credits each startWindowHours a Terraformer isn't established in orbit
+    startWindowHours: num(1, 10_000),
+    jumpCooldownHours: num(0, 1000), // between a Terraformer's jumps
+    traceHours: num(0, 1000), // a jump's trace fades after this; a found Terraformer is lost again after it too
+    stageHours: { atmosphere: num(0, 10_000), water: num(0, 10_000), biosphere: num(0, 10_000) }, // each stage's minimum time
+    bars: {
+      atmosphere: { fuel: int(0, 1_000_000), isotope: int(0, 1_000_000) },
+      water: { ice: int(0, 1_000_000) },
+      biosphere: { alloy: int(0, 1_000_000), exotic: int(0, 1_000_000) },
+    },
+    enginePrice: int(0, 100_000_000),
+    deliveryPay: num(0, 10), // the Founder pays other pilots this share of a delivered unit's value
+    auctionPrice: int(0, 100_000_000),
+    colony: {
+      startPop: int(1, 1_000_000),
+      milestones: { tier1: int(1, 100_000_000), tier2: int(1, 100_000_000), tier3: int(1, 100_000_000) }, // population for each tier
+      growth: num(0, 1), // an hour, when every need is covered
+      decline: num(0, 1), // an hour, times how short the worst-covered need is
+      collapseHours: num(1, 10_000), // to resettle a colony at zero before the cluster goes to auction
+      resettleCost: int(0, 100_000_000),
+      resettlePop: int(1, 1_000_000),
+    },
+    exports: {
+      marketRate: num(0, 10), // the galactic market pays this share of value
+      haulRate: num(0, 10), // goods hauled to another station sell at this share of value
+      haulShare: num(0, 1), // the hauler's cut; the Founder gets the rest
+      boostPerMission: num(0, 1), // export profit boost for each Hauler mission finished
+      boostMax: num(0, 10),
+    },
   },
   carrier: {
     jumpLanes: int(1, 100), // the farthest a fleet carrier jumps at once, in lanes of the war map (orbital gates will go farther)
@@ -95,9 +137,11 @@ interface Tunables {
     receiptsKept: number;
     historyKept: number;
   };
+  warChest: { perPilot: Record<string, number>; warheadsPerMatch: number; returnShare: number; defenseShare: number; usedWinMerit: number };
   accounts: { charactersMax: number; nameMax: number; passwordMin: number; attemptsPerMinute: number };
   sideLock: { on: boolean };
   titles: { points: number };
+  frontier: any;
   carrier: { jumpLanes: number };
   coma: { guard: { sectorFloor: number; weeklyLoss: number; level: number } };
   telemetry: { windowMs: number; tickBudgetMs: number; alertsKept: number; eventsKept: number };

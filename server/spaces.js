@@ -5,6 +5,7 @@
 //   station:<planet id>   an orbital station over a contested world, or a Builder planet's High Port
 //   ship:<owner name>     inside a pilot's fleet carrier
 //   surface:<planet id>   a Builder base, on foot
+//   city:<planet id>      a homeworld's or a Frontier colony's city (cities.ts), on foot
 // and everyone in the same space and the same copy of it sees everyone else walk. A station's copy
 // holds PADS ships; when every pad is taken a new copy opens, so the pads are what decide how many
 // pilots a station holds. Ships and surfaces have one copy each.
@@ -40,7 +41,7 @@ function position(pos) {
 // `isStation(id)` and `isSurface(id)` say which planet ids have a station or a base to walk;
 // `factionOf(name)` is a pilot's faction or null; `people()` lists the pilots' connection records;
 // `send(me, msg)` sends one of them a message.
-function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, people, send }) {
+function createSpaces({ isStation, isSurface, isCity = () => false, berthsOpen = () => 0, factionOf, people, send }) {
   const stations = new Map(); // station id -> its copies, each an array of PADS holders (connection ids, or null)
   const bases = new Map(); // base (planet id) -> its Star Port's berths, connection ids or null
 
@@ -193,6 +194,10 @@ function createSpaces({ isStation, isSurface, berthsOpen = () => 0, factionOf, p
       if (!isSurface(id)) return fail('no such base');
       // Landed on a berth, or shuttled down from the High Port overhead.
       if (me.berth?.base !== id && me.pad?.station !== id) return fail('land at the Star Port or dock at the High Port first');
+      return { ok: true, copy: ONE_COPY };
+    }
+    if (kind === 'city') {
+      if (!isCity(id, me)) return fail('no such city');
       return { ok: true, copy: ONE_COPY };
     }
     return fail('no such space');

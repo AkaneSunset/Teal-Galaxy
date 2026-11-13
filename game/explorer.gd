@@ -42,6 +42,8 @@ const FactionPicker := preload("res://faction_picker.gd")
 const WarPanel := preload("res://war_panel.gd")
 const JumpPanel := preload("res://jump_panel.gd")
 const OrdersPanel := preload("res://orders_panel.gd")
+const FrontierPanel := preload("res://frontier_panel.gd")
+const City := preload("res://city.gd")
 const TradePanel := preload("res://trade_panel.gd")
 const Carrier := preload("res://carrier.gd")
 const Place := preload("res://place.gd")
@@ -138,6 +140,7 @@ var _picker: Control # the faction choice, for a pilot with no side yet
 var _picker_dismissed := false # "Not now": the ship's menu offers it again
 var _war_panel: Control
 var _jump_panel: Control # the carrier's galaxy map (GALAXY MAP terminal): FTL jumps
+var _frontier_panel: Control # the Frontier: cluster leases, the Terraformer, colonies, hauls, the hunt
 var _orders_panel: Control # your faction's orders (HIGH COMMAND terminal, or the War terminal's Orders)
 var _orders_seen := "" # the orders you've been told of
 ## How many titles this pilot held at the last state (-1: none seen yet), to say when one is earned.
@@ -617,6 +620,12 @@ func _build_hud() -> void:
 	_orders_panel.visible = false
 	war_layer.add_child(_orders_panel)
 	_orders_panel.closed.connect(_close_panel)
+	_frontier_panel = FrontierPanel.new()
+	_frontier_panel.visible = false
+	war_layer.add_child(_frontier_panel)
+	_frontier_panel.closed.connect(_close_panel)
+	_frontier_panel.jump_requested.connect(_request_frontier_jump)
+	_frontier_panel.city_requested.connect(_open_city)
 	# The jump itself: the view washes out to the FTL tunnel's blue, then back in at the far end.
 	_jump_veil = ColorRect.new()
 	_jump_veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1011,6 +1020,15 @@ func _interact() -> void:
 			_prompt.text = "Press %s to request docking at %s: the carrier flies itself to its berth" % [controls.binding_text("interact", false), _stations[id].name]
 			if holding:
 				_request_dock(id)
+	elif _near_city() != "" and _station == null and _raid == null:
+		var id := _near_city()
+		var name := str(WarInfo.planet(id).get("name", id))
+		if flight.speed() > DOCK_SPEED:
+			_prompt.text = "Slow below %d m/s to go down to the city on %s" % [DOCK_SPEED, name]
+		else:
+			_prompt.text = "Press %s to take a lander down to the city on %s" % [controls.binding_text("interact", false), name]
+			if holding:
+				_open_city(id)
 	elif not _carrier and _near_station(DOCK_RANGE) != "":
 		var id := _near_station(DOCK_RANGE)
 		if flight.speed() > DOCK_SPEED:
@@ -1413,6 +1431,8 @@ func _sync_space(delta: float) -> void:
 			want = "station:" + id
 	elif _station and _station.get_script() == Surface:
 		want = "" if _station.seated else "surface:" + _station.planet_id
+	elif _station and _station.get_script() == City:
+		want = "city:" + _station.planet_id
 	elif _station == null and _carrier and _crew.is_empty():
 		want = "ship:" + Net.my_name # at the helm of your carrier
 	if want.begins_with("ship:") and want != "ship:" + Net.my_name and want != _space_id:
@@ -1473,6 +1493,8 @@ func _on_service(kind: String) -> void:
 			_open_orders()
 		"contracts":
 			_open_trade("contracts")
+		"frontier":
+			_open_frontier()
 		"dock_market":
 			_open_trade("market", str(Net.planet(_here()).get("owner", "")))
 
@@ -1781,7 +1803,7 @@ func _dock_market_entry(builder: String) -> void:
 func _war_row() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
-	var entries := [["War terminal", _open_war.bind("")], ["Supply contracts", _open_trade.bind("contracts", "")]]
+	var entries := [["War terminal", _open_war.bind("")], ["Supply contracts", _open_trade.bind("contracts", "")], ["Frontier", _open_frontier.bind("")]]
 	if WarInfo.my_faction() == "":
 		entries.append(["Choose your faction", _show_picker])
 	for e in entries:
@@ -1893,7 +1915,7 @@ func _panel_open() -> bool:
 ## Opens one of the war's screens (the faction choice, the War terminal, the dock market or
 ## contracts) over what you're doing: flying, seated in your ship, or standing at a console.
 func _open_panel(panel: Control) -> void:
-	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel]:
+	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel, _frontier_panel]:
 		p.visible = p == panel
 	if "colour" in panel:
 		panel.colour = controls.hud_color()
@@ -1922,7 +1944,7 @@ func _close_panel() -> void:
 
 
 func _hide_panels() -> void:
-	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel]:
+	for p in [_picker, _war_panel, _trade, _jump_panel, _orders_panel, _frontier_panel]:
 		p.visible = false
 
 
@@ -1989,6 +2011,68 @@ func _open_jump() -> void:
 	_open_panel(_jump_panel)
 
 
+## The Frontier: lease a cluster, follow your Terraformer, run a colony, buy its goods, or hunt
+## someone else's ship. Jumps out there need you at the helm of your own fleet carrier.
+func _open_frontier(page := "") -> void:
+	var jumpable: bool = _carrier and _station is Carrier and _station.mine and _crew.is_empty()
+	_frontier_panel.open(System.current, jumpable, page)
+	_open_panel(_frontier_panel)
+
+
+## A jump picked on the Frontier screen: one lane at a time, to a system with no planets of the war.
+func _request_frontier_jump(system_id: String) -> void:
+	if not (_carrier and _station is Carrier and _station.mine and _crew.is_empty()):
+		_frontier_panel.say("Only a fleet carrier's captain can jump it.")
+		return
+	if not _jump.is_empty():
+		_frontier_panel.say("A jump is already under way.")
+		return
+	_request_jump(system_id, "")
+	_frontier_panel.say("Plotting the jump...")
+
+
+## A homeworld (a capital world, whose city stands below) whose orbit you're in, or "".
+func _near_city() -> String:
+	for wp in WarInfo.planets_in(System.current):
+		if wp.get("capital", false) and (Net.admin or str(wp.get("owner", "")) != "coma") and System.distance(System.orbital_pos(str(wp.id)), _pos) < OVER_RANGE:
+			return str(wp.id)
+	return ""
+
+
+## Down to a city on foot: a homeworld's from its orbit, or your colony's from the Frontier screen.
+## Your ship (or carrier) waits overhead; the shuttle stop's console brings you back up to it.
+func _open_city(planet_id: String) -> void:
+	_hide_panels()
+	flight.velocity = Vector3.ZERO
+	flight.throttle = 0.0
+	var place := City.new(planet_id)
+	place.leave_city.connect(_leave_city)
+	_land_in(place, false)
+	_dock_panel.visible = false
+	_station.stand()
+	_say("A lander sets you down at the edge of the city. Its shuttle stop takes you back up.")
+
+
+func _leave_city() -> void:
+	_leave_place()
+	controls.enabled = true
+	if _docked != "":
+		dock(_docked)
+		return
+	_set_space_visible(true)
+	if _carrier:
+		_set_outside(false)
+	else:
+		_camera.make_current()
+	_refresh_focus()
+	_say("Back aboard, in orbit.")
+
+
+## A system's name: one of the war's, else a Frontier system (gate, deep space or a cluster).
+func _system_name(id: String) -> String:
+	return _frontier_panel._sys_name(id)
+
+
 ## Asks the server to jump your carrier (released from its berth first, if it's docked).
 func _request_jump(system_id: String, planet_id: String) -> void:
 	if not _jump.is_empty():
@@ -2010,9 +2094,9 @@ func _start_jump(msg: Dictionary) -> void:
 		return
 	var seconds := float(msg.get("seconds", 5.0))
 	_jump = {"system": str(msg.get("system", "teal-prime")), "planet": str(msg.get("planet", "")) if msg.get("planet") != null else "", "owner": owner, "left": seconds, "total": seconds, "arrived": false}
-	if _jump_panel.visible:
+	if _jump_panel.visible or _frontier_panel.visible:
 		_close_panel()
-	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else WarInfo.system(_jump.system).get("name", _jump.system))
+	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else _system_name(_jump.system))
 	_say("FTL jump to %s in %d seconds" % [to, ceili(seconds)])
 
 
@@ -2020,7 +2104,7 @@ func _jump_step(delta: float) -> void:
 	if _jump.is_empty():
 		return
 	_jump.left -= delta
-	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else WarInfo.system(_jump.system).get("name", _jump.system))
+	var to: String = str(WarInfo.planet(_jump.planet).get("name", "") if _jump.planet != "" else _system_name(_jump.system))
 	if not _jump.arrived:
 		# Spooling up: the view washes out toward the jump.
 		var k := clampf(1.0 - _jump.left / maxf(0.1, _jump.total), 0.0, 1.0)
@@ -2066,7 +2150,7 @@ func _enter_system(system_id: String) -> void:
 	var planets: Array = []
 	for wp in WarInfo.planets_in(system_id):
 		planets.append({"id": wp.id, "name": wp.name})
-	System.enter(system_id, str(WarInfo.system(system_id).get("name", system_id)), planets)
+	System.enter(system_id, _system_name(system_id), planets)
 	_sky.rebuild()
 	for id in _stations:
 		(_stations[id].node as Node3D).queue_free()

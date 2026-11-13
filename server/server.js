@@ -43,6 +43,9 @@ const F = require('./factions');
 const G = require('./galaxy');
 const H = require('./heist');
 const L = require('./ledger.ts');
+const WC = require('./stockpile.ts');
+const FR = require('./frontier.ts');
+const CI = require('./cities.ts');
 const N = require('./navy');
 const S = require('./sites');
 const SP = require('./spaces');
@@ -74,7 +77,9 @@ const BUILDER_ONLY = {
   found_site: 'only Builders found outposts', send_fleet: 'only Builders command fleets', recall_fleet: 'only Builders command fleets', set_price: 'only Builders run a Carrier Dock', set_bid: 'only Builders run a Star Port', set_ask: 'only Builders run a Star Port', market_sell: 'only Builders run a Star Port', set_refinery: 'only Builders run an Extractor', fill_contract: 'only Builders fill contracts', donate: 'only Builders donate to the war', intel_supply: 'only Builders supply intelligence', intel_sell: 'only Builders sell intelligence',
 };
 const JUMP_S = 5; // a fleet carrier's FTL jump spools up this long
+const FRONTIER_MSGS = ['frontier_lease_cluster', 'frontier_sell_back', 'frontier_lease_ship', 'frontier_survey', 'frontier_target', 'frontier_jump', 'frontier_establish', 'frontier_escort', 'frontier_decode', 'frontier_scan', 'frontier_intercept', 'frontier_engine', 'frontier_deliver', 'frontier_build', 'frontier_resettle', 'frontier_auction_buy', 'frontier_buy', 'frontier_export', 'frontier_haul', 'frontier_haul_deliver'];
 const PILOT_ONLY = {
+  ...Object.fromEntries(FRONTIER_MSGS.map((k) => [k, 'only pilots go to the Frontier'])),
   collect: 'only pilots carry cargo', deliver: 'only pilots carry cargo', sell: 'only pilots sell to the Fence',
   dock_buy: 'only pilots buy at a Carrier Dock', post_contract: 'only pilots post contracts', cancel_contract: 'only pilots post contracts', demo_capture: 'only pilots take sectors',
   dock_request: 'only pilots dock at stations', undock: 'only pilots dock at stations', land_request: 'only pilots land at a Star Port',
@@ -96,7 +101,7 @@ const PILOT_ONLY = {
   starfight_move: 'only pilots fly', starfight_fire: 'only pilots fly', starfight_missile: 'only pilots fly', starfight_torpedo: 'only pilots fly', starfight_class: 'only pilots fly', starfight_leave: 'only pilots fly',
 };
 // Messages only an admin's app may send: steering the Coma director and playing Coma by hand.
-const ADMIN_ONLY = ['director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order', 'admin_dashboard'];
+const ADMIN_ONLY = ['city_copy', 'admin_intercept_result', 'director_set', 'admin_armada', 'admin_recall', 'admin_capture', 'admin_order', 'admin_dashboard'];
 
 // Whether a hello's admin_key is the server's ADMIN_KEY (none set: nobody is an admin). The bytes
 // are compared in constant time, so the key can't be found a character at a time; a key of another
@@ -170,11 +175,11 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     const fleets = galaxy.war.fleets.map((fl) => (fl.manual ? { ...fl, manual: undefined } : fl));
     const orders = O.viewFor(galaxy, faction, now());
     const log = galaxy.war.log.filter((e) => O.logVisible(e, faction));
-    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, director: undefined, titles: undefined, war: { ...galaxy.war, fleets, orders, log, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.view(galaxy, faction, now()), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths(), cities: CI.stamps(galaxy) };
   }
 
   function adminView() {
-    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()) }, battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths() };
+    return { ...galaxy, accounts: undefined, owners: undefined, titles: undefined, war: { ...galaxy.war, ledger: L.view(galaxy, now()), stockpiles: WC.view(galaxy) }, frontier: FR.adminView(galaxy), battles: battles.list(), defenses: defenses.list(), facilities: facilities.list(), supremacies: supremacies.list(), spaceBattles: spaceBattles.list(), queues: matchmaking.list(), berths: spaces.allBerths(), cities: CI.stamps(galaxy) };
   }
 
   function stateFor(me) {
@@ -223,6 +228,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       return galaxy.system.planets.some((p) => p.id === id && p.kind !== 'satellite');
     },
     isSurface: (id) => galaxy.system.planets.some((p) => p.id === id),
+    isCity: (id, me) => (CI.isHomeworld(galaxy, id) && (me.admin || F.FACTIONS[W.planet(galaxy, id).owner]?.playable !== false)) || !!CI.colonyCluster(galaxy, id),
     berthsOpen: (id) => G.berthsOpen(galaxy, id),
     factionOf: (name) => (Object.hasOwn(galaxy.pilots, name) ? galaxy.pilots[name].faction ?? null : null),
     people: pilots,
@@ -291,6 +297,38 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     return pts;
   }
 
+  // War chests (stockpile.ts) for the matches that use war goods: drawn from a front's stockpile as
+  // pilots join, settled when the match ends. Every Builder whose goods were used hears what they
+  // did; goods used by the winning side earn warChest.usedWinMerit of their value in War Merit.
+  const warChest = (modeName) => ({
+    open: (planet, faction) => WC.newChest(galaxy, planet, faction),
+    draw: (chest, share = 1, goods = WC.WAR_GOODS) => WC.draw(galaxy, chest, share, goods),
+    settle: (m, wonSide = m.result) => {
+      const where = W.planet(galaxy, m.planet)?.name || m.planet;
+      for (const side of ['a', 'd']) {
+        const chest = m.chests?.[side];
+        if (!chest) continue;
+        WC.settle(galaxy, chest);
+        const won = side === wonSide;
+        const by = new Map();
+        for (const u of chest.used) {
+          const n = (by.get(u.from) || {});
+          n[u.item] = (n[u.item] || 0) + 1;
+          by.set(u.from, n);
+        }
+        for (const [builder, items] of by) {
+          const e = galaxy.bases?.[builder];
+          if (!e) continue;
+          const merit = won ? Math.round(Object.entries(items).reduce((a, [k, n]) => a + n * (G.MERIT_VALUE[k] || 0), 0) * T.get().warChest.usedWinMerit) : 0;
+          if (merit) e.merit = (e.merit || 0) + merit;
+          const list = Object.entries(items).map(([k, n]) => `${n} ${H.ITEMS[k]?.name || k}${n === 1 ? '' : 's'}`).join(', ');
+          F.alert(e, `Your war goods fought in ${modeName} on ${where} (${won ? 'won' : 'lost'}): ${list}${merit ? `. +${merit} War Merit` : ''}`, now());
+        }
+      }
+      save();
+    },
+  });
+
   const battles = B.createBattles({
     galaxy: () => galaxy, now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     onCampaignEnd: (b, winner, vsAi) => {
@@ -304,6 +342,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
   // Sector Defense matches (FPS waves against AI), scored for the campaign like the battles.
   const defenses = DF.createDefenses({
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
+    warChest: { ...warChest('Sector Defense'), get share() { return T.get().warChest.defenseShare; } },
     onEnd: (d, winner) => {
       const squad = d.result === 'won';
       const names = squad ? [...d.pilots.values()].map((p) => p.name) : [];
@@ -330,6 +369,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     now, speed: battleSpeed, send: (c, msg) => send(c.ws, msg), changed,
     loadouts: (name) => G.pilot(galaxy, name).loadouts || [],
     ships: (planet, faction) => SUP.shipName(galaxy, W.planet(galaxy, planet), faction),
+    warChest: warChest('Supremacy'),
     onEnd: (f, winner, vsAi) => {
       const names = [...f.bodies.values()].filter((b) => !b.ai && !b.fodder && b.side === f.result).map((b) => b.name);
       won(f.planet, 'supremacy', winner, f.factions[f.result === 'a' ? 'd' : 'a'], names);
@@ -372,13 +412,17 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
     if (me.battle || me.defense || me.facility || me.supremacy || me.spaceMatch) return { ok: false, reason: "you can't jump in the middle of a battle" };
     const wp = msg.planet ? W.planet(galaxy, String(msg.planet)) : null;
     if (msg.planet && !wp) return { ok: false, reason: 'no such planet' };
-    const sys = W.system(galaxy, wp ? wp.system : String(msg.system || ''));
+    const target = wp ? wp.system : String(msg.system || '');
+    const sys = W.system(galaxy, target) || (FR.isFrontierSystem(galaxy, target) ? { id: target, name: target } : null);
     if (!sys) return { ok: false, reason: 'no such system' };
+    // The Coma Conglomerate's space is for admins only: no player ever goes there.
+    if (sys.capitalOf && F.FACTIONS[sys.capitalOf]?.playable === false && !me.admin) return { ok: false, reason: `${sys.name} is closed space` };
     const t = now();
     if ((me.jumpUntil || 0) > t) return { ok: false, reason: 'the carrier is already jumping' };
     // The jump drive's range, in lanes from the system the carrier is in (orbital gates, in the
     // Frontier's player systems, will reach farther).
-    const lanes = W.laneJumps(galaxy, me.system || W.HOME_SYSTEM, sys.id);
+    const from = me.system || W.HOME_SYSTEM;
+    const lanes = sys.id.startsWith('fr-') || from.startsWith('fr-') ? FR.lanes(galaxy, from, sys.id) : W.laneJumps(galaxy, from, sys.id);
     const range = T.get().carrier.jumpLanes;
     if (lanes === null) return { ok: false, reason: `no lanes reach ${sys.name}` };
     if (lanes > range) return { ok: false, reason: `${sys.name} is ${lanes} lanes away, past the jump drive's range of ${range}: jump to a system on the way first` };
@@ -719,6 +763,9 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         },
         contractItems: G.CONTRACT_ITEMS,
         meritValue: G.MERIT_VALUE,
+        warGoods: WC.WAR_GOODS,
+        frontier: FR.CATALOG,
+        cities: CI.CATALOG,
         demo,
         carrier: W.isDemo(), // the demo war: every pilot flies a fleet carrier
         campaign: { modes: C.MODES, bonuses: C.BONUSES, aiShare: C.AI_SHARE },
@@ -815,8 +862,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'donate': {
         // To a front: the planet given, else the first in the Builder's system whose campaign
-        // their faction is in. The goods count for it in the ledger, and the account takes the
-        // faction's side there.
+        // their faction is in. The goods go to the faction's stockpile there (stockpile.ts), count
+        // for it in the ledger, and the account takes the faction's side there.
         const faction = galaxy.bases?.[me.name]?.faction ?? null;
         const planet = donationFront(faction, msg.planet);
         if (msg.planet && !planet) {
@@ -828,7 +875,7 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
           result = side;
           break;
         }
-        result = G.donate(galaxy, me.name, msg.item, msg.qty);
+        result = G.donate(galaxy, me.name, msg.item, msg.qty, planet);
         if (!result.ok) break;
         const merit = msg.qty * (G.MERIT_VALUE[msg.item] || 0);
         O.donated(galaxy, faction, me.name, merit, now());
@@ -891,6 +938,71 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       case 'cancel_contract':
         result = G.cancelContract(galaxy, me.name, msg.contract);
         break;
+      case 'frontier_lease_cluster':
+        result = FR.leaseCluster(galaxy, me.name, now());
+        break;
+      case 'frontier_sell_back':
+        result = FR.sellBack(galaxy, me.name, String(msg.cluster || ''));
+        break;
+      case 'frontier_lease_ship':
+        result = FR.leaseShip(galaxy, me.name, String(msg.cluster || ''), now());
+        break;
+      case 'frontier_survey':
+        result = FR.survey(galaxy, me.name, String(msg.cluster || ''), String(msg.planet || ''), msg.point, now());
+        break;
+      case 'frontier_target':
+        result = FR.setTarget(galaxy, me.name, msg.ship, String(msg.planet || ''));
+        break;
+      case 'frontier_jump':
+        result = FR.jump(galaxy, me.name, msg.ship, String(msg.system || ''), now());
+        break;
+      case 'frontier_establish':
+        result = FR.establish(galaxy, me.name, msg.ship, now());
+        break;
+      case 'frontier_escort':
+        result = FR.escort(galaxy, me.name, msg.ship, msg.on !== false);
+        break;
+      case 'frontier_decode':
+        result = FR.decode(galaxy, me.name, String(msg.faction || ''));
+        break;
+      case 'frontier_scan':
+        // The system the pilot's carrier is in.
+        result = FR.scan(galaxy, me.name, me.system || W.HOME_SYSTEM, now());
+        break;
+      case 'frontier_intercept':
+        result = FR.intercept(galaxy, me.name, msg.ship, me.system || W.HOME_SYSTEM, now());
+        break;
+      case 'frontier_engine':
+        result = FR.buyEngine(galaxy, me.name, msg.ship, String(msg.stage || ''));
+        break;
+      case 'frontier_deliver':
+        result = FR.deliver(galaxy, me.name, msg.ship, String(msg.item || ''), msg.qty, now());
+        break;
+      case 'frontier_build':
+        result = FR.buildIn(galaxy, me.name, String(msg.cluster || ''), String(msg.building || ''));
+        break;
+      case 'frontier_resettle':
+        result = FR.resettle(galaxy, me.name, String(msg.cluster || ''), now());
+        break;
+      case 'frontier_auction_buy':
+        result = FR.buyAtAuction(galaxy, me.name, String(msg.cluster || ''), now());
+        break;
+      case 'frontier_buy':
+        result = FR.buy(galaxy, me.name, String(msg.cluster || ''), String(msg.item || ''), msg.qty);
+        break;
+      case 'frontier_export':
+        result = FR.exportGoods(galaxy, me.name, String(msg.cluster || ''), String(msg.item || ''), msg.qty);
+        break;
+      case 'frontier_haul':
+        result = FR.takeHaul(galaxy, me.name, String(msg.cluster || ''), String(msg.item || ''), msg.qty, String(msg.to || ''), now());
+        break;
+      case 'frontier_haul_deliver':
+        result = FR.deliverHaul(galaxy, me.name, msg.mission, where(me).station);
+        break;
+      case 'admin_intercept_result':
+        // Until the Intercept match exists: an admin settles an interception by hand.
+        result = FR.interceptResult(galaxy, msg.ship, msg.attackersWon === true, now());
+        break;
       case 'demo_capture':
         result = demo ? G.demoCapture(galaxy, me.name, msg.planet, msg.sector, now()) : { ok: false, reason: 'taking sectors by hand is only for demo mode' };
         break;
@@ -910,6 +1022,27 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         break;
       case 'admin_capture':
         result = W.capture(galaxy, msg.planet, msg.sector, 'coma', now());
+        break;
+      // The city builder: a Founder's colony city, or (admins) a homeworld's, piece by piece.
+      case 'city_get': { // anyone may look at any city, but the Coma's worlds are admins' alone
+        const id = String(msg.planet || '');
+        const closed = F.FACTIONS[W.planet(galaxy, id)?.owner]?.playable === false && !me.admin;
+        return send(ws, { type: 'city', ...CI.view(galaxy, closed ? '' : id), planet: id });
+      }
+      case 'city_place':
+        result = CI.place(galaxy, me, String(msg.planet || ''), String(msg.piece || ''), msg.x, msg.z, msg.rot, now());
+        break;
+      case 'city_move':
+        result = CI.move(galaxy, me, String(msg.planet || ''), msg.id, msg.x, msg.z, msg.rot, now());
+        break;
+      case 'city_remove':
+        result = CI.remove(galaxy, me, String(msg.planet || ''), msg.id, now());
+        break;
+      case 'city_clear':
+        result = CI.clear(galaxy, me, String(msg.planet || ''), now());
+        break;
+      case 'city_copy':
+        result = CI.copy(galaxy, me, String(msg.from || ''), String(msg.planet || ''), now());
         break;
       case 'admin_dashboard':
         return send(ws, { type: 'dashboard', ...dashboard() });
@@ -1071,6 +1204,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
         }
         return send(ws, { type: 'error', reason: `unknown message ${msg.type}` });
     }
+    if (result.ok && msg.type.startsWith('city_')) send(ws, { ...result, type: 'city_result', action: msg.type, planet: msg.planet, tag: String(msg.tag ?? '').slice(0, 32) });
+    if (result.ok && (FRONTIER_MSGS.includes(msg.type) || msg.type === 'admin_intercept_result')) send(ws, { ...result, type: 'frontier_result', action: msg.type });
     if (result.ok) changed();
     else send(ws, { type: 'error', reason: result.reason });
   }
@@ -1114,6 +1249,8 @@ function startServer({ port = 8080, saveFile = null, tickMs = TICK_MS, now = Dat
       if (G.tick(galaxy, now())) changed();
       if (C.tick(galaxy, now())) changed();
       if (O.tick(galaxy, pay, now())) changed();
+      if (FR.tick(galaxy, now())) changed();
+      if (CI.tick(galaxy, now())) changed();
     } catch (err) {
       console.error('error in the galaxy tick:', err);
     }

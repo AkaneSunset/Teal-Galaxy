@@ -25,6 +25,7 @@ const FC = require('./facility');
 const F = require('./factions');
 const N = require('./navy');
 const TM = require('./telemetry.ts');
+const WC = require('./stockpile.ts');
 
 const TEAM_MAX = 16; // a side, AI troopers filling the empty slots
 const FODDER = 10; // fodder bots a side on the ground...
@@ -48,6 +49,15 @@ const BLAST_DOOR_HP = 5000;
 const ELITE_COST = 150; // battle credits for an elite trooper
 const CREDITS = { kill: 10, fodder: 2, capture: 25 };
 const ELITE = { hp: 150, shield: 50, damage: 1.3, speed: 1.05 };
+// War goods from Builders' outposts (stockpile.ts), from each side's war chest:
+const DRONE_BOTS = 4; // fodder bots a drone chassis adds to its side on the ground, for the match
+const LANDER_AT_S = 45; // a lander lands a forward drop ship this long into each ground phase
+const LANDER_SHORT = 12; // metres short of the point it lands toward
+const FUEL_STEP = 10; // fuel cells for each...
+const FUEL_BOARD_S = 5; // ...5 more seconds of boarding window,
+const FUEL_BOARD_MAX_S = 15; // up to this much more
+const SWEEP_S = 20; // a sensor module's sweep at the start of each ground phase
+const CHEST_GOODS = ['lander_frame', 'hauler', 'drone_frame', 'weapon', 'fuel', 'missile', 'warhead', 'sensor', 'shells']; // what a chest here takes
 
 // A storied world's holder gets one of these (campaign.js STORIED); other planets none.
 const BONUSES = {
@@ -264,6 +274,14 @@ function newSupremacy({ id = 's1', planet, planetName = '', attacker, defender =
     gearObjs: [],
     result: null,
     how: null,
+    // War chests (stockpile.ts): one a side, opened when its first pilot joins; who has drawn a share.
+    chests: { a: null, d: null },
+    chestPilots: new Set(),
+    extraFodder: { a: 0, d: 0 },
+    forward: { a: null, d: null }, // a lander's forward drop ship this ground phase: [x, z]
+    swept: { a: 0, d: 0 }, // the round a sensor sweep last ran for each side
+    landed: { a: 0, d: 0 }, // the round a lander last landed for each side
+    boardS: BOARD_S,
   };
   // The engine's hooks.
   f.spawnSpots = spawnSpots;
@@ -328,7 +346,7 @@ function balance(f) {
 // The fodder bots: FODDER a side on the ground; aboard, only the ship's crew.
 function fodder(f) {
   for (const [id, b] of f.bodies) if (b.fodder) f.bodies.delete(id);
-  const want = f.phase === 'ship' ? { [f.winner]: 0, [other(f.winner)]: CREW } : { a: FODDER, d: FODDER };
+  const want = f.phase === 'ship' ? { [f.winner]: 0, [other(f.winner)]: CREW } : { a: FODDER + f.extraFodder.a, d: FODDER + f.extraFodder.d };
   for (const side of ['a', 'd']) {
     for (let i = 0; i < want[side]; i++) {
       const n = f.nextId++;
@@ -349,6 +367,7 @@ function botName(f, side) {
 function spawnSpots(f, b) {
   if (f.phase === 'ship') return f.map.spawns[b.side === f.winner ? 'a' : 'd'];
   const out = f.map.spawns[b.side].slice();
+  if (f.forward[b.side]) for (const [dx, dz] of [[-4, 0], [4, 0], [0, -4], [0, 4]]) out.push([f.forward[b.side][0] + dx, f.forward[b.side][1] + dz]);
   for (const p of f.points) if (p.owner === b.side) for (const [dx, dz] of [[-7, 0], [7, 0], [0, -7], [0, 7]]) out.push([p.x + dx, p.z + dz]);
   return out.map(([x, z]) => FC.pushOut(f, clamp(x, 1, f.w - 1), clamp(z, 1, f.d - 1)));
 }
@@ -460,6 +479,7 @@ function groundStep(f, dt) {
     if (p.owner) f.bars[p.owner] += BAR_RATE * dt;
   }
   supply(f);
+  chestGround(f);
   const full = ['a', 'd'].find((s) => f.bars[s] >= BAR_TARGET);
   const late = f.t - f.phaseAt >= GROUND_MAX_S;
   if (full || late) startBoarding(f, full || (f.bars.a > f.bars.d ? 'a' : 'd'));
@@ -472,6 +492,47 @@ function supply(f) {
   const u = { id: f.nextId++, weapon: FC.random(f.rng) < 0.5 ? 'railgun' : 'rockets', x, z };
   f.pickups.set(u.id, u);
   f.feed.push({ text: `Front supply drop: a ${FC.WEAPONS[u.weapon].name}` });
+  // And a drop at each side's drop ship from its war chest: a rocket launcher for a missile, a
+  // railgun for a weapon system.
+  for (const side of ['a', 'd']) {
+    const chest = f.chests[side];
+    const item = ['missile', 'weapon'].filter((k) => WC.has(chest, k) > 0).sort(() => FC.random(f.rng) - 0.5)[0];
+    if (!item) continue;
+    const from = WC.use(chest, item, 1, f.t);
+    const [dx, dz] = f.map.drop[side];
+    const v = { id: f.nextId++, weapon: item === 'missile' ? 'rockets' : 'railgun', x: dx, z: dz < f.d / 2 ? dz + 6 : dz - 6 };
+    [v.x, v.z] = FC.pushOut(f, v.x, v.z, 0.6).map(r1);
+    f.pickups.set(v.id, v);
+    f.feed.push({ text: `${sideName(f, side)} supply drop: a ${FC.WEAPONS[v.weapon].name} from ${from[0]}`, side, chest: item, from: from[0] });
+  }
+}
+
+// War goods on the ground, each ground phase: a sensor module sweeps the field at its start, and a
+// lander chassis lands a forward drop ship LANDER_AT_S in, short of the nearest point the side
+// doesn't hold; its pilots can come back there until the ground is won.
+function chestGround(f) {
+  for (const side of ['a', 'd']) {
+    const chest = f.chests[side];
+    if (!chest) continue;
+    if (f.swept[side] !== f.round && WC.has(chest, 'sensor') > 0) {
+      f.swept[side] = f.round;
+      const from = WC.use(chest, 'sensor', 1, f.t);
+      f.active.push({ kind: 'sensor', side, by: null, until: f.t + SWEEP_S, x: f.w / 2, z: f.d / 2, next: f.t, left: 0 });
+      f.feed.push({ text: `${sideName(f, side)} swept the field with a sensor module from ${from[0]}`, side, chest: 'sensor', from: from[0] });
+    }
+    if (f.landed[side] !== f.round && f.t - f.phaseAt >= LANDER_AT_S && WC.has(chest, 'lander_frame') > 0) {
+      const [hx, hz] = f.map.drop[side];
+      const target = f.points.filter((p) => p.owner !== side).sort((p, q) => Math.hypot(p.x - hx, p.z - hz) - Math.hypot(q.x - hx, q.z - hz))[0];
+      if (!target) continue;
+      f.landed[side] = f.round;
+      const dist = Math.hypot(target.x - hx, target.z - hz) || 1;
+      const k = Math.max(0, dist - LANDER_SHORT) / dist;
+      const at = FC.pushOut(f, clamp(hx + (target.x - hx) * k, 2, f.w - 2), clamp(hz + (target.z - hz) * k, 2, f.d - 2), 1).map(r1);
+      const from = WC.use(chest, 'lander_frame', 1, f.t);
+      f.forward[side] = at;
+      f.feed.push({ text: `${sideName(f, side)} landed a forward drop ship from ${from[0]}: respawn there`, side, chest: 'lander_frame', from: from[0] });
+    }
+  }
 }
 
 // The ground is won: boarding shuttles land at the winners' drop ship and every point they hold.
@@ -480,11 +541,27 @@ function startBoarding(f, side) {
   f.phaseAt = f.t;
   f.winner = side;
   f.shuttles = [f.map.drop[side], ...f.points.filter((p) => p.owner === side).map((p) => [p.x, p.z])];
-  f.feed.push({ text: `${sideName(f, side)} won the ground: board the shuttles! ${BOARD_S} seconds` });
+  f.forward = { a: null, d: null };
+  // War goods: fuel cells lengthen the boarding window, a hauler hull lands one more shuttle mid-field.
+  const chest = f.chests[side];
+  f.boardS = BOARD_S;
+  const cells = Math.min(WC.has(chest, 'fuel'), (FUEL_BOARD_MAX_S / FUEL_BOARD_S) * FUEL_STEP);
+  const steps = Math.floor(cells / FUEL_STEP);
+  if (steps > 0) {
+    const from = WC.use(chest, 'fuel', steps * FUEL_STEP, f.t);
+    f.boardS += steps * FUEL_BOARD_S;
+    f.feed.push({ text: `${steps * FUEL_STEP} fuel cells from ${from[0]}: the shuttles wait ${steps * FUEL_BOARD_S} seconds longer`, side, chest: 'fuel', from: from[0] });
+  }
+  if (WC.has(chest, 'hauler') > 0) {
+    const from = WC.use(chest, 'hauler', 1, f.t);
+    f.shuttles.push(FC.pushOut(f, f.w / 2, f.d / 2, 1).map(r1));
+    f.feed.push({ text: `A hauler hull from ${from[0]} came down as an extra shuttle mid-field`, side, chest: 'hauler', from: from[0] });
+  }
+  f.feed.push({ text: `${sideName(f, side)} won the ground: board the shuttles! ${f.boardS} seconds` });
 }
 
 function boardingStep(f) {
-  if (f.t - f.phaseAt < BOARD_S) return;
+  if (f.t - f.phaseAt < f.boardS) return;
   const boarders = [...f.bodies.values()].filter((b) => b.alive && !b.fodder && b.side === f.winner && f.shuttles.some(([x, z]) => Math.hypot(b.x - x, b.z - z) <= BOARD_R));
   f.boarders = boarders.length;
   f.pilotsAboard = boarders.filter((b) => !b.ai).length; // only pilots add time
@@ -496,6 +573,12 @@ function boardingStep(f) {
   setMap(f, f.shipMaps[shipSide], shipSide);
   fodder(f);
   for (const b of f.bodies.values()) if (b.present) FC.spawn(f, b);
+  // A strategic warhead in the boarders' chest becomes a breaching charge: the first blast door standing goes.
+  const door = f.breakables.find((br) => br.kind === 'door' && br.hp > 0);
+  if (door && WC.has(f.chests[f.winner], 'warhead') > 0) {
+    const from = WC.use(f.chests[f.winner], 'warhead', 1, f.t);
+    FC.hurtBreakable(f, door, door.hp, { name: `A breaching charge from ${from[0]}`, side: f.winner });
+  }
   f.feed.push({ text: `${f.boarders} aboard ${f.shipNames[shipSide]} (${f.pilotsAboard} pilots, +${BOARD_BONUS_S * f.pilotsAboard} s): ${Math.round(f.shipUntil - f.t)} seconds to destroy its reactor` });
 }
 
@@ -520,6 +603,8 @@ function endRound(f, side, how) {
   f.phaseAt = f.t;
   f.winner = null;
   f.shuttles = [];
+  f.forward = { a: null, d: null };
+  f.boardS = BOARD_S;
   f.bars = { a: 0, d: 0 };
   setMap(f, f.ground);
   f.points = f.ground.points.map(([x, z]) => ({ x, z, owner: null, progress: 0 }));
@@ -564,7 +649,7 @@ function step(f, dt) {
 
 function frame(f) {
   const ship = f.phase === 'ship' ? other(f.winner) : null;
-  const left = f.phase === 'ground' ? GROUND_MAX_S - (f.t - f.phaseAt) : f.phase === 'boarding' ? BOARD_S - (f.t - f.phaseAt) : f.shipUntil - f.t;
+  const left = f.phase === 'ground' ? GROUND_MAX_S - (f.t - f.phaseAt) : f.phase === 'boarding' ? f.boardS - (f.t - f.phaseAt) : f.shipUntil - f.t;
   const out = {
     match: f.id,
     t: r1(f.t),
@@ -578,6 +663,8 @@ function frame(f) {
     winner: f.winner,
     points: f.points.map((p) => [p.owner, Math.round(p.progress * 100)]),
     shuttles: f.shuttles,
+    forward: { a: f.forward.a, d: f.forward.d },
+    chests: { a: WC.chestView(f.chests.a), d: WC.chestView(f.chests.d) },
     boarders: f.boarders,
     pilotsAboard: f.pilotsAboard || 0,
     breakables: f.breakables.map((br) => [br.kind, Math.round(br.hp), br.maxHp]),
@@ -633,11 +720,38 @@ function joined(f, name) {
     points: FC.POINTS,
     classes: FC.DEFAULT_CLASSES,
     customMax: FC.CUSTOM_MAX,
-    streaks: f.bonus === 'streaks' ? Object.fromEntries(BONUSES.streaks.streaks.map((s) => [s, FC.STREAKS[s]])) : {},
+    streaks: { barrage: FC.STREAKS.barrage, ...(f.bonus === 'streaks' ? Object.fromEntries(BONUSES.streaks.streaks.map((s) => [s, FC.STREAKS[s]])) : {}) },
+    chest: WC.chestView(f.chests[b.side]),
     eliteCost: ELITE_COST,
     rounds: ROUNDS_TO_WIN,
     start: [b.x, b.z],
   };
+}
+
+// A pilot's share of their side's war chest came (`got`, by good: stockpile.draw). Drone chassis
+// add DRONE_BOTS fodder bots each to the side for the match; each shell crate is an Orbital
+// Barrage the pilot can call in. The rest waits in the chest for the match to use.
+function chestJoined(f, side, name, got) {
+  const chest = f.chests[side];
+  const b = f.bodies.get(name);
+  const drones = WC.has(chest, 'drone_frame');
+  if (drones > 0) {
+    const from = WC.use(chest, 'drone_frame', drones, f.t);
+    f.extraFodder[side] += drones * DRONE_BOTS;
+    if (f.phase !== 'ship') {
+      for (let i = 0; i < drones * DRONE_BOTS; i++) {
+        const n = f.nextId++;
+        FC.newBody(f, { id: `fb${n}`, name: `${botName(f, side)} ${n}`, side, ai: true, fodder: true, cls: 'assault' });
+      }
+    }
+    f.feed.push({ text: `${drones * DRONE_BOTS} more ${botName(f, side)}s fight for ${f.factions[side] ? F.the(f.factions[side]) : 'the militia'}, built on drone chassis from ${from[0]}`, side, chest: 'drone_frame', from: from[0] });
+  }
+  const shells = got.shells || 0;
+  if (b && shells > 0) {
+    const from = WC.use(chest, 'shells', shells, f.t) || [];
+    for (let i = 0; i < shells; i++) b.earned.push('barrage');
+    f.feed.push({ name, text: `${name} has ${shells} Orbital Barrage${shells === 1 ? '' : 's'} from shell crates sent by ${from[0]}`, side, chest: 'shells', from: from[0] });
+  }
 }
 
 // A pilot joins `side` (an AI trooper makes room) / leaves (one comes back).
@@ -667,7 +781,9 @@ function removePilot(f, name) {
 
 // Supremacy matches a server runs: like createFacilities. `ships(planet, faction)` names a side's
 // ship over the planet.
-function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts = () => [], ships = () => null, onEnd = null }) {
+// `warChest`: { open(planet, faction) -> a chest or null, draw(chest) -> what came, settle(f) } from
+// the server (stockpile.ts over its galaxy); null: no war goods.
+function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts = () => [], ships = () => null, onEnd = null, warChest = null }) {
   const matches = new Map();
   const conns = new Map();
   let nextId = 1;
@@ -685,6 +801,13 @@ function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts 
   function enlist(me, f, side) {
     if (me.supremacy && me.supremacy !== f.id) leave(me);
     addPilot(f, me.name, side, loadouts(me.name));
+    // Each pilot's first time in the match brings a share of the side's war chest.
+    if (warChest && !f.chestPilots.has(me.name) && f.factions[side]) {
+      f.chestPilots.add(me.name);
+      f.chests[side] ||= warChest.open(f.planet, f.factions[side]);
+      const got = f.chests[side] ? warChest.draw(f.chests[side], 1, CHEST_GOODS) : {};
+      if (Object.keys(got).length) chestJoined(f, side, me.name, got);
+    }
     conns.get(f.id).set(me.name, me);
     me.supremacy = f.id;
     send(me, joined(f, me.name));
@@ -757,6 +880,7 @@ function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts 
     const winner = f.result === 'a' || f.result === 'd' ? f.factions[f.result] : null;
     const vsAi = !humans(f, 'a').length || !humans(f, 'd').length;
     const pts = winner && onEnd ? onEnd(f, winner, vsAi) : 0;
+    if (warChest) warChest.settle(f);
     const text = f.how === 'abandoned' ? 'The match ended: everyone left' : winner ? `${F.FACTIONS[winner].name} won the match ${f.rounds.a}–${f.rounds.d} in rounds: +${pts} campaign points on ${f.planetName}` : `A draw: no campaign points`;
     const fr = frame(f);
     for (const [name, c] of conns.get(f.id)) {
@@ -816,6 +940,7 @@ function createSupremacies({ now = Date.now, speed = 1, send, changed, loadouts 
 module.exports = {
   TEAM_MAX,
   FODDER,
+  CHEST_GOODS,
   CREW,
   BAR_TARGET,
   BOARD_S,
@@ -837,6 +962,7 @@ module.exports = {
   addPilot,
   removePilot,
   startBoarding,
+  chestJoined,
   step,
   frame,
   stateFor,

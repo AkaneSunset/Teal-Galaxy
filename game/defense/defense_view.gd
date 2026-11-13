@@ -14,6 +14,7 @@ extends Node3D
 ## launcher (from supply drops), Esc pause (with Leave match). Walk over a supply drop to take it.
 
 const WarInfo := preload("res://war_info.gd")
+const Surfaces := preload("res://surfaces.gd")
 
 const WALK := 5.0
 const SPRINT := 7.5
@@ -119,8 +120,10 @@ func _enemy_colour() -> Color:
 
 # --- The arena -----------------------------------------------------------------------------------
 
-func _mat(colour: Color, glow := 0.0) -> StandardMaterial3D:
-	var key := "%s/%s" % [colour, glow]
+## A material in `colour`; `surface` ("floor", "wall") picks its textures from
+## res://textures/surfaces.json.
+func _mat(colour: Color, glow := 0.0, surface := "") -> StandardMaterial3D:
+	var key := "%s/%s/%s" % [colour, glow, surface]
 	if _mats.has(key):
 		return _mats[key]
 	var m := StandardMaterial3D.new()
@@ -130,6 +133,8 @@ func _mat(colour: Color, glow := 0.0) -> StandardMaterial3D:
 		m.emission_enabled = true
 		m.emission = colour
 		m.emission_energy_multiplier = glow
+	if surface != "":
+		Surfaces.apply(m, "place", "glass" if colour.a < 1.0 else surface)
 	_mats[key] = m
 	return m
 
@@ -137,7 +142,7 @@ func _mat(colour: Color, glow := 0.0) -> StandardMaterial3D:
 func _box(parent: Node3D, size: Vector3, pos: Vector3, colour: Color, solid := true, glow := 0.0) -> Node3D:
 	var mesh := BoxMesh.new()
 	mesh.size = size
-	mesh.material = _mat(colour, glow)
+	mesh.material = _mat(colour, glow, Surfaces.box_surface(size, glow))
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	var node: Node3D = mi

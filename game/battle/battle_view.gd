@@ -150,6 +150,7 @@ func _ready() -> void:
 	_units_view = Units.new()
 	_units_view.terrain = terrain
 	_units_view.side_colours = {"a": side_colour("a").srgb_to_linear(), "d": side_colour("d").srgb_to_linear()}
+	_units_view.side_looks = {"a": side_look("a"), "d": side_look("d")}
 	add_child(_units_view)
 	_fx = Fx.new()
 	_fx.terrain = terrain
@@ -245,6 +246,12 @@ func side_colour(side: String) -> Color:
 	if f == null or str(f) == "":
 		return MILITIA
 	return WarInfo.faction_color(f)
+
+
+## Whose textures a side's units wear: its faction's, or the militia's plain hull panels.
+func side_look(side: String) -> String:
+	var f = side_faction(side)
+	return "militia" if f == null or str(f) == "" else str(f)
 
 
 func side_name(side: String) -> String:

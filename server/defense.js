@@ -16,6 +16,7 @@
 
 const F = require('./factions');
 const TM = require('./telemetry.ts');
+const WC = require('./stockpile.ts');
 
 const SIZE = 120; // the arena is SIZE x SIZE metres
 const SQUAD_MAX = 4;
@@ -46,6 +47,10 @@ const HEAD = 1.6; // ...or, when only that shows over cover, here (and they hit 
 const OBJECTIVE_REPAIR = 0.25; // the objective gets back this share of its health in every break
 const OBJECTIVE_GOAL = 0.5; // on objective maps, this share of each wave goes for the objective
 const OBJECTIVE_GUARD_R = 10; // ...unless a pilot they can see is this close
+// War goods from Builders' outposts, from the squad's war chest (stockpile.ts):
+const SENTRY = { damage: 12, every: 0.5, range: 40, at: { x: 60, y: 4, z: 60 } }; // a drone chassis: a sentry drone over the middle for a set
+const SHELLING = 80; // a shell crate: this much to every enemy as a wave lands
+const CHEST_GOODS = ['lander_frame', 'drone_frame', 'weapon', 'missile', 'warhead', 'sensor', 'shells', 'slugs']; // what a chest here takes
 
 // Campaign points the bonus round adds to a win.
 function bonusPoints(d) {
@@ -184,6 +189,12 @@ function newDefense({ id = 'd1', planet, planetName, faction, enemy = null, seed
     bonus: false, // the bonus round is on: the match is won whatever happens now
     bonusKills: 0,
     result: null, // 'won' or 'lost'
+    // The squad's war chest (stockpile.ts) as side a's, who has drawn a share, and what it's running.
+    chests: { a: null, d: null },
+    chestPilots: new Set(),
+    sentry: null, // { until: set, from, cd }
+    scouted: 0, // the set a sensor module scouts the waves of
+    warlordStruck: false,
   };
 }
 
@@ -455,6 +466,52 @@ function startWave(d) {
   for (const [type, n] of waveOf(d.set, d.wave, Math.max(1, present(d).length))) for (let k = 0; k < n; k++) spawnEnemy(d, type, i++);
   const lead = d.wave % WAVES === 0 ? `: a ${ENEMIES.boss.name} leads them` : '';
   d.feed.push({ text: d.bonus ? `Bonus wave ${d.wave}${lead}` : `Set ${d.set}, wave ${d.wave}${lead}` });
+  chestWave(d);
+}
+
+// War goods as a wave lands: a shell crate shells it, the first Warlord meets a strategic warhead,
+// and a drone chassis puts a sentry drone over the middle until the set ends.
+function chestWave(d) {
+  const chest = d.chests.a;
+  if (!chest) return;
+  if (WC.has(chest, 'shells') > 0) {
+    const from = WC.use(chest, 'shells', 1, d.t);
+    for (const e of d.enemies.values()) hurtEnemy(d, e, SHELLING, null);
+    d.feed.push({ text: `A shell crate from ${from[0]} shells the wave as it lands`, chest: 'shells', from: from[0] });
+  }
+  const boss = [...d.enemies.values()].find((e) => e.type === 'boss' && e.hp > 0);
+  if (boss && !d.warlordStruck && WC.has(chest, 'warhead') > 0) {
+    d.warlordStruck = true;
+    const from = WC.use(chest, 'warhead', 1, d.t);
+    hurtEnemy(d, boss, boss.hp, null);
+    d.feed.push({ text: `A strategic warhead from ${from[0]} takes the ${ENEMIES.boss.name} out as it lands`, chest: 'warhead', from: from[0] });
+  }
+  if (!d.bonus && (!d.sentry || d.sentry.until < d.set) && WC.has(chest, 'drone_frame') > 0) {
+    const from = WC.use(chest, 'drone_frame', 1, d.t);
+    d.sentry = { until: d.set, from: from[0], cd: 0 };
+    d.feed.push({ text: `A sentry drone from ${from[0]} holds the middle for set ${d.set}`, chest: 'drone_frame', from: from[0] });
+  }
+}
+
+// The sentry drone fires at the nearest enemy it can see.
+function sentryStep(d, dt) {
+  const s = d.sentry;
+  if (!s) return;
+  if (d.bonus || s.until < d.set) {
+    d.sentry = null;
+    return;
+  }
+  s.cd -= dt;
+  if (s.cd > 0) return;
+  const o = SENTRY.at;
+  const e = [...d.enemies.values()]
+    .filter((x) => x.hp > 0 && Math.hypot(x.x - o.x, x.z - o.z) <= SENTRY.range)
+    .sort((x, y) => Math.hypot(x.x - o.x, x.z - o.z) - Math.hypot(y.x - o.x, y.z - o.z))
+    .find((x) => clear(d, o, { x: x.x, y: (ENEMIES[x.type].fly || 0) + ENEMIES[x.type].height / 2, z: x.z }));
+  if (!e) return;
+  s.cd = SENTRY.every;
+  d.shots.push(['sentry', o.x, o.z, r1(e.x), r1(e.z)]);
+  hurtEnemy(d, e, SENTRY.damage, null);
 }
 
 // A wave is cleared: a break, supply drops, and after a set more lives and the next modifiers.
@@ -496,13 +553,60 @@ function drops(d, lastOfSet) {
   if (lastOfSet || random(d.rng) < 0.35) kinds.push('rocket');
   if (present(d).length > 2) kinds.push('ammo');
   const keep = modifiersFor(d.set).includes('famine') ? Math.ceil(kinds.length * MODIFIERS.famine.drops) : kinds.length;
-  for (const kind of kinds.slice(0, keep)) {
+  const out = kinds.slice(0, keep);
+  // From the squad's war chest: a missile makes sure of a rocket launcher in every drop, a weapon
+  // system adds one more at the end of a set, and a slug crate one more ammo crate.
+  const chest = d.chests.a;
+  const sent = [];
+  if (WC.has(chest, 'missile') > 0) {
+    sent.push(['missile', WC.use(chest, 'missile', 1, d.t)[0]]);
+    if (!out.includes('rocket')) out.push('rocket');
+  }
+  if (lastOfSet && WC.has(chest, 'weapon') > 0) {
+    sent.push(['weapon', WC.use(chest, 'weapon', 1, d.t)[0]]);
+    out.push('rocket');
+  }
+  if (WC.has(chest, 'slugs') > 0) {
+    sent.push(['slugs', WC.use(chest, 'slugs', 1, d.t)[0]]);
+    out.push('ammo');
+  }
+  for (const kind of out) {
     const a = random(d.rng) * Math.PI * 2;
     const r = 10 + random(d.rng) * 18;
     const u = { id: d.nextId++, kind, x: r1(60 + Math.cos(a) * r), z: r1(60 + Math.sin(a) * r) };
     d.pickups.set(u.id, u);
   }
   d.feed.push({ text: 'Supply drop inbound' });
+  for (const [item, from] of sent) d.feed.push({ text: `In the drop: ${{ missile: 'a rocket launcher', weapon: 'another rocket launcher', slugs: 'more ammo' }[item]} from ${from}`, chest: item, from });
+  // A sensor module scouts the waves of a set: the next wave's makeup in every break.
+  if (!d.bonus && d.scouted !== nextSet(d) && WC.has(chest, 'sensor') > 0) {
+    const from = WC.use(chest, 'sensor', 1, d.t);
+    d.scouted = nextSet(d);
+    d.feed.push({ text: `A sensor module from ${from[0]} scouts set ${d.scouted}'s waves`, chest: 'sensor', from: from[0] });
+  }
+  if (d.scouted && d.scouted === nextSet(d)) d.feed.push({ text: `Next wave: ${nextWave(d).map(([type, n]) => `${n} ${ENEMIES[type].name}${n === 1 ? '' : 's'}`).join(', ')}` });
+}
+
+// The set and wave the next wave will be.
+function nextSet(d) {
+  return !d.bonus && d.wave >= WAVES ? d.set + 1 : d.set;
+}
+function nextWave(d) {
+  const set = nextSet(d);
+  const wave = !d.bonus && d.wave >= WAVES ? 1 : d.wave + 1;
+  return waveOf(set, wave, Math.max(1, present(d).length));
+}
+
+// A pilot's share of the squad's war chest came (stockpile.draw): each lander chassis is
+// one more shared life. The rest waits in the chest for the waves.
+function chestJoined(d) {
+  const chest = d.chests.a;
+  const n = WC.has(chest, 'lander_frame');
+  if (n > 0) {
+    const from = WC.use(chest, 'lander_frame', n, d.t);
+    d.lives += n;
+    d.feed.push({ text: `${n} lander${n === 1 ? '' : 's'} from ${from[0]}: +${n} ${n === 1 ? 'life' : 'lives'}`, chest: 'lander_frame', from: from[0] });
+  }
 }
 
 // --- The simulation --------------------------------------------------------------------------
@@ -596,6 +700,7 @@ function tick(d, dt) {
     if (p.alive && p.shield < SHIELD && d.t - p.hitAt >= SHIELD_DELAY_S) p.shield = Math.min(SHIELD, p.shield + SHIELD_RATE * dt);
   }
   for (const e of d.enemies.values()) if (e.hp > 0) enemyStep(d, e, dt);
+  sentryStep(d, dt);
   for (const [id, e] of d.enemies) if (e.hp <= 0) d.enemies.delete(id);
   if (d.phase === 'break' && d.t >= d.breakUntil) startWave(d);
   else if (d.phase === 'wave' && d.enemies.size === 0) endWave(d);
@@ -622,6 +727,9 @@ function frame(d) {
     phase: d.phase,
     breakLeft: d.phase === 'break' ? r1(Math.max(0, d.breakUntil - d.t)) : 0,
     lives: d.lives,
+    chest: WC.chestView(d.chests.a),
+    sentry: d.sentry ? [SENTRY.at.x, SENTRY.at.z] : null,
+    nextWave: d.scouted && d.scouted === nextSet(d) && d.phase === 'break' ? nextWave(d) : null,
     bonus: d.bonus,
     bonusKills: d.bonusKills,
     objective: d.objective ? [Math.round(d.objective.hp), d.objective.maxHp] : null,
@@ -678,7 +786,8 @@ function joined(d, name) {
 // `onEnd(d, winner)` scores the result for the campaign (winner: the squad's faction, or the
 // enemy's, or null for the militia) and returns the points (bonusPoints(d) on top for a win);
 // `speed` makes matches run faster (tests).
-function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null }) {
+// `warChest`: the server's war chests (see supremacy.js), drawn at warChest.defenseShare.
+function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null, warChest = null }) {
   const matches = new Map();
   const conns = new Map(); // match id -> Map(name -> connection)
   let nextId = 1;
@@ -697,6 +806,12 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
   function enlist(me, d) {
     if (me.defense && me.defense !== d.id) leave(me);
     addPilot(d, me.name);
+    if (warChest && d.faction && !d.chestPilots.has(me.name)) {
+      d.chestPilots.add(me.name);
+      d.chests.a ||= warChest.open(d.planet, d.faction);
+      const got = d.chests.a ? warChest.draw(d.chests.a, warChest.share ?? 1, CHEST_GOODS) : {};
+      if (Object.keys(got).length) chestJoined(d);
+    }
     conns.get(d.id).set(me.name, me);
     me.defense = d.id;
     send(me, joined(d, me.name));
@@ -735,6 +850,7 @@ function createDefenses({ now = Date.now, speed = 1, send, changed, onEnd = null
   function finish(d) {
     const winner = d.result === 'won' ? d.faction : d.enemy;
     const pts = onEnd ? onEnd(d, winner) : 0;
+    if (warChest) warChest.settle(d, d.result === 'won' ? 'a' : 'd');
     const gain = (who) => (who ? `: +${pts} campaign points for ${F.the(who)}` : '');
     const text =
       d.result === 'won' && d.bonus
@@ -826,6 +942,8 @@ module.exports = {
   waveOf,
   newDefense,
   addPilot,
+  chestJoined,
+  CHEST_GOODS,
   removePilot,
   move,
   fire,

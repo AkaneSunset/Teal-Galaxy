@@ -10,6 +10,7 @@ const H = require('./heist');
 const N = require('./navy');
 const S = require('./sites');
 const W = require('./war');
+const SP = require('./stockpile.ts');
 
 // A home base is a Command Centre with eight nodes around it in a square, each for one building
 // (NODES). The Command Centre's level decides which nodes can be built, how high they can level
@@ -1155,23 +1156,26 @@ function cancelContract(g, name, id) {
   return { ok: true, refunded: refund };
 }
 
-// A Builder gives goods from stock to their faction's war supply in their system, for the sector
-// battles of phase 3, and earns War Merit by their value.
-function donate(g, builder, item, qty) {
+// A Builder sends finished war goods from stock to their faction's stockpile on a front (a planet
+// whose campaign their faction is in: stockpile.ts), for the big battles there, and earns War Merit
+// by their value. Metal, ice, ores and intermediate materials stay for building.
+function donate(g, builder, item, qty, planet = null) {
   const home = homeOf(g, builder);
   if (!home) return fail('you have no home planet');
   const e = econ(g, home.id);
   if (!e.faction) return fail('choose a faction first');
   if (!stockable(item)) return fail('no such item');
+  if (!SP.isGood(item)) return fail('only finished war goods go to the front');
   if (!Number.isInteger(qty) || qty < 1) return fail('bad amount');
   if ((e.stock[item] || 0) < qty) return fail(`not enough ${H.ITEMS[item]?.name || item}`);
+  if (!planet) return fail('no front to send it to: your faction is in no campaign in your system');
+  const r = SP.add(g, planet, e.faction, item, qty, builder);
+  if (!r.ok) return r;
   e.stock[item] -= qty;
-  const supply = ((g.war.supply[g.system.id] ||= {})[e.faction] ||= {});
-  supply[item] = (supply[item] || 0) + qty;
   const before = F.rank(e.merit);
   e.merit = (e.merit || 0) + qty * MERIT_VALUE[item];
   const after = F.rank(e.merit);
-  log(g, `${builder} donated ${amountOf(item, qty)} to ${F.the(e.faction)}`);
+  log(g, `${builder} sent ${amountOf(item, qty)} to ${F.the(e.faction)} on the front at ${W.planet(g, planet)?.name || planet}`);
   if (after !== before) {
     F.alert(e, `${e.merit} War Merit: you are now a ${after.name}`);
     log(g, `${builder} is now a ${after.name} of ${F.the(e.faction)}`);

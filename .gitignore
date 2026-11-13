@@ -9,3 +9,5 @@ build/
 server/node_modules/
 server/galaxy.json
 server/telemetry.jsonl
+tools/blender/.cache/
+__pycache__/
