@@ -1124,7 +1124,7 @@ lays the maps on by face as the shader does.
 
 **Units with a model of their own.** A faction's unit at one tier can have its own model in place
 of the shared one: `game/battle/models/<faction>/<type>.glb` (`ashen/artillery_t3.glb` is the Ashen
-Collective's tier 3 mobile artillery, the first). `battle_models.gd` uses it for that faction's side
+Collective's tier 3 mobile artillery, the first; `ashen/tank_t3.glb` its tier 3 heavy tank). `battle_models.gd` uses it for that faction's side
 whenever the file is there (`model(type, look)`), at the size it was modelled (no tier scaling), and
 every other side keeps the shared model. The file holds a `body` mesh, a `top` mesh placed where
 the turret turns and a `muzzle` point under it; colours and paint masks are in the vertex colours,

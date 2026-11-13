@@ -1,7 +1,7 @@
 """The sector battle units that have a model of their own: one faction's unit at one tier, modelled
 here part by part, exported to game/battle/models/<faction>/<type>.glb and rendered.
 
-    python tools/blender/unit_models.py OUT_DIR [export] [render] [ashen/artillery_t3 ...] [samples=N]
+    python tools/blender/unit_models.py OUT_DIR [export] [render] [ashen/artillery_t3 ...] [view=side ...] [samples=N]
 
 A unit without one of these keeps the shared model of its type (battle_models.gd), drawn bigger
 for its tier. One with a file here is drawn from it at its own size, wearing the textures listed
@@ -32,7 +32,7 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------
@@ -96,7 +96,11 @@ class Part(list):
             quad = [a[i], a[j], b[j], b[i]]
             if (area > 0) == (x1 > x0):
                 quad.reverse()
-            self.poly(quad, colour, mask)
+            if profile1:  # the two ends differ, so the side isn't flat: two triangles, each with its own facing
+                self.poly(quad[:3], colour, mask)
+                self.poly([quad[0], quad[2], quad[3]], colour, mask)
+            else:
+                self.poly(quad, colour, mask)
         if caps:
             self.poly(a, colour, mask, mid)
             self.poly(b, colour, mask, mid)
@@ -123,6 +127,31 @@ class Part(list):
     def wheel(self, r, x0, x1, z, y, colour, mask=PLAIN, sides=10):
         """A wheel on an axle across the hull."""
         self.lathe((x0, y, z), (1, 0, 0), [(0, r), (x1 - x0, r)], colour, mask, sides)
+
+    def track(self, loop, x0, x1, band, cleat, every=0.42):
+        """A track: the side profile `loop` [(z, y), ...] pulled across from x0 to x1, cleats all
+        the way round it."""
+        self.extrude(loop, x0, x1, band)
+        zc = sum(p[0] for p in loop) / len(loop)
+        yc = sum(p[1] for p in loop) / len(loop)
+        for i in range(len(loop)):
+            (z0, y0), (z1, y1) = loop[i], loop[(i + 1) % len(loop)]
+            run = math.hypot(z1 - z0, y1 - y0)
+            tilt = math.degrees(math.atan2(-(y1 - y0), z1 - z0))
+            out = ((y0 - y1) / run, (z1 - z0) / run)  # (z, y) away from the loop's inside
+            if out[0] * ((z0 + z1) / 2 - zc) + out[1] * ((y0 + y1) / 2 - yc) < 0:
+                out = (-out[0], -out[1])
+            n = max(1, round(run / every))
+            for k in range(n):
+                t = (k + 0.5) / n
+                self.box((x1 - x0 + 0.06, 0.1, every * 0.48), ((x0 + x1) / 2, y0 + (y1 - y0) * t + out[1] * 0.03, z0 + (z1 - z0) * t + out[0] * 0.03), cleat, PLAIN, (tilt, 0, 0))
+
+    def line(self, points, x, colour, mask=SIDE_GLOW, wide=0.1, proud=0.06):
+        """A lit line on a side wall at `x`, through the points [(z, y), ...]."""
+        for (z0, y0), (z1, y1) in zip(points, points[1:]):
+            run = math.hypot(z1 - z0, y1 - y0)
+            tilt = math.degrees(math.atan2(-(y1 - y0), z1 - z0))
+            self.box((proud, wide, run + wide * 0.6), (x, (y0 + y1) / 2, (z0 + z1) / 2), colour, mask, (tilt, 0, 0))
 
     def mirrored(self, other):
         """Adds `other` and its mirror image across the hull's middle."""
@@ -208,15 +237,22 @@ def render(out, unit, shared):
     views = {
         "front": ((-13, -17, 8.5), (0.8, -1, 2.4), 50, 0.0),
         "rear": ((12, 17, 8.0), (0, 0, 2.2), 50, 0.0),
-        "side": ((-30, -2, 3.2), (0, -2, 2.6), 70, 0.0),
+        "side": ((-30, -2, 3.2), (0, -2, 2.6), 70, 0.0, (40, 0, -60)),
         "head_on": ((0, -32, 3.5), (0, 0, 2.8), 75, 0.0),
-        "top": ((0, -1.6, 44), (0, -1.5, 0), 62, math.pi / 2),
+        "top": ((0, -1.6, 44), (0, -1.5, 0), 62, math.pi / 2, (30, 0, 200)),
     }
-    for view, (cam, target, lens, turn) in views.items():
+    k = load(unit).get("view", 1.0)  # how much further back to stand for a bigger unit
+    only = [w[5:] for w in sys.argv if w.startswith("view=")]
+    for view, (cam, target, lens, turn, *sun) in views.items():
+        if only and view not in only:
+            continue
+        cam, target = tuple(c * k for c in cam), tuple(c * k for c in target)
         kit.reset()
         place(unit, side, turn=turn)
-        bm.stage(cam, target, lens)
+        bm.stage(cam, target, lens, sun=sun[0] if sun else (52, 0, 28))  # a sun that doesn't glint off a facet into this camera
         bm.shoot(os.path.join(out, f"{name}_{view}.png"))
+    if only and "in_battle" not in only:
+        return
     # In a battle: from the battle camera's height, among the shared models it fights beside.
     kit.reset()
     base, tier = unit.split("/")[1].split("_t")
