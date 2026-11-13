@@ -247,8 +247,52 @@ def coma_hall(M):
         tube([(x, y, z0), (x - 2.5, y + 2, z0 - drop * 0.5), (x - 2.0, y + 3, z0 - drop)], [0.2, 0.15, 0.05], M["hide"], sides=4, steps=3, detail=True)
 
 
+def coma_power(M):
+    """The Power Plant: a swollen dome between two long lobes, round ports in their faces, gold seams
+    running over them, hoops held up on arms of light, and a ring of glowing pillars round the front."""
+    ball(11.5, (0, -2, 0), M["hide"], sx=1.0, sy=1.0, sz=1.45, segs=28, rings=14, dome=True)
+    ball(8.5, (0, -10, 0), M["hide"], sx=1.5, sy=0.9, sz=0.85, segs=24, rings=12, dome=True)  # the hump behind
+    for s in (-1, 1):
+        ball(7.0, (s * 10.5, 2, 0), M["hide"], sx=1.4, sy=1.05, sz=0.72, segs=24, rings=12, dome=True)
+        coma_port(M, (s * 10.5, 8.0, 2.8), 2.1)
+        coma_port(M, (s * 5.2, 7.0, 8.2), 1.3, turn=-s * 0.4)
+    ball(5.0, (0, 9, 0), M["hide"], sx=1.0, sy=0.9, sz=1.05, segs=20, rings=10, dome=True)  # the snout round the way in
+    coma_port(M, (0, 12.75, 2.75), 2.75)
+    for k, a in enumerate((-2.2, -1.5, -0.9, 0.3, 1.0, 1.95, 2.6, 3.4, 4.1)):  # gold seams over the dome, pole to ground
+        pts = [(11.5 * 1.03 * math.sin(t) * math.cos(a + 0.25 * t), -2 + 11.5 * 1.03 * math.sin(t) * math.sin(a + 0.25 * t), 16.7 * 1.03 * math.cos(t))
+               for t in (0.22, 0.5, 0.8, 1.1, 1.38, 1.55)]
+        tube(pts, 0.13, M["aur"], sides=4, steps=3, detail=True)
+    for s in (-1, 1):  # and along the lobes
+        for dz, sweep in ((0.55, 0.0), (0.82, 0.5)):
+            pts = [(s * (10.5 + 9.8 * 1.03 * math.cos(u) * math.sqrt(1 - dz * dz)), 2 + 7.35 * 1.03 * math.sin(u) * math.sqrt(1 - dz * dz), 5.04 * 1.03 * dz)
+                   for u in [sweep + i * 0.42 for i in range(7)]]
+            tube(pts, 0.12, M["aur"], sides=4, steps=3, detail=True)
+    for R, r, c, rot, arm in ((6.5, 0.85, (7.5, -6, 24.5), (math.radians(68), 0, math.radians(28)), [(5.0, -3.5, 14.0), (6.8, -4.6, 18.5), (7.6, -5.2, 21.0)]),
+                              (4.3, 0.6, (-7.8, -1.5, 21.5), (math.radians(35), math.radians(28), 0), [(-5.2, -1.5, 13.6), (-6.8, -1.5, 17.5), (-7.4, -1.5, 20.0)]),
+                              (3.3, 0.5, (-14.5, 3.0, 12.5), (math.radians(58), 0, math.radians(-35)), [(-8.8, 0.5, 9.0), (-11.8, 1.8, 10.6), (-13.3, 2.6, 11.4)]),
+                              (2.6, 0.45, (15.0, 3.5, 11.0), (math.radians(60), 0, math.radians(40)), [(9.0, 1.5, 8.6), (12.0, 2.6, 9.8), (13.6, 3.2, 10.4)])):
+        _hoop(R, r, c, M["hide"], rot=rot, squash=0.5, segs=32)
+        for rr in (R + r + 0.03, R - r - 0.03):
+            _hoop(rr, 0.12, c, M["aur"], rot=rot, segs=32, minor=4, detail=True)
+        tube(arm, [0.34, 0.26, 0.2], M["aur"], sides=5, steps=3, detail=True)
+        cyl(0.7, 0.4, arm[0], M["hide"], verts=10)
+    for k in range(13):  # the ring of pillars round the front
+        a = math.radians(-8 + k * 16)
+        x, y = 18.0 * math.cos(a), 2 + 15.5 * math.sin(a)
+        if abs(x) < 3.5:
+            continue
+        cyl(0.95, 0.45, (x, y, 0), M["plate"], verts=10)
+        ring(0.92, 0.05, (x, y, 0.46), M["aur"], detail=True, segs=16)
+        cyl(0.42, 3.4 + 0.5 * (k % 3), (x, y, 0.45), M["beam"], verts=12, detail=True)
+        cyl(0.5, 0.15, (x, y, 3.85 + 0.5 * (k % 3)), M["hide"], verts=10, detail=True)
+    box((5.2, 8.5, 0.3), (0, 16.6, 0), M["black"])
+    for s in (-1, 1):
+        box((0.14, 8.5, 0.06), (s * 2.3, 16.6, 0.3), M["aur"], detail=True)
+
+
 COMA = {
     "hall": (coma_hall, (7, 7), 76),
+    "power": (coma_power, (4, 4), 30),
 }
 
 FACTIONS = {

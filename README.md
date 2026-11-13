@@ -1051,6 +1051,15 @@ reach, which is all the Compatibility renderer lights one mesh with. The limbs, 
 are `kit.tube` (a shape swept smoothly through points); `round_room`, `dome`, `arc_wall`,
 `arched_wall`, `helix_ramp` and `saucer` make the rest.
 
+The Coma's **Power Plant** (`city/coma/power.glb`) is a swollen dome between two long lobes, round
+ports in their faces, gold seams over them, hoops held up on arms of light, and a ring of glowing
+pillars round the front. Inside (`inside_power.glb`), a passage leads to the **reactor hall**: a
+cluster of black spires veined with gold on a stepped dais, the great one throwing a beam up to the
+dome's crown, columns of light round the hall, discs afloat and gold lines swirling out over the
+floor. Through a short way on the right is the **pylon gallery**: four spires hung in the air over
+beams of light, strung together and to the heart held in hoops in the middle. The Power Plant is
+a colony piece in the catalog, so a Coma city only shows it if an admin places one.
+
 **Propaganda.** Every faction has four posters (`game/city/<faction>/propaganda/poster_<n>.png`,
 512 x 768): a monument, its emblem, its skyline by night and a notice. `tools/blender/propaganda.py`
 makes them: the buildings on them are the faction's own models rendered in Blender and cut down to

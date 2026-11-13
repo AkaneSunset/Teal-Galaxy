@@ -885,7 +885,123 @@ ASHEN = {
     "inside_zone_high_2": lambda M: ashen_spire(M, mirror=-1),
 }
 
-COMA = {"inside_hall": coma_spire}
+def coma_power(M):
+    """The Power Plant from the inside: a passage in, the reactor hall (a cluster of black spires
+    with gold veins on a stepped dais, columns of light round it, discs afloat and gold lines
+    swirling out over the floor) and, through a short way, the pylon gallery (spires hung in the air
+    over beams of light, strung together with gold)."""
+    lamps = []
+
+    def lamp(at):
+        lamps.append(at)
+        marker(f"light{len(lamps)}", at)
+
+    W, H, END = 4.0, 5.5, -17.4
+    shell(-W, W, END, 2, H, M["deck"], M["shell"])
+    wall((-W, 2), (W, 2), 0, H, M["shell"])
+    way_out(M, 2, frame="goldm", door="black", lamp="aur")
+    for s in (-1, 1):
+        wall((s * W, 2), (s * W, END), 0, H, M["rib"])
+        box((0.05, 2 - END, 0.05), (s * 3.76, (END + 2) / 2, H - 0.7), M["aur"], detail=True)
+        box((0.05, 2 - END, 0.03), (s * 1.3, (END + 2) / 2, 0.0), M["aur"], detail=True)
+    for y in (-4.0, -9.0, -14.0):
+        ring(2.2, 0.05, (0, y, H - 0.03), M["aur"], sy=0.7, detail=True, segs=24)
+    for words, size, z in (("COMA", 0.62, 4.1), ("POWER PLANT", 0.34, 3.35)):
+        t = text(words, size, (3.75, -5.0, z), M["light"], depth=0.04, detail=True)
+        t.rotation_euler = (math.pi / 2, 0, math.pi * 1.5)
+    display(M, (-3.78, -5.0, 1.3), "+x", w=1.1, h=1.65, frame="black", lamp="aur")
+    display(M, (-3.78, -11.0, 1.3), "+x", w=1.1, h=1.65, frame="black", lamp="aur")
+    lamp((0, -9.0, 5.0))
+
+    # The reactor hall.
+    room("hall")
+    c = (0.0, -41.0)
+    cx, cy = c
+    R, HH, RISE = 24.0, 18.0, 9.0
+    doors = [math.pi / 2, 0.0]
+    round_room(c, R, HH, M["deck"], M["rib"], doors=[(math.pi / 2, 7.6, 5.5), (0.0, 5.0, 5.0)], segs=48)
+    dome(c, R + 0.6, HH, RISE, M["shell"], segs=48, rings=5)
+    ribs(M, c, R, HH, RISE, 24, start=math.pi / 24, skip=doors, crown=6.0, thick=0.55)
+    for r, z in ((10.5, 0.0), (8.8, 0.3), (7.2, 0.6)):  # the dais
+        cyl(r, 0.3, (cx, cy, z), M["plate"], verts=40)
+        ring(r - 0.05, 0.045, (cx, cy, z + 0.31), M["aur"], detail=True, segs=48)
+    z0 = 0.9
+    cyl(2.0, 15.0, (cx, cy, z0), M["hide"], verts=8, top=0.15, turn=OCT)  # the great spire
+    for k in range(8):
+        a = OCT + k * math.pi / 4
+        tube([(cx + 1.9 * math.cos(a), cy + 1.9 * math.sin(a), z0 + 0.2), (cx + 0.25 * math.cos(a), cy + 0.25 * math.sin(a), z0 + 14.6)], 0.07, M["aur"], sides=3, steps=1, detail=True)
+    cyl(0.3, HH + RISE - z0 - 15.0, (cx, cy, z0 + 14.8), M["beam"], verts=8, detail=True)  # the light it throws up
+    for k, h in enumerate((9.5, 11.5, 8.5, 10.5, 9.0, 12.0)):  # the spires round it
+        a = k * math.tau / 6 + 0.3
+        x, y, _ = _polar(c, 4.7, a)
+        cyl(1.1, h, (x, y, z0), M["hide"], verts=6, top=0.08)
+        for f in (0.28, 0.55):
+            ring(1.1 * (1 - f) + 0.04, 0.05, (x, y, z0 + h * f), M["aur"], detail=True, segs=12)
+        for da in (-2.1, 0.0, 2.1):
+            tube([(x + 1.0 * math.cos(a + da), y + 1.0 * math.sin(a + da), z0 + 0.1), (x + 0.1 * math.cos(a + da), y + 0.1 * math.sin(a + da), z0 + h - 0.3)],
+                 0.06, M["aur"], sides=3, steps=1, detail=True)
+    for arm in range(3):  # gold lines swirling out over the floor
+        pts = [_polar(c, 11.2 + t * 11.0, arm * math.tau / 3 + 0.5 + t * 1.9, 0.03) for t in [i / 8 for i in range(9)]]
+        tube(pts, 0.11, M["aur"], sides=4, steps=3, flat=0.25, detail=True)
+        pts = [_polar(c, 11.6 + t * 9.0, arm * math.tau / 3 + 0.85 + t * 1.6, 0.03) for t in [i / 8 for i in range(9)]]
+        tube(pts, 0.06, M["aur"], sides=4, steps=3, flat=0.3, detail=True)
+    for deg in (20, 60, 120, 160, 200, 240, 300, 340):  # columns of light round the hall
+        x, y, _ = _polar(c, 19.8, math.radians(deg))
+        cyl(1.2, 0.6, (x, y, 0), M["plate"], verts=10)
+        ring(1.15, 0.045, (x, y, 0.61), M["aur"], detail=True, segs=16)
+        cyl(0.38, 20.5, (x, y, 0.6), M["beam"], verts=10, detail=True)
+        for z in (5.0, 10.0, 15.0):
+            ring(0.55, 0.06, (x, y, z), M["hide"], detail=True, segs=12)
+    for deg, z in ((45, 7.5), (135, 11.0), (225, 9.0), (315, 13.0)):
+        light_disc(M, _polar(c, 14.0, math.radians(deg), z), 2.5, 22.0)
+    lamp((0, -23.0, 6.0))
+    lamp((10.0, -46.0, 12.5))
+    lamp((-10.0, -46.0, 12.5))
+    lamp((0, -55.0, 9.0))
+    lamp((cx, cy, 20.0))
+
+    # The pylon gallery, through the way on the right.
+    c2 = (48.0, -41.0)
+    passage(M, c, R, c2, 13.0)
+    room("coil")
+    gx, gy = c2
+    R2, H2, RISE2 = 13.0, 11.0, 6.0
+    round_room(c2, R2, H2, M["deck"], M["rib"], doors=[(math.pi, 5.0, 5.0)], segs=32)
+    dome(c2, R2 + 0.6, H2, RISE2, M["shell"], segs=32, rings=4)
+    ribs(M, c2, R2, H2, RISE2, 14, start=math.pi / 14, skip=(math.pi,), crown=4.0)
+    for r, z in ((4.0, 0.0), (3.0, 0.3)):
+        cyl(r, 0.3, (gx, gy, z), M["plate"], verts=32)
+        ring(r - 0.05, 0.045, (gx, gy, z + 0.31), M["aur"], detail=True, segs=36)
+    ball(0.9, (gx, gy, 3.4), M["pool"], segs=14, rings=8, detail=True)  # the heart of it, held in hoops
+    for R3, tilt in ((1.5, 0.0), (1.9, 1.1), (2.3, 2.2)):
+        ring(R3, 0.05, (gx, gy, 3.4), M["aur"], sx=1.0, sy=abs(math.cos(tilt)) * 0.7 + 0.3, detail=True, segs=28)
+    cyl(0.12, 2.5, (gx, gy, 0.6), M["beam"], verts=6, detail=True)
+    cyl(0.12, H2 + RISE2 - 4.3, (gx, gy, 4.3), M["beam"], verts=6, detail=True)
+    tops = []
+    for k in range(4):  # the pylons, hung in the air over their beams
+        a = math.pi / 4 + k * math.pi / 2
+        x, y, _ = _polar(c2, 7.2, a)
+        z = 4.8 + 0.6 * (k % 2)
+        cyl(1.6, 0.2, (x, y, 0), M["plate"], verts=12)
+        ring(1.2, 0.045, (x, y, 0.21), M["aur"], detail=True, segs=16)
+        cyl(0.12, z - 2.4, (x, y, 0.2), M["beam"], verts=6, detail=True)
+        cyl(0.1, 2.4, (x, y, z - 2.4), M["hide"], verts=6, top=1.4, detail=True)
+        cyl(1.4, 4.6, (x, y, z), M["hide"], verts=6, top=0.05, detail=True)
+        for f, rr in ((0.02, 1.42), (0.3, 1.0), (0.55, 0.66)):
+            ring(rr, 0.05, (x, y, z + 4.6 * f), M["aur"], detail=True, segs=12)
+        cyl(0.18, 2.6, (x, y, z + 0.5), M["beam"], verts=6, detail=True)  # the light at its heart, showing through
+        tops.append((x, y, z + 0.1))
+    for k in range(4):
+        strand(M, tops[k], tops[(k + 1) % 4], 0.05)
+        strand(M, tops[k], (gx, gy, 3.4), 0.03)
+    for r in (6.0, 9.6):
+        ring(r, 0.05, (gx, gy, 0.02), M["aur"], detail=True, segs=40)
+    lamp((gx - 3.0, gy, 7.0))
+    lamp((gx + 4.0, gy, 7.0))
+    room()
+
+
+COMA = {"inside_hall": coma_spire, "inside_power": coma_power}
 
 INSIDES = {"compact": COMPACT, "ashen": ASHEN, "coma": COMA}
 
@@ -903,6 +1019,9 @@ VIEWS = {
                         ((-6.9, -65.9, 11.2), (4.0, -51.0, 10.5), 14), ((-25.4, -56.0, 1.7), (-36.0, -56.0, 4.2), 14),
                         ((25.4, -56.0, 1.7), (36.0, -56.0, 6.0), 13), ((0, -80.2, 1.75), (0, -93.0, 1.6), 13),
                         ((0, -81.5, 5.6), (0, -93.0, -0.8), 14)],
+        "inside_power": [((0, -18.6, 1.7), (0, -41.0, 9.0), 14), ((-13.5, -26.5, 1.7), (3.0, -45.0, 10.0), 14),
+                         ((14.5, -52.0, 2.2), (-4.0, -36.0, 6.0), 14), ((16.0, -41.0, 1.7), (48.0, -41.0, 4.0), 16),
+                         ((36.6, -41.0, 1.7), (48.0, -41.0, 5.0), 14)],
     },
 }
 
