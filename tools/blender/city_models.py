@@ -27,7 +27,7 @@ import bpy  # noqa: E402
 import housing  # noqa: E402
 import interiors  # noqa: E402
 import kit  # noqa: E402
-from kit import CELL, ball, box, compact_mats, cyl, finish, pilasters, render, reset, ring, saucer, slits, text, tube, twin_turret  # noqa: E402
+from kit import CELL, ball, box, compact_mats, cyl, finish, pilasters, render, reset, ring, saucer, slits, spike, text, tube, twin_turret  # noqa: E402
 
 # --- The Terran Compact ----------------------------------------------------------------------------
 # Dark navy naval-industrial armour, chamfered blocks, blue window slits, amber work lights, huge
@@ -290,6 +290,190 @@ def coma_power(M):
         box((0.14, 8.5, 0.06), (s * 2.3, 16.6, 0.3), M["aur"], detail=True)
 
 
+# --- Ashen Collective -------------------------------------------------------------------------------
+
+def _path(points, width, m, z=0.0, thick=0.18, kerb=None, detail=False):
+    """A winding paved path through `points` ((x, y) on the ground), `width` across, laid flat at
+    `z`; with `kerb` a material, a low kerb runs along both its edges."""
+    import bmesh
+    from mathutils import Vector
+    pts = [p for _, p in kit._spline([(x, y, 0.0) for x, y in points], 6)]
+    bm = bmesh.new()
+    rows = []
+    for i, p in enumerate(pts):
+        a, b = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+        d = (b - a).normalized()
+        side = Vector((-d.y, d.x, 0.0))
+        row = []
+        for s in (-1, 1):
+            for h in (z, z + thick):
+                row.append(bm.verts.new(p + side * s * width / 2 + Vector((0, 0, h))))
+        rows.append(row)
+    for r0, r1 in zip(rows, rows[1:]):  # top, bottom and both sides of each stretch
+        for i, j in ((1, 3), (2, 0), (0, 1), (3, 2)):
+            bm.faces.new((r0[i], r0[j], r1[j], r1[i]))
+    for row, flip in ((rows[0], False), (rows[-1], True)):
+        f = (row[0], row[1], row[3], row[2])
+        bm.faces.new(f[::-1] if flip else f)
+    kit._solid("path", bm, m, detail)
+    if kerb is not None:
+        for s in (-1, 1):
+            edge = []
+            for i, p in enumerate(pts[::2]):
+                k = min(i * 2, len(pts) - 1)
+                a, b = pts[max(k - 1, 0)], pts[min(k + 1, len(pts) - 1)]
+                d = (b - a).normalized()
+                q = p + Vector((-d.y, d.x, 0.0)) * s * (width / 2 + 0.15)
+                edge.append((q.x, q.y, z + thick + 0.08))
+            tube(edge, 0.16, kerb, sides=4, steps=2, flat=0.7, detail=True)
+
+
+def _tree(M, at, h, spread, seed):
+    """A swamp tree: a crooked trunk that forks, and dark leaves in clumps on each branch."""
+    import random
+    r = random.Random(seed)
+    x, y, z = at
+    lean = (r.uniform(-1, 1), r.uniform(-1, 1))
+    top = (x + lean[0] * 0.8, y + lean[1] * 0.8, z + h * 0.55)
+    tube([(x, y, z), (x + lean[0] * 0.3, y + lean[1] * 0.3, z + h * 0.3), top], [0.42, 0.3, 0.22], M["bark"], sides=6, steps=3)
+    for k in range(3):  # roots
+        a = r.uniform(0, math.tau)
+        tube([(x, y, z + 0.6), (x + math.cos(a) * 1.0, y + math.sin(a) * 1.0, z + 0.1)], [0.2, 0.08], M["bark"], sides=4, steps=1, detail=True)
+    for k in range(r.choice((2, 3))):  # branches, each ending in a clump of leaves
+        a = r.uniform(0, math.tau)
+        end = (top[0] + math.cos(a) * spread * 0.6, top[1] + math.sin(a) * spread * 0.6, z + h * r.uniform(0.7, 0.85))
+        tube([top, end], [0.2, 0.09], M["bark"], sides=5, steps=1)
+        for j in range(3):
+            c = (end[0] + r.uniform(-1.2, 1.2), end[1] + r.uniform(-1.2, 1.2), end[2] + r.uniform(-0.2, 1.4))
+            ball(spread * r.uniform(0.32, 0.45), c, M["leaf"], sz=0.7, segs=7, rings=5)
+    ball(spread * 0.5, (top[0], top[1], z + h * 0.9), M["leaf"], sz=0.65, segs=8, rings=5)
+
+
+def _shrub(M, at, size, seed):
+    import random
+    r = random.Random(seed)
+    for k in range(3):
+        ball(size * r.uniform(0.5, 0.8), (at[0] + r.uniform(-size, size) * 0.6, at[1] + r.uniform(-size, size) * 0.6, at[2] + size * 0.25),
+             M["leaf"], sz=0.6, segs=6, rings=4, detail=True)
+
+
+def _barrier(M, a, b, z=0.0, h=1.1):
+    """A low Ashen barrier from `a` to `b` (on the ground): six-sided armoured blocks, each with a
+    red-lit window in its face, the kind that edges the planting beds."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    turn = math.atan2(dy, dx)
+    n = max(1, round(length / 2.4))
+    seg = length / n
+    for i in range(n):
+        t = (i + 0.5) / n
+        c = (a[0] + dx * t, a[1] + dy * t, z)
+        box((seg - 0.18, 0.7, h), c, M["plate"], bevel=0.3, rot=(0, 0, turn))
+        box((seg - 0.18, 0.9, 0.18), c, M["frame"], rot=(0, 0, turn))  # the foot
+        for s in (-1, 1):  # the lit window in each face
+            o = (-math.sin(turn) * s * 0.36, math.cos(turn) * s * 0.36)
+            box((seg * 0.6, 0.06, 0.16), (c[0] + o[0], c[1] + o[1], z + h * 0.42), M["strip"], rot=(0, 0, turn), detail=True)
+
+
+def _monolith(M, at, h):
+    """The park's monument: a stepped black spire of angled plates, slit with red light, on a
+    raised plinth with an ember well at its foot."""
+    x, y, z = at
+    cyl(5.4, 0.7, (x, y, z), M["frame"], verts=8, turn=math.pi / 8)
+    cyl(5.5, 0.08, (x, y, z + 0.7), M["strip"], verts=8, turn=math.pi / 8)
+    cyl(4.6, 0.5, (x, y, z + 0.78), M["floor"], verts=8, turn=math.pi / 8)
+    z += 1.28
+    tiers = [(5.6, 4.6, 0.30), (4.6, 3.8, 0.26), (3.6, 3.0, 0.22), (2.6, 2.2, 0.16), (1.6, 1.4, 0.06)]
+    zz = z
+    for i, (w, d, f) in enumerate(tiers):
+        hh = h * f
+        box((w, d, hh), (x, y, zz), M["plate"], bevel=0.35)
+        for sx in (-1, 1):  # angled plates leaning on its flanks
+            box((0.6, d * 0.7, hh * 0.8), (x + sx * (w / 2 + 0.1), y, zz), M["frame"], bevel=0.15, rot=(0, sx * 0.12, 0))
+        for k, ox in enumerate((-0.28, 0.0, 0.28)[: 3 - i // 2]):  # red slits up the front and back
+            for sy in (-1, 1):
+                box((0.16, 0.08, hh * (0.75 if k != 1 else 0.55)), (x + ox * w, y + sy * (d / 2 + 0.02), zz + hh * 0.12), M["strip"])
+        box((w + 0.3, d + 0.3, 0.12), (x, y, zz + hh - 0.06), M["strip"], detail=True)  # a lit seam where the tiers meet
+        zz += hh
+    spike(0.7, (x, y, zz), (x, y, zz + h * 0.14), M["plate"], verts=4)
+    for a in range(4):  # buttress blades at the corners
+        ang = math.pi / 4 + a * math.pi / 2
+        foot = (x + math.cos(ang) * 4.6, y + math.sin(ang) * 4.0, z - 0.5)
+        spike(0.55, foot, (x + math.cos(ang) * 2.0, y + math.sin(ang) * 1.7, z + h * 0.35), M["frame"], flat=0.45, tip=0.15)
+    box((2.2, 0.6, 1.8), (x, y + 2.55, z - 0.1), M["frame"], bevel=0.12)  # the ember well at its foot
+    box((1.6, 0.1, 1.2), (x, y + 2.9, z + 0.1), M["grate"])
+    box((1.4, 0.06, 1.0), (x, y + 2.84, z + 0.2), M["ember"])
+
+
+def _pavilion(M, at, turn=0.0):
+    """A shelter: an angular black roof hung on four raked legs, red light under its eaves."""
+    x, y, z = at
+    c, s = math.cos(turn), math.sin(turn)
+
+    def p(u, v, w=0.0):
+        return (x + u * c - v * s, y + u * s + v * c, z + w)
+
+    box((8.4, 6.4, 0.25), p(0, 0), M["floor"], rot=(0, 0, turn))
+    for u in (-3.2, 3.2):
+        for v in (-2.2, 2.2):
+            spike(0.32, p(u * 1.08, v * 1.1), p(u * 0.86, v * 0.82, 3.6), M["frame"], tip=0.22)
+    box((9.8, 7.8, 0.6), p(0, 0, 3.6), M["plate"], bevel=0.28, rot=(0, 0, turn))
+    box((7.0, 5.0, 0.7), p(0, 0, 4.2), M["plate"], bevel=0.3, rot=(0, 0, turn))  # its raised crown
+    for u, v, w, d in ((0, -3.92, 9.9, 0.12), (0, 3.92, 9.9, 0.12), (-4.92, 0, 0.12, 7.9), (4.92, 0, 0.12, 7.9)):
+        box((w, d, 0.12), p(u, v, 3.62), M["strip"], rot=(0, 0, turn))  # the lit edge of the eave
+    box((5.0, 0.6, 0.5), p(0, -1.0, 0.25), M["frame"], rot=(0, 0, turn), detail=True)  # benches
+    box((5.0, 0.6, 0.5), p(0, 1.0, 0.25), M["frame"], rot=(0, 0, turn), detail=True)
+
+
+def _solid_marker(at, size):
+    """Marks a box `size` (x, y, z) with its bottom centre at `at` as solid: the park is a flat
+    piece you walk over, and the game walls in only what its "solid..." markers cover."""
+    mk = kit.marker(f"solid{len([m for m in kit._marks if m.name.startswith('solid')]) + 1}", (at[0], at[1], at[2] + size[2] / 2))
+    mk.scale = (size[0] / 2, size[1] / 2, size[2] / 2)
+
+
+def ashen_park(M):
+    """An Ashen park, 3 x 3 cells: dark paving and swamp beds under trees, a winding path between
+    planters edged with red-lit barriers, a black spire monument slit with red light on a raised
+    plinth, and a shelter with a lit eave. Front toward +Y."""
+    M = dict(M)
+    M["leaf"] = kit.mat("leaf", "#26331f", metal=0.0, rough=0.8)
+    M["bark"] = kit.mat("bark", "#29231f", metal=0.0, rough=0.85)
+    M["stone"] = kit.mat("stone", "#45474c", metal=0.1, rough=0.8)
+    box((29.6, 29.6, 0.2), (0, 0, 0), M["floor"])  # the paving everywhere
+    for x0, y0, w, d in ((-9.5, -8.0, 9.5, 12.0), (8.5, 9.0, 11.0, 9.0), (-10.0, 9.5, 8.0, 8.0), (10.0, -9.5, 7.5, 7.5)):
+        box((w, d, 0.45), (x0, y0, 0.2), M["moss"], bevel=0.12)  # swamp beds, raised a little
+    # The paths: one winding in from the front to the monument, one crossing toward the shelter.
+    _path([(1.0, 15.0), (2.5, 9.0), (-1.0, 3.0), (1.5, -2.5), (5.5, -5.0)], 3.2, M["stone"], z=0.2, kerb=M["frame"])
+    _path([(-15.0, 2.5), (-9.0, 1.5), (-3.0, 0.5), (0.5, -1.0)], 2.4, M["stone"], z=0.2, kerb=M["frame"])
+    _path([(2.5, -2.0), (6.0, 1.0), (10.5, 2.5), (15.0, 2.0)], 2.4, M["stone"], z=0.2, kerb=M["frame"])
+    _monolith(M, (8.5, -8.5, 0.2), 22.0)
+    _pavilion(M, (-9.5, 9.5, 0.65), turn=0.0)
+    # Barriers round the beds and along the front edge, broken where the paths come in.
+    for a, b in (((-14.4, 14.6), (-2.0, 14.6)), ((4.5, 14.6), (14.4, 14.6)), ((-14.6, -14.4), (-14.6, -1.0)),
+                 ((-14.6, 5.0), (-14.6, 14.0)), ((-14.2, -14.6), (2.0, -14.6)), ((14.6, -3.0), (14.6, 0.5)),
+                 ((14.6, 4.5), (14.6, 13.0)), ((-4.8, -2.2), (-4.8, -13.5))):
+        _barrier(M, a, b, z=0.2)
+        _solid_marker(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0.2), (abs(b[0] - a[0]) + 0.9, abs(b[1] - a[1]) + 0.9, 1.1))
+    _solid_marker((8.5, -8.5, 0.0), (9.0, 8.4, 24.0))  # the monument on its plinth
+    for i, (x, y, h, sp) in enumerate(((-10.5, -5.0, 9.5, 3.4), (-7.0, -11.5, 7.5, 2.8), (-12.0, -12.0, 6.5, 2.4), (10.5, 9.5, 10.0, 3.6),
+                                       (6.0, 11.0, 7.0, 2.6), (12.5, 6.5, 6.0, 2.2), (-3.5, 6.5, 8.0, 3.0), (3.0, -12.5, 6.5, 2.4))):
+        _tree(M, (x, y, 0.6), h, sp, seed=31 + i)
+        _solid_marker((x, y, 0.6), (0.9, 0.9, h * 0.6))
+    for i, (x, y, sz) in enumerate(((-6.0, -6.0, 1.3), (-12.5, -2.5, 1.1), (-8.5, -2.0, 0.9), (7.0, 6.5, 1.2), (12.0, 12.0, 1.0),
+                                    (-2.0, 9.0, 1.1), (-12.5, 6.0, 1.0), (4.5, 4.5, 0.9), (13.0, -4.5, 1.1), (-1.5, -12.0, 1.0))):
+        _shrub(M, (x, y, 0.6), sz, seed=60 + i)
+    for i, (x, y) in enumerate(((-2.0, 12.0), (5.0, 7.5), (-3.5, -3.5), (-11.5, 3.6), (8.0, 4.4), (13.0, 4.2))):  # path lamps
+        cyl(0.18, 1.4, (x, y, 0.2), M["frame"], verts=6, detail=True)
+        box((0.34, 0.34, 0.34), (x, y, 1.6), M["strip"], detail=True)
+    for i, (x, y, r) in enumerate(((-5.5, 12.5, 0.9), (12.8, -0.8, 0.7), (-13.0, -8.0, 0.8))):  # boulders in the beds
+        ball(r, (x, y, 0.5), M["char"], sx=1.3, sz=0.7, segs=6, rings=4, detail=True)
+
+
+ASHEN = {
+    "park": (ashen_park, (3, 3), 26),
+}
+
 COMA = {
     "hall": (coma_hall, (7, 7), 76),
     "power": (coma_power, (4, 4), 30),
@@ -297,7 +481,7 @@ COMA = {
 
 FACTIONS = {
     "compact": (compact_mats, COMPACT),
-    "ashen": (kit.ashen_mats, {}),
+    "ashen": (kit.ashen_mats, ASHEN),
     "luminar": (kit.luminar_mats, {}),
     "coma": (kit.coma_mats, COMA),
 }
