@@ -1,11 +1,11 @@
 """The Ashen Collective's Armoured Command Unit: a hunched walker of black plate. Heavy legs that
-bend forward at the knee over two-toed feet, a chest that widens upward, a small head sunk
-between the shoulders, and over each shoulder a pauldron with a blade swept up and back. Its right
+bend forward at the knee over two-toed feet, a chest that widens upward, a hooded head sunk
+between the shoulders, and from each shoulder three blades fanned up, out and back. Its right
 arm is the cannon, its left the build arm. Its light is the side's colour: a V in the chest and in
 the visor, vents down the back, slits in the plating.
 
 The legs and hips are the body; everything from the waist up is the top, so it turns to face what
-it shoots at. About 9.6 m wide across the arms and 8.9 m to the top of the head (10.6 m to the
+it shoots at. About 9.6 m wide across the arms and 9.2 m to the top of the head (11 m to the
 blades); the server's ACU is 5 m in radius.
 """
 
@@ -59,37 +59,50 @@ def build(Part):
 
     # --- From the waist up, measured from the waist ---
     top, side = Part(), Part()
-    top.lathe((0, 0, 0), (0, 1, 0), [(0, 1.25), (0.5, 1.25)], RECESS, sides=8)
-    top.hexa(_ring(0.4, -1.6, 1.6, -1.3, 1.2), _ring(2.6, -2.6, 2.6, -1.6, 2.0), PLATE)  # the chest, wider and further forward as it rises
-    top.slab(2.6, (-2.6, 2.6, -1.6, 2.0), 3.3, (-1.8, 1.8, -1.5, 1.0), PLATE)
-    top.slab(3.3, (-1.4, 1.4, -1.3, 0.55), 3.38, (-1.3, 1.3, -1.2, 0.45), ROOF, PAINT)  # the back plate, in the side's colour
-    lean = -math.degrees(math.atan2(0.8, 2.2))
-    side.box((1.45, 1.7, 0.16), (1.25, 1.65, 1.72), RAISED, PLAIN, (lean, 0, 0))  # chest plates either side of the core
-    side.box((0.7, 0.12, 0.06), (1.3, 2.15, 1.99), LIT, SIDE_GLOW, (lean, 0, 0))
-    top.box((1.1, 1.5, 0.1), (0, 1.55, 1.63), RECESS, PLAIN, (lean, 0, 0))
-    top.extrude([(1.2, 0.7), (2.45, 2.3), (2.3, 2.95), (1.0, 2.95)], -0.3, 0.3, RAISED)  # a prow down the middle of the chest
-    side.box((0.16, 1.2, 0.08), (0.52, 1.5, 1.68), LIT, SIDE_GLOW, (lean, 0, 14))  # the core: a lit V either side of it
-    side.hexa(_ring(2.6, 1.0, 2.6, -1.1, 1.7), _ring(3.75, 1.7, 2.5, -1.2, 0.5), RAISED)  # a collar rising to the shoulder
-    side.box((0.6, 0.05, 0.16), (1.9, 3.2, 1.22), LIT, SIDE_GLOW, (-44, 0, 0))
-    side.slab(0.5, (1.0, 1.55, 0.6, 1.25), 1.0, (1.1, 1.75, 0.7, 1.45), RAISED)  # belly plates
-    # The reactor on its back, three vents down it.
-    top.hexa(_ring(0.8, -1.4, 1.4, -2.4, -1.4), _ring(2.9, -1.2, 1.2, -2.25, -1.5), RAISED)
-    for x in (-0.7, 0.0, 0.7):
-        top.box((0.26, 1.5, 0.1), (x, 1.85, -2.34), LIT, SIDE_GLOW, (4, 0, 0))
-    # The head: low, forward, a crest over a lit visor.
-    top.slab(2.85, (-0.65, 0.65, 0.9, 2.25), 3.8, (-0.45, 0.45, 0.8, 1.85), RAISED)
-    top.box((0.22, 0.45, 1.3), (0, 3.9, 1.2), PLATE, PLAIN, (12, 0, 0))
-    side.box((0.5, 0.13, 0.06), (0.25, 3.32, 2.1), LIT, SIDE_GLOW, (-22, 0, 22))
+    top.lathe((0, 0, 0), (0, 1, 0), [(0, 1.05), (0.5, 1.05)], RECESS, sides=8)
+    # The torso: a narrow waist widening to broad shoulders, the chest leaning out over the hips.
+    top.hexa(_ring(0.4, -1.1, 1.1, -1.0, 1.0), _ring(2.3, -2.5, 2.5, -1.5, 1.9), PLATE)
+    top.slab(2.3, (-2.5, 2.5, -1.5, 1.9), 3.0, (-2.1, 2.1, -1.4, 1.2), PLATE)
+    top.slab(3.0, (-1.3, 1.3, -1.3, 0.1), 3.08, (-1.2, 1.2, -1.2, 0.0), ROOF, PAINT)  # the back plate, in the side's colour
 
-    # A shoulder: the pauldron, and two blades swept up and back over it.
-    side.hexa(_ring(1.9, 2.6, 4.75, -1.5, 1.5), _ring(3.5, 2.4, 4.3, -1.25, 1.2), RAISED)
-    side.hexa(_ring(0.9, 4.55, 4.95, -1.15, 1.15), _ring(3.2, 4.3, 4.7, -1.35, 1.35), PLATE)  # a shield plate down over the upper arm
-    side.line([(0.0, 1.2), (0.0, 1.75)], 4.92, LIT, wide=0.16, proud=0.1)
-    side.box((1.3, 0.16, 0.08), (3.55, 2.3, 1.5), LIT, SIDE_GLOW, (-5, 0, 0))  # a slit across its front
-    side.box((1.1, 0.05, 0.18), (3.4, 3.52, 0.6), LIT, SIDE_GLOW)  # lit seam on top, for the camera overhead
-    side.extrude([(-1.3, 3.4), (1.0, 3.4), (0.1, 4.5), (-2.3, 5.6), (-1.9, 4.3)], 3.3, 4.2, PLATE,
-                 profile1=[(-1.3, 3.4), (0.8, 3.4), (0.0, 4.4), (-2.2, 5.45), (-1.9, 4.3)])
-    side.extrude([(-1.4, 3.3), (0.4, 3.3), (-0.4, 4.0), (-2.0, 4.8), (-1.8, 3.9)], 2.3, 2.9, RAISED)
+    def chest(x, y, lift=0.0):  # a point on the chest's leaning front
+        return (x, y - 0.428 * lift, 1.0 + (y - 0.4) * 0.474 + 0.904 * lift)
+    out = (0.0, -0.428 * 0.2, 0.904 * 0.2)
+    # Chest plates: each a blade pointing down and in to the core, a lit line along its lower edge.
+    side.prism([chest(0.2, 2.25), chest(2.35, 2.25), chest(2.25, 1.65), chest(0.55, 0.9), chest(0.2, 1.15)], out, RAISED)
+    side.beam(chest(2.15, 1.5, 0.2), chest(0.6, 0.8, 0.2), 0.16, 0.08, LIT, face=out)
+    side.prism([chest(0.15, 0.95), chest(0.75, 0.6), chest(0.85, 0.42), chest(0.15, 0.42)], (0, -0.04, 0.1), RAISED)  # belly plates
+    top.prism([chest(-0.22, 2.2), chest(0.22, 2.2), chest(0.22, 1.3), chest(0.0, 1.05), chest(-0.22, 1.3)], (0, -0.13, 0.28), RECESS)  # the core's housing
+    top.beam(chest(0, 2.0, 0.31), chest(0, 1.35, 0.31), 0.14, 0.06, LIT, face=out)
+    # The reactor on its back, three vents down it.
+    top.hexa(_ring(0.7, -1.2, 1.2, -2.2, -1.2), _ring(2.8, -1.3, 1.3, -2.3, -1.4), RAISED)
+    for x in (-0.7, 0.0, 0.7):
+        top.box((0.26, 1.5, 0.1), (x, 1.8, -2.27), LIT, SIDE_GLOW, (-3, 0, 0))
+
+    # The head: a hood sunk into the shoulders. From the front an arrowhead, broad at the brow and
+    # down to a point at the chin; from the side a beak thrust forward, its crest running back.
+    crown = [(-0.5, 3.2), (0.8, 2.4), (2.2, 2.2), (2.8, 3.3), (1.9, 4.1), (0.3, 4.25)]
+    brow = [(-0.3, 3.2), (0.8, 3.0), (1.7, 3.0), (2.0, 3.45), (1.5, 3.9), (0.3, 3.95)]
+    top.extrude(crown, -0.3, 0.3, PLATE)
+    side.extrude(crown, 0.3, 1.15, PLATE, profile1=brow)
+    top.box((0.2, 0.3, 1.5), (0, 4.2, 1.0), RAISED, PLAIN, (8, 0, 0))  # the crest
+    side.beam((0.98, 3.25, 2.13), (0.1, 2.58, 2.5), 0.24, 0.12, LIT, face=(0.4, -0.3, 1))  # the visor: a lit V down the face
+
+    # A shoulder: a block over the arm, and three blades fanned up and out from it, each leaning
+    # back as it rises: a short one in front, the long one over the arm, a tall one behind the head.
+    side.hexa(_ring(1.8, 2.3, 4.5, -1.3, 1.3), _ring(3.0, 2.2, 4.0, -1.1, 1.0), RAISED)
+    side.hexa(_ring(0.9, 4.45, 4.8, -1.1, 1.1), _ring(2.9, 4.1, 4.5, -1.3, 1.3), PLATE)  # a shield plate down over the upper arm
+    side.line([(0.0, 1.2), (0.0, 1.8)], 4.76, LIT, wide=0.16, proud=0.1)
+
+    def blade(points, z0, lean, thick, colour):
+        side.prism([(x, y, z0 - (y - points[0][1]) * lean) for x, y in points], (0, 0, -thick), colour)
+    blade([(2.0, 2.3), (4.5, 2.1), (5.0, 2.9), (4.6, 4.2), (3.1, 3.3)], 1.25, 0.45, 0.4, RAISED)
+    blade([(2.2, 2.7), (4.7, 2.5), (5.35, 3.5), (5.0, 5.3), (3.5, 4.0), (2.4, 3.5)], 0.45, 0.5, 0.5, PLATE)
+    blade([(1.3, 2.9), (3.1, 3.0), (3.9, 6.0), (2.3, 4.4)], -0.7, 0.35, 0.45, PLATE)
+    side.beam((4.55, 2.45, 1.2), (4.75, 3.0, 0.97), 0.14, 0.06, LIT)  # lit edges on the blades
+    side.beam((4.95, 3.0, 0.24), (5.05, 4.3, -0.4), 0.16, 0.06, LIT)
+    side.beam((3.6, 3.2, 1.0), (2.5, 2.75, 1.2), 0.14, 0.06, LIT)
+    side.box((1.2, 0.05, 0.18), (3.2, 3.02, -0.5), LIT, SIDE_GLOW)  # lit seam on top, for the camera overhead
     # The upper arm, hanging from it.
     side.box((1.15, 2.3, 1.25), (3.75, 0.95, 0.0), PLATE)
     side.wheel(0.55, 3.05, 4.45, 0.1, -0.25, RECESS, sides=8)  # the elbow
@@ -125,7 +138,7 @@ def build(Part):
     top.box((0.4, 0.4, 0.5), along(3.2, sign=-1), LIT, SIDE_GLOW, rot)
 
     views = {
-        "front": ((-15, -21, 9.5), (0.5, 0, 4.9), 50, 0.0),
+        "front": ((-15, -21, 9.5), (0.5, 0, 4.9), 50, 0.0, (60, 0, 70)),
         "rear": ((14, 21, 9.0), (0, 0, 4.9), 50, 0.0),
         "side": ((-34, 0, 5.0), (0, 0, 5.0), 60, 0.0, (40, 0, -60)),
         "head_on": ((0, -34, 5.2), (0, 0, 5.0), 60, 0.0),

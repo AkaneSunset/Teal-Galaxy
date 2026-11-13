@@ -153,6 +153,30 @@ class Part(list):
             tilt = math.degrees(math.atan2(-(y1 - y0), z1 - z0))
             self.box((proud, wide, run + wide * 0.6), (x, (y0 + y1) / 2, (z0 + z1) / 2), colour, mask, (tilt, 0, 0))
 
+    def prism(self, points, offset, colour, mask=PLAIN):
+        """A flat plate of any outline: the polygon `points` (in one plane) pulled by `offset`."""
+        pts = [Vector(p) for p in points]
+        off = Vector(offset)
+        n = Vector((0, 0, 0))
+        for i in range(len(pts)):
+            a, b = pts[i], pts[(i + 1) % len(pts)]
+            n += Vector(((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y)))
+        n.normalize()
+        mid = sum(pts, Vector()) / len(pts) + off / 2
+        self.poly(pts, colour, mask, mid)
+        self.poly([p + off for p in pts], colour, mask, mid)
+        for i in range(len(pts)):
+            a, b = pts[i], pts[(i + 1) % len(pts)]
+            self.poly([a, b, b + off, a + off], colour, mask, (a + b) / 2 + off / 2 - (b - a).cross(n))
+
+    def beam(self, a, b, wide, deep, colour, mask=SIDE_GLOW, face=(0, 0, 1)):
+        """A bar from a to b, `wide` across and `deep` along `face` (the way its lit side looks)."""
+        a, b = Vector(a), Vector(b)
+        w = (b - a).normalized()
+        u = w.cross(Vector(face)).normalized() * wide / 2
+        v = u.cross(w).normalized() * deep / 2
+        self.hexa([a - u - v, a + u - v, a + u + v, a - u + v], [b - u - v, b + u - v, b + u + v, b - u + v], colour, mask)
+
     def mirrored(self, other):
         """Adds `other` and its mirror image across the hull's middle."""
         self.extend(other)
