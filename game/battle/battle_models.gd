@@ -164,7 +164,8 @@ static func own(type: String, look: String) -> bool:
 
 
 ## {"body": Mesh, "top": Mesh or null, "top_at": Vector3, "muzzle": metres out from the top's pivot,
-## "muzzle_up": metres above it} for a unit type (or "pod", a drop pod): `look`'s own model of it
+## "muzzle_up": metres above it, and for a gun off the middle line "muzzle_at": Vector3 from the
+## pivot, facing +Z} for a unit type (or "pod", a drop pod): `look`'s own model of it
 ## if its faction has one, or the one every side shares.
 static func model(type: String, look := "") -> Dictionary:
 	if own(type, look):
@@ -439,6 +440,7 @@ static func _load_own(path: String) -> Dictionary:
 			if muzzle != null:
 				out.muzzle = Vector2(muzzle.position.x, muzzle.position.z).length()
 				out.muzzle_up = muzzle.position.y
+				out.muzzle_at = muzzle.position # where exactly, for a gun that isn't on the middle line
 	root.free()
 	return out
 

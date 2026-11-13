@@ -32,7 +32,7 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3", "ashen/tank_t3"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------
@@ -242,6 +242,7 @@ def render(out, unit, shared):
         "top": ((0, -1.6, 44), (0, -1.5, 0), 62, math.pi / 2, (30, 0, 200)),
     }
     k = load(unit).get("view", 1.0)  # how much further back to stand for a bigger unit
+    views.update(load(unit).get("views", {}))  # a tall unit's own cameras
     only = [w[5:] for w in sys.argv if w.startswith("view=")]
     for view, (cam, target, lens, turn, *sun) in views.items():
         if only and view not in only:
@@ -255,8 +256,8 @@ def render(out, unit, shared):
         return
     # In a battle: from the battle camera's height, among the shared models it fights beside.
     kit.reset()
-    base, tier = unit.split("/")[1].split("_t")
-    scale = 1.25 ** (int(tier) - 1)
+    base, _, tier = unit.split("/")[1].partition("_t")
+    scale = 1.25 ** (int(tier or 1) - 1)
     place(unit, side, at=(-7, 0, 0), turn=0.5, aim=-0.2)
     bm.build(shared, base, side, at=(7, 0, 0), turn=0.5, aim=-0.2, scale=scale)
     bm.build(shared, "tank", side, at=(19, 4, 0), turn=0.5, aim=-0.2)
