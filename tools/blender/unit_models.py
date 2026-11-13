@@ -32,7 +32,7 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------
@@ -169,13 +169,16 @@ class Part(list):
             a, b = pts[i], pts[(i + 1) % len(pts)]
             self.poly([a, b, b + off, a + off], colour, mask, (a + b) / 2 + off / 2 - (b - a).cross(n))
 
-    def beam(self, a, b, wide, deep, colour, mask=SIDE_GLOW, face=(0, 0, 1)):
-        """A bar from a to b, `wide` across and `deep` along `face` (the way its lit side looks)."""
+    def beam(self, a, b, wide, deep, colour, mask=SIDE_GLOW, face=(0, 0, 1), wide1=None, deep1=None):
+        """A bar from a to b, `wide` across and `deep` along `face` (the way its lit side looks);
+        `wide1` by `deep1` at b, if it tapers."""
         a, b = Vector(a), Vector(b)
         w = (b - a).normalized()
-        u = w.cross(Vector(face)).normalized() * wide / 2
-        v = u.cross(w).normalized() * deep / 2
-        self.hexa([a - u - v, a + u - v, a + u + v, a - u + v], [b - u - v, b + u - v, b + u + v, b - u + v], colour, mask)
+        u = w.cross(Vector(face)).normalized() / 2
+        v = u.cross(w).normalized() / 2
+        u1, v1 = u * (wide if wide1 is None else wide1), v * (deep if deep1 is None else deep1)
+        u, v = u * wide, v * deep
+        self.hexa([a - u - v, a + u - v, a + u + v, a - u + v], [b - u1 - v1, b + u1 - v1, b + u1 + v1, b - u1 + v1], colour, mask)
 
     def mirrored(self, other):
         """Adds `other` and its mirror image across the hull's middle."""
@@ -233,6 +236,11 @@ def export(unit):
         bpy.context.scene.collection.objects.link(muzzle)
         muzzle.parent = top
         muzzle.location = bm.TO_BLENDER @ Vector(m["muzzle"])
+    elif m.get("muzzle"):  # a gun fixed in the body
+        muzzle = bpy.data.objects.new("muzzle", None)
+        bpy.context.scene.collection.objects.link(muzzle)
+        muzzle.parent = body
+        muzzle.location = bm.TO_BLENDER @ Vector(m["muzzle"])
     path = os.path.join(MODELS, unit + ".glb")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=path, export_format="GLB", export_yup=True, export_apply=False,
@@ -282,11 +290,16 @@ def render(out, unit, shared):
     kit.reset()
     base, _, tier = unit.split("/")[1].partition("_t")
     scale = 1.25 ** (int(tier or 1) - 1)
-    place(unit, side, at=(-7, 0, 0), turn=0.5, aim=-0.2)
-    bm.build(shared, base, side, at=(7, 0, 0), turn=0.5, aim=-0.2, scale=scale)
+    r = load(unit).get("span", 0.0)  # a very wide unit: stand it further off, and the camera further back
+    place(unit, side, at=(-7 - r, 0, 0), turn=0.5, aim=-0.2)
+    if base in shared:
+        bm.build(shared, base, side, at=(7, 0, 0), turn=0.5, aim=-0.2, scale=scale)
+    elif "ashen/tank_t3" in UNITS and side == "ashen":
+        place("ashen/tank_t3", side, at=(6, -2, 0), turn=0.5, aim=-0.2)
     bm.build(shared, "tank", side, at=(19, 4, 0), turn=0.5, aim=-0.2)
-    bm.build(shared, "striker", side, at=(-19, 5, 0), turn=0.5)
-    bm.stage((-10, -52, 44), (0, 0, 1.5), 60)
+    bm.build(shared, "striker", side, at=(-19 if not r else 27, 5 if not r else -6, 0), turn=0.5)
+    kb = 1.0 + r / 22.0
+    bm.stage((-10 - r * 0.6, -52 * kb, 44 * kb), (-r * 0.45, 0, 1.5), 60)
     bm.shoot(os.path.join(out, f"{name}_in_battle.png"))
 
 

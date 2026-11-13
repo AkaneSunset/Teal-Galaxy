@@ -624,6 +624,8 @@ func _shots(list: Array) -> void:
 			muzzle = u.pos + (m.top_at as Vector3) + Vector3(0, float(m.muzzle_up), 0) + dir * float(m.muzzle)
 			if m.has("muzzle_at"): # a gun out on an arm: turned with the shot
 				muzzle = u.pos + (m.top_at as Vector3) + Basis(Vector3.UP, atan2(dir.x, dir.z)) * (m.muzzle_at as Vector3)
+		elif m.has("muzzle_at"): # a gun fixed in the body: wherever the unit has it now
+			muzzle = u.pos + Basis(Vector3.UP, u.yaw) * (m.muzzle_at as Vector3)
 		elif u.kind == "air":
 			muzzle = u.pos + Vector3(0, -0.9, 0) + dir * 3.0
 		elif u.type == "node":

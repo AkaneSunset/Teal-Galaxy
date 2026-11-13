@@ -441,6 +441,10 @@ static func _load_own(path: String) -> Dictionary:
 				out.muzzle = Vector2(muzzle.position.x, muzzle.position.z).length()
 				out.muzzle_up = muzzle.position.y
 				out.muzzle_at = muzzle.position # where exactly, for a gun that isn't on the middle line
+		else: # a gun fixed in the body: where it is, from the unit's origin
+			var fixed := _named(root, "muzzle") as Node3D
+			if fixed != null:
+				out.muzzle_at = fixed.position
 	root.free()
 	return out
 
