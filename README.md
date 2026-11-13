@@ -968,6 +968,11 @@ piece count, frame rate and draw calls.
   `--admin-key`, see Admins above). Every piece is offered and is scenery, tinted in the owning
   faction's look. "Copy city from" copies another homeworld's layout as a starting point, and
   "Clear the whole city" (pressed twice) empties it.
+- **Parks** are free everywhere. The Ashen Collective's (`game/city/ashen/park.glb`) is a black
+  spire monument slit with red light on a raised plinth, a shelter with a lit eave, swamp beds and
+  trees, and winding stone paths between planters edged with red-lit barriers. You walk over a
+  park, but its model's `solid...` markers (empties, each a box its scale's size) wall in the
+  monument, barriers and tree trunks.
 
 **Faction styles.** Every city is built in its faction's look: the homeworld's owner, or the colony
 Founder's faction (Founders don't pick). The models are made in Blender by
