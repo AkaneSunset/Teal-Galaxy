@@ -1122,6 +1122,19 @@ draws at most twice the batches it did. Wrecks keep their side's textures, darke
 them the same way: it reads the `match` block of `battle_models.gd`, builds each unit in Blender and
 lays the maps on by face as the shader does.
 
+**Units with a model of their own.** A faction's unit at one tier can have its own model in place
+of the shared one: `game/battle/models/<faction>/<type>.glb` (`ashen/artillery_t3.glb` is the Ashen
+Collective's tier 3 mobile artillery, the first). `battle_models.gd` uses it for that faction's side
+whenever the file is there (`model(type, look)`), at the size it was modelled (no tier scaling), and
+every other side keeps the shared model. The file holds a `body` mesh, a `top` mesh placed where
+the turret turns and a `muzzle` point under it; colours and paint masks are in the vertex colours,
+so the same shader draws it. It can wear texture sets of its own, listed under `battle` in
+`surfaces.json` as `<faction>/<type>` (painted parts) and `<faction>/<type>_frame` (plain parts).
+The models are written part by part in `tools/blender/units/<faction>_<type>.py` and built by
+`tools/blender/unit_models.py OUT_DIR [export] [render] [samples=N]`, which writes the .glb and
+renders the unit from each side, from above, and next to the shared models at the battle camera's
+height. To add one: write its file, add it to `UNITS` there, and run it.
+
 **Map terminal (a look, not in the game yet).** `tools/blender/map_terminal.py OUT_DIR [samples=N]
 [glb]` models and renders a holographic map station: a projector on a dais throwing a wireframe map
 of a ring station into the air (rooms as boxes, corridors as lines, the lift shaft as a beam, an

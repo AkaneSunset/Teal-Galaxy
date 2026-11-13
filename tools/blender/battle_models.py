@@ -191,10 +191,12 @@ def _maps(name):
     return os.path.join(TEXTURES, e["set"]), e.get("tile", _table["sets"].get(e["set"], 4.0))
 
 
-def material(side, colour, mask, plain=False):
-    """One part's material, as the game's shader paints it (SHADER in battle_models.gd)."""
+def material(side, colour, mask, plain=False, look=None):
+    """One part's material, as the game's shader paints it (SHADER in battle_models.gd). `look` is
+    whose textures it wears, if not the side's own: a unit with a set of its own ("ashen/artillery_t3")."""
+    look = look or side
     kind = "hull" if mask > 0.85 else "side" if mask > 0.6 else "glow" if mask > 0.35 else "frame"
-    name = f"{side}:{kind}:{colour.key()}" + (":plain" if plain else "")
+    name = f"{side}:{look}:{kind}:{colour.key()}" + (":plain" if plain else "")
     if name in bpy.data.materials:
         return bpy.data.materials[name]
     m = bpy.data.materials.new(name)
@@ -210,7 +212,7 @@ def material(side, colour, mask, plain=False):
     bsdf.inputs["Metallic"].default_value = 0.1
     bsdf.inputs["Emission Strength"].default_value = 1.0
     bsdf.inputs["Emission Color"].default_value = tuple(e + c * 0.12 for e, c in zip(emit, col)) + (1,)
-    maps = None if plain or kind in ("side", "glow") else _maps(side if kind == "hull" else side + "_frame")
+    maps = None if plain or kind in ("side", "glow") else _maps(look if kind == "hull" else look + "_frame")
     if maps is None:
         return m
     folder, tile = maps
@@ -265,7 +267,7 @@ def material(side, colour, mask, plain=False):
 TO_BLENDER = Matrix(((1, 0, 0), (0, 0, -1), (0, 1, 0)))  # Godot's Y up, front +Z -> Blender's Z up, front -Y
 
 
-def _object(name, faces, side, plain):
+def _object(name, faces, side, plain, look=None):
     """A mesh from faces in Godot's space, with the face-projected UVs the shader works out."""
     bm = bmesh.new()
     uv = bm.loops.layers.uv.new("face")
@@ -278,7 +280,7 @@ def _object(name, faces, side, plain):
         f.normal_update()
         if f.normal.dot(TO_BLENDER @ normal) < 0:
             f.normal_flip()
-        mat = material(side, colour, mask, plain)
+        mat = material(side, colour, mask, plain, look)
         if mat.name not in slots:
             slots[mat.name] = len(mats)
             mats.append(mat)

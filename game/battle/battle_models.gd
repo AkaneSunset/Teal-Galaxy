@@ -13,6 +13,11 @@ extends RefCounted
 ##
 ## A type may have a `top` (a turret) that turns on its own: drawn with its own MultiMesh at
 ## `top_at` above the unit's origin, yawed toward what it shoots at.
+##
+## A faction's unit may have a model of its own, made in Blender by tools/blender/unit_models.py:
+## res://battle/models/<faction>/<type>.glb ("ashen/artillery_t3"), with a "body" mesh, a "top" mesh
+## where its turret turns and a "muzzle" point under that, painted by the same vertex colours. It is
+## drawn at its own size (no tier_scale), and may wear textures of its own (see material()).
 
 const PLAIN := 0.0
 const GLOW := 0.5
@@ -96,17 +101,23 @@ void fragment() {
 """
 
 const Surfaces := preload("res://surfaces.gd")
+const OWN_MODEL := "res://battle/models/%s/%s.glb"
 
 static var _cache := {}
+static var _own := {} # "look/type" -> whether that faction's unit has a model of its own
 static var _shader: Shader
-static var _materials := {} # look -> ShaderMaterial
+static var _materials := {} # look, or "look/type" -> ShaderMaterial
 
 
 ## The material a side's unit MultiMeshes draw with. `look` is the side's faction ("militia" for a
 ## side with none): its units wear the textures listed for it under "battle" in
 ## res://textures/surfaces.json, the painted hull one set and the plain frame another. One shader
-## for all of them; with no look, or none listed, plain paint.
-static func material(look := "") -> ShaderMaterial:
+## for all of them; with no look, or none listed, plain paint. A unit `type` with textures of its
+## own listed there (as "<look>/<type>" and "<look>/<type>_frame") wears those instead.
+static func material(look := "", type := "") -> ShaderMaterial:
+	if type != "" and look != "":
+		if not Surfaces.entry("battle", look + "/" + type).is_empty():
+			look = look + "/" + type
 	if _materials.has(look):
 		return _materials[look]
 	if _shader == null:
@@ -135,13 +146,33 @@ static func material(look := "") -> ShaderMaterial:
 
 
 ## How much bigger a unit of a higher tier is drawn: "tank_t3" is a Tank Mk III.
-static func tier_scale(type: String) -> float:
+## A unit with a model of its own for `look` (its side's faction) is modelled at its real size.
+static func tier_scale(type: String, look := "") -> float:
+	if own(type, look):
+		return 1.0
 	return pow(1.25, int(type.get_slice("_t", 1)) - 1) if type.contains("_t") else 1.0
 
 
-## {"body": Mesh, "top": Mesh or null, "top_at": Vector3, "muzzle": metres from the top's pivot}
-## for a unit type (or "pod", a drop pod).
-static func model(type: String) -> Dictionary:
+## Whether `look`'s faction has a model of its own for this unit type.
+static func own(type: String, look: String) -> bool:
+	if look == "" or look == "militia":
+		return false
+	var key := look + "/" + type
+	if not _own.has(key):
+		_own[key] = ResourceLoader.exists(OWN_MODEL % [look, type])
+	return _own[key]
+
+
+## {"body": Mesh, "top": Mesh or null, "top_at": Vector3, "muzzle": metres out from the top's pivot,
+## "muzzle_up": metres above it} for a unit type (or "pod", a drop pod): `look`'s own model of it
+## if its faction has one, or the one every side shares.
+static func model(type: String, look := "") -> Dictionary:
+	if own(type, look):
+		var key := look + "/" + type
+		if not _cache.has(key):
+			_cache[key] = _load_own(OWN_MODEL % [look, type])
+		if not (_cache[key] as Dictionary).is_empty():
+			return _cache[key]
 	if _cache.has(type):
 		return _cache[type]
 	if type.contains("_t"): # a higher tier ("tank_t2") looks like its base, drawn bigger (tier_scale)
@@ -380,9 +411,40 @@ static func model(type: String) -> Dictionary:
 				_box(body, Vector3(0.3, 2.4, 1.2), Vector3(cos(a) * 2.0, 1.6, sin(a) * 2.0), DARK, PLAIN, Vector3(0, -a, 0))
 		_:
 			_box(body, Vector3(3, 3, 3), Vector3(0, 1.5, 0), GREY, PAINT)
-	var out := {"body": body.commit(), "top": top.commit() if top else null, "top_at": top_at, "muzzle": muzzle}
+	var out := {"body": body.commit(), "top": top.commit() if top else null, "top_at": top_at, "muzzle": muzzle, "muzzle_up": 0.6}
 	_cache[type] = out
 	return out
+
+
+## A unit's own model from its .glb: {} if the file doesn't hold a "body" mesh.
+static func _load_own(path: String) -> Dictionary:
+	var scene := load(path) as PackedScene
+	if scene == null:
+		return {}
+	var root := scene.instantiate()
+	var body := _named(root, "body") as MeshInstance3D
+	if body == null: # however the importer named it: the first mesh that isn't the turret
+		for n in root.find_children("*", "MeshInstance3D", true, false) + [root]:
+			if n is MeshInstance3D and n.name != "top":
+				body = n
+				break
+	var out := {}
+	if body != null and body.mesh != null:
+		out = {"body": body.mesh, "top": null, "top_at": Vector3.ZERO, "muzzle": 2.0, "muzzle_up": 0.6}
+		var top := _named(root, "top") as MeshInstance3D
+		if top != null and top.mesh != null:
+			out.top = top.mesh
+			out.top_at = top.position
+			var muzzle := _named(top, "muzzle") as Node3D
+			if muzzle != null:
+				out.muzzle = Vector2(muzzle.position.x, muzzle.position.z).length()
+				out.muzzle_up = muzzle.position.y
+	root.free()
+	return out
+
+
+static func _named(from: Node, name: String) -> Node:
+	return from if from.name == name else from.find_child(name, true, false)
 
 
 ## A see-through copy of a structure for placing it (the build ghost), in one colour.

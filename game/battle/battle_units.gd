@@ -102,22 +102,32 @@ func _batch(mesh: Mesh, mat: Material) -> Batch:
 	return b
 
 
-## The material a side's units draw with: its faction's textures.
-func _material(side: String) -> ShaderMaterial:
-	return Models.material(str(side_looks.get(side, "")))
+## The material a side's units draw with: its faction's textures (a unit type's own, if it has any).
+func _material(side: String, type := "") -> ShaderMaterial:
+	return Models.material(look(side), type)
+
+
+## The faction whose models and textures a side's units wear.
+func look(side: String) -> String:
+	return str(side_looks.get(side, ""))
+
+
+## A unit type's model as a side draws it: its faction's own, or the shared one.
+func _model(type: String, side: String) -> Dictionary:
+	return Models.model(type, look(side))
 
 
 func _body(type: String, side: String) -> Batch:
 	var key := type + "/" + side
 	if not _bodies.has(key):
-		_bodies[key] = _batch(Models.model(type).body, _material(side))
+		_bodies[key] = _batch(_model(type, side).body, _material(side, type))
 	return _bodies[key]
 
 
 func _top(type: String, side: String) -> Batch:
 	var key := type + "/" + side
 	if not _tops.has(key):
-		_tops[key] = _batch(Models.model(type).top, _material(side))
+		_tops[key] = _batch(_model(type, side).top, _material(side, type))
 	return _tops[key]
 
 
@@ -193,7 +203,7 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 			basis = u.tilt * basis
 		elif u.kind == "air":
 			basis = basis * Basis(Vector3.RIGHT, 0.08 if u.state == "move" else 0.0)
-		var scale := Models.tier_scale(u.type)
+		var scale := Models.tier_scale(u.type, look(u.side))
 		if u.landed_at > 0.0 and now - u.landed_at < 0.35: # out of the pod with a little bounce
 			scale *= 0.85 + 0.15 * (now - u.landed_at) / 0.35
 		var y_scale := 1.0
@@ -204,7 +214,7 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 		if now - u.hit_at < 0.08: # a flash of white when hit
 			custom = custom.lerp(Color(2, 2, 2), 0.5)
 		_put(_body(u.type, u.side), xf, custom)
-		var m: Dictionary = Models.model(u.type)
+		var m: Dictionary = _model(u.type, u.side)
 		if m.top:
 			var top_basis := basis * Basis(Vector3.UP, u.top_yaw - u.yaw)
 			_put(_top(u.type, u.side), Transform3D(top_basis.scaled(Vector3(scale, scale * y_scale, scale)), xf * (m.top_at as Vector3)), custom)
@@ -260,8 +270,8 @@ func add_wreck(u: Unit) -> void:
 		basis = u.tilt * basis * Basis(Vector3.FORWARD, 0.12)
 	else:
 		basis = basis.scaled(Vector3(1, 0.45, 1)) # a broken stump of a building
-	var m: Dictionary = Models.model(u.type)
-	basis = basis.scaled(Vector3.ONE * Models.tier_scale(u.type))
+	var m: Dictionary = _model(u.type, u.side)
+	basis = basis.scaled(Vector3.ONE * Models.tier_scale(u.type, look(u.side)))
 	var xf := Transform3D(basis, at)
 	var top := Transform3D()
 	if m.top:
@@ -282,7 +292,7 @@ func _draw_wrecks() -> void:
 		var xf: Transform3D = w.xform
 		xf.origin.y -= sink
 		_put(_body(w.type, w.side), xf, Color(0.35, 0.33, 0.3, 0.5))
-		if Models.model(w.type).top:
+		if _model(w.type, w.side).top:
 			var t: Transform3D = w.top
 			t.origin.y -= sink
 			_put(_top(w.type, w.side), t, Color(0.35, 0.33, 0.3, 0.5))

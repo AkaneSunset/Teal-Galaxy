@@ -58,7 +58,9 @@
 		"luminar": {"set": "ceramic_plates", "tile": 2.5},
 		"luminar_frame": {"set": "trim_plates", "tile": 1.5},
 		"coma": {"set": "gunmetal_traces", "tile": 4.0},
-		"coma_frame": {"set": "hammered_gold", "tile": 1.0}
+		"coma_frame": {"set": "hammered_gold", "tile": 1.0},
+		"ashen/artillery_t3": {"set": "black_plating", "tile": 3.0},
+		"ashen/artillery_t3_frame": {"set": "black_plating", "tile": 3.0}
 	},
 	"compact": {
 		"navy": "armour_plate",

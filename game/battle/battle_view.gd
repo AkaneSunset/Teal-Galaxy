@@ -617,11 +617,11 @@ func _shots(list: Array) -> void:
 					if d < best:
 						best = d
 						y = t.pos.y + (0.0 if t.kind == "air" else (3.0 if t.kind == "structure" else 1.6))
-		var m: Dictionary = Models.model(u.type)
+		var m: Dictionary = Models.model(u.type, side_look(u.side))
 		var muzzle := u.pos + Vector3(0, 2.0, 0)
 		var dir := Vector3(to.x - u.pos.x, 0, to.y - u.pos.z).normalized()
 		if m.top:
-			muzzle = u.pos + (m.top_at as Vector3) + Vector3(0, 0.6, 0) + dir * float(m.muzzle)
+			muzzle = u.pos + (m.top_at as Vector3) + Vector3(0, float(m.muzzle_up), 0) + dir * float(m.muzzle)
 		elif u.kind == "air":
 			muzzle = u.pos + Vector3(0, -0.9, 0) + dir * 3.0
 		elif u.type == "node":
