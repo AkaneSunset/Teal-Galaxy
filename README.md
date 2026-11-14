@@ -1126,7 +1126,7 @@ lays the maps on by face as the shader does.
 of the shared one: `game/battle/models/<faction>/<type>.glb` (`ashen/artillery_t3.glb` is the Ashen
 Collective's tier 3 mobile artillery, the first; `ashen/tank_t3.glb` its tier 3 heavy tank, `ashen/acu.glb` its Armoured Command Unit, whose top is everything from the waist up; `ashen/experimental.glb` an eight-legged experimental walker with a laser eye and missile racks, modelled ahead of the unit itself, which the server does not have yet). `battle_models.gd` uses it for that faction's side
 whenever the file is there (`model(type, look)`), at the size it was modelled (no tier scaling), and
-every other side keeps the shared model. The file holds a `body` mesh, a `top` mesh placed where
+every other side keeps the shared model. A higher tier without a file of its own uses its base type's (`ashen/gunship.glb` draws the Ashen gunship at every tier, bigger for each), as it would the shared model. The file holds a `body` mesh, a `top` mesh placed where
 the turret turns and a `muzzle` point under it; colours and paint masks are in the vertex colours,
 so the same shader draws it. It can wear texture sets of its own, listed under `battle` in
 `surfaces.json` as `<faction>/<type>` (painted parts) and `<faction>/<type>_frame` (plain parts).

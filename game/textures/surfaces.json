@@ -66,7 +66,9 @@
 		"ashen/acu": {"set": "black_plating", "tile": 3.0},
 		"ashen/acu_frame": {"set": "black_plating", "tile": 3.0},
 		"ashen/experimental": {"set": "black_plating", "tile": 5.0},
-		"ashen/experimental_frame": {"set": "black_plating", "tile": 5.0}
+		"ashen/experimental_frame": {"set": "black_plating", "tile": 5.0},
+		"ashen/gunship": {"set": "black_plating", "tile": 3.0},
+		"ashen/gunship_frame": {"set": "black_plating", "tile": 3.0}
 	},
 	"compact": {
 		"navy": "armour_plate",

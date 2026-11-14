@@ -32,7 +32,7 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------
@@ -281,7 +281,7 @@ def render(out, unit, shared):
             continue
         cam, target = tuple(c * k for c in cam), tuple(c * k for c in target)
         kit.reset()
-        place(unit, side, turn=turn)
+        place(unit, side, at=(0, 0, load(unit).get("fly", 0.0)), turn=turn)  # an aircraft is shown in the air
         bm.stage(cam, target, lens, sun=sun[0] if sun else (52, 0, 28))  # a sun that doesn't glint off a facet into this camera
         bm.shoot(os.path.join(out, f"{name}_{view}.png"))
     if only and "in_battle" not in only:
@@ -291,7 +291,7 @@ def render(out, unit, shared):
     base, _, tier = unit.split("/")[1].partition("_t")
     scale = 1.25 ** (int(tier or 1) - 1)
     r = load(unit).get("span", 0.0)  # a very wide unit: stand it further off, and the camera further back
-    place(unit, side, at=(-7 - r, 0, 0), turn=0.5, aim=-0.2)
+    place(unit, side, at=(-7 - r, 0, load(unit).get("fly", 0.0)), turn=0.5, aim=-0.2)
     if base in shared:
         bm.build(shared, base, side, at=(7, 0, 0), turn=0.5, aim=-0.2, scale=scale)
     elif "ashen/tank_t3" in UNITS and side == "ashen":

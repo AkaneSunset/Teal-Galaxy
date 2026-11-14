@@ -625,7 +625,7 @@ func _shots(list: Array) -> void:
 			if m.has("muzzle_at"): # a gun out on an arm: turned with the shot
 				muzzle = u.pos + (m.top_at as Vector3) + Basis(Vector3.UP, atan2(dir.x, dir.z)) * (m.muzzle_at as Vector3)
 		elif m.has("muzzle_at"): # a gun fixed in the body: wherever the unit has it now
-			muzzle = u.pos + Basis(Vector3.UP, u.yaw) * (m.muzzle_at as Vector3)
+			muzzle = u.pos + Basis(Vector3.UP, u.yaw) * (m.muzzle_at as Vector3) * Models.tier_scale(u.type, side_look(u.side))
 		elif u.kind == "air":
 			muzzle = u.pos + Vector3(0, -0.9, 0) + dir * 3.0
 		elif u.type == "node":

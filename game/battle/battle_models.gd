@@ -118,6 +118,8 @@ static func material(look := "", type := "") -> ShaderMaterial:
 	if type != "" and look != "":
 		if not Surfaces.entry("battle", look + "/" + type).is_empty():
 			look = look + "/" + type
+		elif type.contains("_t") and not Surfaces.entry("battle", look + "/" + type.get_slice("_t", 0)).is_empty():
+			look = look + "/" + type.get_slice("_t", 0) # a higher tier wears its base's set until it has its own
 	if _materials.has(look):
 		return _materials[look]
 	if _shader == null:
@@ -146,20 +148,32 @@ static func material(look := "", type := "") -> ShaderMaterial:
 
 
 ## How much bigger a unit of a higher tier is drawn: "tank_t3" is a Tank Mk III.
-## A unit with a model of its own for `look` (its side's faction) is modelled at its real size.
+## A unit with a model of its own for `look` (its side's faction) is modelled at its real size; one
+## drawn with its base type's own model ("gunship_t3" with the faction's "gunship") is still scaled.
 static func tier_scale(type: String, look := "") -> float:
-	if own(type, look):
+	if own_type(type, look) == type:
 		return 1.0
 	return pow(1.25, int(type.get_slice("_t", 1)) - 1) if type.contains("_t") else 1.0
 
 
-## Whether `look`'s faction has a model of its own for this unit type.
+## Whether `look`'s faction has a model of its own for this unit type (or for its base type).
 static func own(type: String, look: String) -> bool:
+	return own_type(type, look) != ""
+
+
+## The type whose own model `look`'s faction draws this unit with: the type itself, or for a higher
+## tier without one its base type ("gunship" for "gunship_t2"), or "" if the faction has neither.
+static func own_type(type: String, look: String) -> String:
 	if look == "" or look == "militia":
-		return false
+		return ""
 	var key := look + "/" + type
 	if not _own.has(key):
-		_own[key] = ResourceLoader.exists(OWN_MODEL % [look, type])
+		var found := ""
+		if ResourceLoader.exists(OWN_MODEL % [look, type]):
+			found = type
+		elif type.contains("_t") and ResourceLoader.exists(OWN_MODEL % [look, type.get_slice("_t", 0)]):
+			found = type.get_slice("_t", 0)
+		_own[key] = found
 	return _own[key]
 
 
@@ -168,10 +182,11 @@ static func own(type: String, look: String) -> bool:
 ## pivot, facing +Z} for a unit type (or "pod", a drop pod): `look`'s own model of it
 ## if its faction has one, or the one every side shares.
 static func model(type: String, look := "") -> Dictionary:
-	if own(type, look):
-		var key := look + "/" + type
+	var mine := own_type(type, look)
+	if mine != "":
+		var key := look + "/" + mine
 		if not _cache.has(key):
-			_cache[key] = _load_own(OWN_MODEL % [look, type])
+			_cache[key] = _load_own(OWN_MODEL % [look, mine])
 		if not (_cache[key] as Dictionary).is_empty():
 			return _cache[key]
 	if _cache.has(type):
