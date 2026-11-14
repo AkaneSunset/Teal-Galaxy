@@ -70,7 +70,13 @@
 		"ashen/gunship": {"set": "black_plating", "tile": 3.0},
 		"ashen/gunship_frame": {"set": "black_plating", "tile": 3.0},
 		"ashen/tank": {"set": "black_plating", "tile": 2.5},
-		"ashen/tank_frame": {"set": "black_plating", "tile": 2.5}
+		"ashen/tank_frame": {"set": "black_plating", "tile": 2.5},
+		"ashen/artillery": {"set": "black_plating", "tile": 2.5},
+		"ashen/artillery_frame": {"set": "black_plating", "tile": 2.5},
+		"ashen/striker": {"set": "black_plating", "tile": 2.0},
+		"ashen/striker_frame": {"set": "black_plating", "tile": 2.0},
+		"ashen/scout": {"set": "black_plating", "tile": 2.0},
+		"ashen/scout_frame": {"set": "black_plating", "tile": 2.0}
 	},
 	"compact": {
 		"navy": "armour_plate",

@@ -32,7 +32,7 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship", "ashen/tank"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship", "ashen/tank", "ashen/artillery", "ashen/striker", "ashen/scout"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------
@@ -179,6 +179,11 @@ class Part(list):
         u1, v1 = u * (wide if wide1 is None else wide1), v * (deep if deep1 is None else deep1)
         u, v = u * wide, v * deep
         self.hexa([a - u - v, a + u - v, a + u + v, a - u + v], [b - u1 - v1, b + u1 - v1, b + u1 + v1, b - u1 + v1], colour, mask)
+
+    def trace(self, points, wide, deep, colour, mask=SIDE_GLOW, face=(0, 0, 1)):
+        """A lit line through points anywhere in space, its lit side looking along `face`."""
+        for a, b in zip(points, points[1:]):
+            self.beam(a, b, wide, deep, colour, mask, face)
 
     def mirrored(self, other):
         """Adds `other` and its mirror image across the hull's middle."""
