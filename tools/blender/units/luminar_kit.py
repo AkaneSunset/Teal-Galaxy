@@ -67,3 +67,15 @@ def barrel(P, at, along, steps, colour=None, mask=PLAIN, sides=10):
     """A turned barrel: steps = [(from, to, radius), ...] along its line."""
     for a, b, r in steps:
         P.lathe(at, along, [(a, r), (b, r)], colour or CERAMIC, mask, sides=sides, turn=math.pi / sides)
+
+
+def tipped(P, part, pivot, degrees):
+    """Adds `part` to P turned about the X axis through `pivot`: positive tips its front (+Z) down."""
+    a = math.radians(degrees)
+    c, s = math.cos(a), math.sin(a)
+
+    def turn(v, about):
+        y, z = v[1] - about[1], v[2] - about[2]
+        return type(v)((v[0], about[1] + y * c - z * s, about[2] + y * s + z * c))
+    for corners, n, colour, mask in part:
+        P.append(([turn(p, pivot) for p in corners], turn(n, (0, 0, 0)), colour, mask))
