@@ -350,7 +350,7 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
     u.vet = 0;
     u.kills = 0;
   }
-  if (c.carries) u.cargo = c.carries.count;
+  if (c.carries) u.cargo = Array(c.carries.count).fill(null); // who is aboard: null is a fresh team, or what a team that got back on had
   if (dropAt) u.state = 'drop';
   b.units.set(u.id, u);
   return u;
@@ -631,14 +631,18 @@ function order(b, name, msg) {
     case 'stop':
       for (const u of units) {
         [u.orders, u.target] = [[], null];
-        if (u.cargo) unload(b, u); // a carrier told to stop lets its troops off
+        if (u.cargo?.length) unload(b, u); // a carrier told to stop lets its troops off
       }
       return { ok: true };
     case 'move':
     case 'amove': {
       if (!num(msg.x) || !num(msg.z)) return { ok: true, quiet: true };
       const spots = formation(units, clamp(msg.x, 0, SIZE), clamp(msg.z, 0, SIZE));
-      units.forEach((u, i) => give(u, { order: msg.order, x: spots[i][0], z: spots[i][1] }));
+      units.forEach((u, i) => {
+        // A team sent onto one of its carriers gets aboard.
+        const ride = CATALOG[u.type].carried && msg.order === 'move' ? carrierAt(b, u, clamp(msg.x, 0, SIZE), clamp(msg.z, 0, SIZE)) : null;
+        give(u, ride ? { order: 'board', target: ride.id } : { order: msg.order, x: spots[i][0], z: spots[i][1] });
+      });
       return { ok: true };
     }
     case 'attack': {
@@ -989,6 +993,12 @@ function unitStep(b, u, dt) {
     if (build(b, u, o, dt)) u.orders.shift();
     return;
   }
+  if (o.order === 'board') {
+    if (board(b, u, o)) return u.orders.shift();
+    const t = b.units.get(o.target);
+    moveToward(b, u, t.x, t.z, dt, CATALOG[t.type].radius + CATALOG[u.type].radius + 1);
+    return;
+  }
   if (o.order === 'attack') {
     const t = b.units.get(o.target);
     if (!t || t.hp <= 0 || !c.hits.includes(CATALOG[t.type].kind)) return u.orders.shift();
@@ -1020,18 +1030,45 @@ function unitStep(b, u, dt) {
   if (moveToward(b, u, o.x, o.z, dt)) u.orders.shift();
 }
 
-// A troop carrier puts down what it carries: its fire teams step off the ramp behind it and stand
-// ready (they shoot what comes in range, and take orders like any unit).
+// A carrier puts down what it carries: its teams step off the ramp behind it and stand ready (they
+// shoot what comes in range, and take orders like any unit). A team that had got back on comes off
+// as it went in: its hit points and its stars.
 function unload(b, u) {
-  const { unit, count } = CATALOG[u.type].carries;
-  const n = Math.min(u.cargo, count);
-  u.cargo = 0;
+  const { unit } = CATALOG[u.type].carries;
+  const teams = u.cargo;
+  u.cargo = [];
   const back = CATALOG[u.type].radius + CATALOG[unit].radius + 1;
-  for (let i = 0; i < n; i++) {
-    const a = u.heading + Math.PI + (i - (n - 1) / 2) * 0.9;
+  teams.forEach((was, i) => {
+    const a = u.heading + Math.PI + (i - (teams.length - 1) / 2) * 0.9;
     const s = spawn(b, unit, u.side, u.owner, u.x + Math.sin(a) * back, u.z + Math.cos(a) * back);
     s.heading = u.heading;
+    if (was) Object.assign(s, was);
+  });
+}
+
+// The carrier a team could get on at (x, z): one of its own side's and owner's, of a kind that
+// carries it, with room.
+function carrierAt(b, u, x, z) {
+  let best = null;
+  for (const t of b.units.values()) {
+    const c = CATALOG[t.type].carries;
+    if (!c || c.unit !== u.type || t.side !== u.side || t.owner !== u.owner || t.hp <= 0 || t.dropAt || t.cargo.length >= c.count) continue;
+    if (Math.hypot(t.x - x, t.z - z) <= CATALOG[t.type].radius + 2 && (!best || t.id < best.id)) best = t;
   }
+  return best;
+}
+
+// A board order: walk to the carrier and get on, if it still has room when the team reaches it.
+// True when the order is over (aboard, or the carrier is gone or full).
+function board(b, u, o) {
+  const t = b.units.get(o.target);
+  const c = t && CATALOG[t.type].carries;
+  if (!c || c.unit !== u.type || t.hp <= 0 || t.side !== u.side || t.cargo.length >= c.count) return true;
+  if (dist(u, t) > CATALOG[t.type].radius + CATALOG[u.type].radius + 2) return false;
+  t.cargo.push({ hp: u.hp, maxHp: u.maxHp, vet: u.vet, kills: u.kills });
+  b.units.delete(u.id); // gone from the field without dying
+  for (const p of b.pilots.values()) if (p.drive === u.id) p.drive = null;
+  return true;
 }
 
 const moving = (u) => u.state === 'move' || (!!u.driven && !!(u.driven.mx || u.driven.mz));
@@ -1176,7 +1213,7 @@ function tick(b, dt) {
       const sent = u.orders.length > 0;
       if (u.driven) driveStep(b, u, dt);
       else unitStep(b, u, dt);
-      if (u.cargo && (u.state === 'fight' || (sent && !u.orders.length) || u.driven?.fire)) unload(b, u);
+      if (u.cargo?.length && ((sent && (u.state === 'fight' || !u.orders.length)) || u.driven?.fire)) unload(b, u);
     }
   }
   buildGrid(b);

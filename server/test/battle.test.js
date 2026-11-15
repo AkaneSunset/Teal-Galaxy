@@ -1010,7 +1010,7 @@ test('veterancy: the value of the enemies killed earns stars that heal and tough
   assert.deepStrictEqual(B.frame(b).units.find((u) => u[0] === t.id)[9], 1);
 });
 
-test('troop carriers: two infantry teams step off where its orders end, when it meets the enemy, or on stop', () => {
+test('troop carriers: two infantry teams step off where its orders end, when it meets the enemy, or on stop, and get back on', () => {
   const b = battle();
   const infantry = () => units(b, (u) => u.type === 'infantry');
   assert.ok(C.factory.produces.includes('transport') && B.DROPPABLE.includes('transport'));
@@ -1025,7 +1025,7 @@ test('troop carriers: two infantry teams step off where its orders end, when it 
   run(b, 4);
   assert.strictEqual(infantry().length, 2);
   assert.ok(infantry().every((u) => u.owner === 'A' && u.side === 'a' && Math.hypot(u.x - t.x, u.z - t.z) < 12 && u.z < t.z), 'behind it, off the ramp');
-  assert.strictEqual(t.cargo, 0);
+  assert.strictEqual(t.cargo.length, 0);
   B.order(b, 'A', { units: [t.id], order: 'move', x: 600, z: 400 });
   run(b, 5);
   assert.strictEqual(infantry().length, 2, 'only once');
@@ -1035,18 +1035,41 @@ test('troop carriers: two infantry teams step off where its orders end, when it 
   foe.hp = 1e6;
   B.order(b, 'A', { units: [t2.id], order: 'amove', x: 900, z: 600 });
   run(b, 6);
-  assert.strictEqual(t2.cargo, 0);
+  assert.strictEqual(t2.cargo.length, 0);
   assert.strictEqual(infantry().length, 4);
   assert.ok(t2.z < 380, "it didn't drive on past");
+  b.units.delete(foe.id);
   // Told to stop, it lets them off where it stands.
   const t3 = B.spawn(b, 'transport', 'a', 'A', 300, 300);
   B.order(b, 'A', { units: [t3.id], order: 'stop' });
   assert.strictEqual(infantry().length, 6);
+  // A team sent onto its carrier gets back on, and comes off again as it went in.
+  const [i1, i2] = units(b, (u) => u.type === 'infantry' && Math.hypot(u.x - t3.x, u.z - t3.z) < 12);
+  i1.hp = 50;
+  i1.vet = 1;
+  B.order(b, 'A', { units: [i1.id, i2.id], order: 'move', x: t3.x + 1, z: t3.z });
+  run(b, 3);
+  assert.strictEqual(infantry().length, 4);
+  assert.strictEqual(t3.cargo.length, 2);
+  assert.ok(!B.frame(b).dead.includes(i1.id), "they didn't die");
+  run(b, 3);
+  assert.strictEqual(t3.cargo.length, 2, 'it keeps them aboard until it is sent somewhere');
+  B.order(b, 'A', { units: [t3.id], order: 'move', x: 300, z: 340 });
+  run(b, 6);
+  assert.strictEqual(infantry().length, 6);
+  assert.ok(infantry().some((u) => u.hp < 130 && u.vet === 1));
+  // A full carrier takes no more: the team just walks up to it. Nor does another pilot's.
+  const extra = B.spawn(b, 'infantry', 'a', 'A', t2.x + 10, t2.z);
+  t2.cargo = [null, null];
+  B.order(b, 'A', { units: [extra.id], order: 'move', x: t2.x, z: t2.z });
+  run(b, 4);
+  assert.ok(b.units.has(extra.id) && t2.cargo.length === 2);
+  t2.cargo = [];
   // One destroyed still loaded takes its troops with it.
   const t4 = B.spawn(b, 'transport', 'a', 'A', 300, 500);
   t4.hp = 0;
   run(b, 0.2);
-  assert.strictEqual(infantry().length, 6);
+  assert.strictEqual(infantry().length, 7);
 });
 
 test('scout planes: unarmed aircraft from the air factory that see furthest of all', () => {

@@ -1126,7 +1126,9 @@ lays the maps on by face as the shader does.
 mass, made by land factories and dropped like any tier 1 unit) carries two Infantry teams
 (`infantry`: 130 hp, 6 m/s, 9 damage every 0.5 s at 32 m, land and structures only). They get off
 behind it where its orders end, the moment it starts fighting, or when it is told to stop; a carrier
-destroyed still loaded takes them with it, and they don't get back on. Infantry come no other way.
+destroyed still loaded takes them with it. A team sent (a plain move) onto one of its owner's
+carriers with room walks to it and gets back on, keeping its hit points and stars; the server turns
+that move into a `board` order. Any unit type with `carries` in the catalog works the same way. Infantry come no other way.
 Factions without their own models draw both with simple shared ones.
 
 **Scout planes.** The Scout Plane (`spotter`: 120 hp, 38 m/s, unarmed, 45 mass, made by air

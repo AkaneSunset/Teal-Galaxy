@@ -388,7 +388,7 @@ func _unit_tip(t: String) -> String:
 	if t == "aa":
 		s += " (hits air only)"
 	if c.has("carries"):
-		s += ". Carries %d %s teams: they get off where its orders end, when it meets the enemy, or when you tell it to stop" % [int(c.carries.count), str(view.catalog.get(str(c.carries.unit), {}).get("name", c.carries.unit)).to_lower()]
+		s += ". Carries %d %s teams: they get off where its orders end, when it meets the enemy, or when you tell it to stop. Send a team onto it to get back on" % [int(c.carries.count), str(view.catalog.get(str(c.carries.unit), {}).get("name", c.carries.unit)).to_lower()]
 	if t == "engineer" or t == "acu":
 		s += ". Builds extractors, generators, turrets and factories"
 	if t == "acu":
