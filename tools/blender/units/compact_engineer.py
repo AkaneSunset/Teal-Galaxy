@@ -56,4 +56,4 @@ def build(Part):
     body.box((0.04, 1.2, 0.04), (0.2, 4.1, -5.3), DARK)  # the cable
     body.box((0.22, 0.3, 0.22), (0.2, 3.4, -5.3), LIGHT)
     body.mirrored(right)
-    return {"body": body, "top": None, "top_at": (0, 0, 0), "muzzle": (0.2, 3.3, -5.3), "view": 0.9}
+    return {"body": body, "top": None, "top_at": (0, 0, 0), "muzzle": (0.2, 3.3, -5.3), "view": 1.25}

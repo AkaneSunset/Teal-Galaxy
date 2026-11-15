@@ -46,4 +46,4 @@ def build(Part):
     top.lathe((0, 0.8, 1.6), (0, 0, 1), [(5.15, 0.12), (5.17, 0.12)], TRACK, sides=8)
     barrel(top, (0.45, 0.85, 1.6), (0, 0, 1), [(0, 0.7, 0.06)])  # the coaxial gun
     top.mirrored(side)
-    return {"body": body, "top": top, "top_at": TOP_AT, "muzzle": (0.0, 0.8, 6.75), "view": 0.85}
+    return {"body": body, "top": top, "top_at": TOP_AT, "muzzle": (0.0, 0.8, 6.75), "view": 1.05}
