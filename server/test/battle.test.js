@@ -1048,3 +1048,16 @@ test('troop carriers: two infantry teams step off where its orders end, when it 
   run(b, 0.2);
   assert.strictEqual(infantry().length, 6);
 });
+
+test('scout planes: unarmed aircraft from the air factory that see furthest of all', () => {
+  const b = battle();
+  assert.ok(C.airfactory.produces.includes('spotter') && B.DROPPABLE.includes('spotter'));
+  assert.ok(Object.values(C).every((c) => c === C.spotter || (c.vision || 0) < C.spotter.vision));
+  const s = B.spawn(b, 'spotter', 'a', 'A', 600, 300);
+  const foe = B.spawn(b, 'tank', 'd', '', 600, 330);
+  B.order(b, 'A', { units: [s.id], order: 'move', x: 600, z: 500 });
+  run(b, 3);
+  assert.strictEqual(foe.hp, C.tank.hp, "it doesn't shoot");
+  assert.strictEqual(s.hp, C.spotter.hp, "and a tank can't reach it");
+  assert.ok(s.z > 380, 'it flies on');
+});

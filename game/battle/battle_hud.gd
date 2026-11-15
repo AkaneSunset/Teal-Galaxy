@@ -15,7 +15,7 @@ const PANEL_BG := Color(0.02, 0.05, 0.08, 0.86)
 const MINIMAP_W := 220.0
 const DROP_COLUMNS := 4
 const DROP_W := DROP_COLUMNS * 60.0 + (DROP_COLUMNS - 1) * 6.0 + 24.0 # the call-in panel's width
-const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "transport", "gunship"]
+const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "transport", "spotter", "gunship"]
 
 var view: Node # battle_view.gd
 var drop_count := 1

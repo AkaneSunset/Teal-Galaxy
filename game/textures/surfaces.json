@@ -92,7 +92,21 @@
 		"compact/transport": {"set": "armour_plate", "tile": 3.0},
 		"compact/transport_frame": {"set": "brushed_steel", "tile": 1.5},
 		"compact/infantry": {"set": "armour_plate", "tile": 1.5},
-		"compact/infantry_frame": {"set": "brushed_steel", "tile": 1.5}
+		"compact/infantry_frame": {"set": "brushed_steel", "tile": 1.5},
+		"luminar/tank": {"set": "hull_panels", "tile": 4.0},
+		"luminar/tank_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/striker": {"set": "hull_panels", "tile": 4.0},
+		"luminar/striker_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/scout": {"set": "hull_panels", "tile": 4.0},
+		"luminar/scout_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/artillery": {"set": "hull_panels", "tile": 4.0},
+		"luminar/artillery_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/engineer": {"set": "hull_panels", "tile": 4.0},
+		"luminar/engineer_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/bomber": {"set": "hull_panels", "tile": 4.0},
+		"luminar/bomber_frame": {"set": "hull_panels", "tile": 4.0},
+		"luminar/spotter": {"set": "hull_panels", "tile": 4.0},
+		"luminar/spotter_frame": {"set": "hull_panels", "tile": 4.0}
 	},
 	"compact": {
 		"navy": "armour_plate",

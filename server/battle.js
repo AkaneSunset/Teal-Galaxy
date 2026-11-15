@@ -127,6 +127,8 @@ const CATALOG = {
   transport: { name: 'Troop Carrier', kind: 'land', hp: 380, speed: 15, damage: 8, reload: 0.5, range: 32, cost: 120, energy: 500, radius: 4, vision: 90, hits: LAND, carries: { unit: 'infantry', count: 2 } },
   infantry: { name: 'Infantry', kind: 'land', hp: 130, speed: 6, damage: 9, reload: 0.5, range: 32, cost: 40, energy: 150, radius: 2.5, vision: 70, hits: LAND, carried: true },
   aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, energy: 450, radius: 3, vision: 100, hits: ['air'] },
+  // The scout plane is unarmed: fast, cheap, and it sees further than anything else.
+  spotter: { name: 'Scout Plane', kind: 'air', hp: 120, speed: 38, damage: 0, reload: 0, range: 0, cost: 45, energy: 300, radius: 3, vision: 220, hits: [] },
   fighter: { name: 'Fighter', kind: 'air', hp: 260, speed: 30, damage: 22, reload: 0.6, range: 40, cost: 70, energy: 500, radius: 3, vision: 120, hits: ['air'] },
   bomber: { name: 'Bomber', kind: 'air', hp: 520, speed: 18, damage: 260, reload: 5, range: 14, cost: 160, energy: 1100, radius: 3.5, vision: 100, hits: ['land', 'structure'], splash: 12, shell: 60 },
   gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, energy: 1400, radius: 3, vision: 100, hits: ['land', 'structure', 'air'] },
@@ -138,7 +140,7 @@ const CATALOG = {
   energystorage: { name: 'Energy Storage', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 0, radius: 6, hits: [], storage: STORAGE.energystorage },
   turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'] },
   factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa', 'transport'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
-  airfactory: { name: 'Air Factory', kind: 'structure', hp: 2200, damage: 0, cost: 280, energy: 1500, radius: 12, hits: [], produces: ['fighter', 'bomber', 'gunship'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
+  airfactory: { name: 'Air Factory', kind: 'structure', hp: 2200, damage: 0, cost: 280, energy: 1500, radius: 12, hits: [], produces: ['spotter', 'fighter', 'bomber', 'gunship'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, energy: 0, radius: 12, hits: [] },
   node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'] },
 };

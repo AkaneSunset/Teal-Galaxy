@@ -114,6 +114,10 @@ static func draw(c: CanvasItem, type: String, rect: Rect2, tint := Color.WHITE) 
 			c.draw_line(P.call(24, 22), P.call(28, 8), line, 2.5 * s)
 			c.draw_polyline(PackedVector2Array([P.call(14, 6), P.call(20, 1), P.call(26, 6)]), SHIELD * tint, w)
 			_track(c, P.call(7, 33), P.call(33, 33), 3 * s, line, w)
+		"spotter":
+			# A small plane inside a ring: it looks, it doesn't shoot.
+			_plane(c, P.call(20, 20), 0.6 * s, line)
+			c.draw_arc(P.call(20, 20), 15 * s, 0, TAU, 24, line, w * 0.8)
 		"transport":
 			# A truck: a cab, a box body, three wheels.
 			c.draw_rect(Rect2(P.call(4, 11), Vector2(22, 16) * s), line)
