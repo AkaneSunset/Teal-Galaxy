@@ -848,10 +848,26 @@ def hammered_gold(seed=30):
     save("hammered_gold", albedo, h, rough, strength=40)
 
 
+def polished_marble(seed=37):
+    """Polished white metal with a little marble in it: smooth and glossy, a few thin grey veins
+    wandering across soft clouds, no seams or panel lines. The Luminar's unit shells."""
+    warp = fbm(3, seed, 4) * 2 - 1
+    def veins(cells, s, sharp):
+        f = fbm(cells, s, 5) + warp * 0.18
+        return np.clip(1 - np.abs(np.sin(f * np.pi * 3.0)) * sharp, 0, 1) ** 3
+    v = veins(2, seed + 1, 9.0) * 0.8 + veins(4, seed + 2, 12.0) * 0.4
+    v = np.clip(v * np.clip(fbm(3, seed + 3, 3) * 2.2 - 0.6, 0, 1), 0, 1)  # veins come and go
+    cloud = fbm(3, seed + 4, 4)
+    albedo = np.clip(0.97 - cloud * 0.07 - blur(v, 2.5) * 0.1 - v * 0.26, 0, 1)
+    h = np.full((N, N), 0.5) - blur(v, 1.5) * 0.02
+    rough = np.clip(0.26 + cloud * 0.08 + v * 0.1, 0, 1)
+    save("polished_marble", albedo, h, rough, ao=np.ones((N, N)), strength=6)
+
+
 SETS = {f.__name__: f for f in [hull_panels, trim_plates, brushed_steel, deck_plate, grip_dark, glass, window_lights,
                                 light_panel, rock, ice, armour_plate, hazard_stripes, ferrocrete, chitin, moss, vein_glow,
                                 black_plating, black_deck, ember_grate, black_machinery,
-                                ceramic_plates, crystal, gunmetal_traces, hammered_gold, rib_plating, light_pool]}
+                                ceramic_plates, crystal, gunmetal_traces, hammered_gold, rib_plating, light_pool, polished_marble]}
 
 
 def sheet(path):
