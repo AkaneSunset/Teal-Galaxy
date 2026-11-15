@@ -131,7 +131,7 @@ func shot(a: Vector3, b: Vector3, type: String, colour: Color, rate: float) -> v
 		"gunship":
 			_bolt(a, b, 0.1, 5.0, 0.35, hot, true)
 			flash(a, 0.8, hot, 0.06)
-		"scout":
+		"scout", "transport", "infantry":
 			_bolt(a, b, 0.08, 3.0, 0.2, Color(1.0, 0.9, 0.6), true)
 		_:
 			_bolt(a, b, 0.12, 5.0, 0.35, hot, true)

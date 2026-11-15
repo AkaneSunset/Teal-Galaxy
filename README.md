@@ -1122,11 +1122,18 @@ draws at most twice the batches it did. Wrecks keep their side's textures, darke
 them the same way: it reads the `match` block of `battle_models.gd`, builds each unit in Blender and
 lays the maps on by face as the shader does.
 
+**Troop carriers and infantry.** The Troop Carrier (`transport`: 380 hp, 15 m/s, a roof gun, 120
+mass, made by land factories and dropped like any tier 1 unit) carries two Infantry teams
+(`infantry`: 130 hp, 6 m/s, 9 damage every 0.5 s at 32 m, land and structures only). They get off
+behind it where its orders end, the moment it starts fighting, or when it is told to stop; a carrier
+destroyed still loaded takes them with it, and they don't get back on. Infantry come no other way.
+Factions without their own models draw both with simple shared ones.
+
 **Units with a model of their own.** A faction's unit at one tier can have its own model in place
 of the shared one: `game/battle/models/<faction>/<type>.glb` (`ashen/artillery_t3.glb` is the Ashen
 Collective's tier 3 mobile artillery, the first; `ashen/tank_t3.glb` its tier 3 heavy tank, `ashen/acu.glb` its Armoured Command Unit, whose top is everything from the waist up; `ashen/experimental.glb` an eight-legged experimental walker with a laser eye and missile racks, modelled ahead of the unit itself, which the server does not have yet). `battle_models.gd` uses it for that faction's side
 whenever the file is there (`model(type, look)`), at the size it was modelled (no tier scaling), and
-every other side keeps the shared model. A higher tier without a file of its own uses its base type's (`ashen/gunship.glb` draws the Ashen gunship at every tier, bigger for each), as it would the shared model. The Ashen roster so far: `acu`, `scout`, `striker` (the assault bot), `tank` (light, tier 1), `artillery` (wheeled, tier 1), `tank_t3`, `artillery_t3`, `gunship`, and `experimental`. The file holds a `body` mesh, a `top` mesh placed where
+every other side keeps the shared model. A higher tier without a file of its own uses its base type's (`ashen/gunship.glb` draws the Ashen gunship at every tier, bigger for each), as it would the shared model. The Ashen roster so far: `acu`, `scout`, `striker` (the assault bot), `tank` (light, tier 1), `artillery` (wheeled, tier 1), `tank_t3`, `artillery_t3`, `gunship`, and `experimental`. The Terran Compact's tier 1 roster (welded grey steel, the side's colour in twin stripes and its ringed mark; shared parts in `units/compact_kit.py`): `tank` (the line tank), `artillery` (a tracked tractor towing a howitzer, the gun its top), `scout` (the recon car), `aa` (the flak halftrack), `engineer` (the construction crawler), `gunship` (the patrol gunship, a helicopter), `transport` (the conscript carrier) and `infantry` (a fire team of five). The file holds a `body` mesh, a `top` mesh placed where
 the turret turns and a `muzzle` point under it; colours and paint masks are in the vertex colours,
 so the same shader draws it. It can wear texture sets of its own, listed under `battle` in
 `surfaces.json` as `<faction>/<type>` (painted parts) and `<faction>/<type>_frame` (plain parts).

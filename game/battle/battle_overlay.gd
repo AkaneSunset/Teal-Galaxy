@@ -149,6 +149,11 @@ func _icon(u: Units.Unit, s: Vector2, sel: bool) -> void:
 			draw_line(s + Vector2(2, -4), s + Vector2(2, 4), mark, 2.0)
 		"artillery":
 			draw_arc(s + Vector2(0, 3), 4.0, PI, TAU, 8, mark, 2.0)
+		"transport":
+			draw_rect(Rect2(s - Vector2(4, 2.5), Vector2(8, 5)), mark, false, 1.5)
+		"infantry":
+			for dx in [-3.0, 0.0, 3.0]:
+				draw_circle(s + Vector2(dx, 0), 1.2, mark)
 		"aa":
 			draw_polyline(PackedVector2Array([s + Vector2(-4, 3), s + Vector2(0, -3), s + Vector2(4, 3)]), mark, 2.0)
 		"extractor":

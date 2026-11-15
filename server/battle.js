@@ -121,6 +121,11 @@ const CATALOG = {
   striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, energy: 275, radius: 3, vision: 80, hits: LAND },
   tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, energy: 650, radius: 4, vision: 80, hits: LAND },
   artillery: { name: 'Artillery', kind: 'land', hp: 220, speed: 7, damage: 120, reload: 4, range: 160, cost: 170, energy: 850, radius: 3, vision: 80, hits: LAND, minRange: 30, splash: 14, shell: 160 },
+  // The troop carrier drives its fire teams to the line and puts them down where its orders end, or
+  // the moment it meets the enemy; after that it is a light gun truck. Infantry come no other way:
+  // slow and cheap to kill one at a time, but each team shoots as hard as a striker for its price.
+  transport: { name: 'Troop Carrier', kind: 'land', hp: 380, speed: 15, damage: 8, reload: 0.5, range: 32, cost: 120, energy: 500, radius: 4, vision: 90, hits: LAND, carries: { unit: 'infantry', count: 2 } },
+  infantry: { name: 'Infantry', kind: 'land', hp: 130, speed: 6, damage: 9, reload: 0.5, range: 32, cost: 40, energy: 150, radius: 2.5, vision: 70, hits: LAND, carried: true },
   aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, energy: 450, radius: 3, vision: 100, hits: ['air'] },
   fighter: { name: 'Fighter', kind: 'air', hp: 260, speed: 30, damage: 22, reload: 0.6, range: 40, cost: 70, energy: 500, radius: 3, vision: 120, hits: ['air'] },
   bomber: { name: 'Bomber', kind: 'air', hp: 520, speed: 18, damage: 260, reload: 5, range: 14, cost: 160, energy: 1100, radius: 3.5, vision: 100, hits: ['land', 'structure'], splash: 12, shell: 60 },
@@ -132,7 +137,7 @@ const CATALOG = {
   massstorage: { name: 'Mass Storage', kind: 'structure', hp: 600, damage: 0, cost: 80, energy: 200, radius: 6, hits: [], storage: STORAGE.massstorage },
   energystorage: { name: 'Energy Storage', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 0, radius: 6, hits: [], storage: STORAGE.energystorage },
   turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'] },
-  factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
+  factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa', 'transport'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   airfactory: { name: 'Air Factory', kind: 'structure', hp: 2200, damage: 0, cost: 280, energy: 1500, radius: 12, hits: [], produces: ['fighter', 'bomber', 'gunship'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, energy: 0, radius: 12, hits: [] },
   node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'] },
@@ -163,7 +168,7 @@ const tierOf = (type) => CATALOG[type]?.tier || 1;
 // needing five generators' worth to run, units at the old prices starved the economy.
 const ENERGY_PRICE = 0.5;
 for (const c of Object.values(CATALOG)) if (c.energy) c.energy = Math.round(c.energy * ENERGY_PRICE);
-const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure' && tierOf(id) === 1 && !CATALOG[id].acu);
+const DROPPABLE = Object.keys(CATALOG).filter((id) => CATALOG[id].kind !== 'structure' && tierOf(id) === 1 && !CATALOG[id].acu && !CATALOG[id].carried);
 const builds = (u) => !!CATALOG[u.type].builds; // engineers and ACUs
 const makes = (u) => !!CATALOG[u.type].produces; // land and air factories
 const upgradable = (u) => !!CATALOG[u.type].upgrade; // factories, extractors, generators
@@ -343,6 +348,7 @@ function spawn(b, type, side, owner, x, z, { built = true, dropAt = 0 } = {}) {
     u.vet = 0;
     u.kills = 0;
   }
+  if (c.carries) u.cargo = c.carries.count;
   if (dropAt) u.state = 'drop';
   b.units.set(u.id, u);
   return u;
@@ -621,7 +627,10 @@ function order(b, name, msg) {
   };
   switch (msg.order) {
     case 'stop':
-      for (const u of units) [u.orders, u.target] = [[], null];
+      for (const u of units) {
+        [u.orders, u.target] = [[], null];
+        if (u.cargo) unload(b, u); // a carrier told to stop lets its troops off
+      }
       return { ok: true };
     case 'move':
     case 'amove': {
@@ -1009,6 +1018,20 @@ function unitStep(b, u, dt) {
   if (moveToward(b, u, o.x, o.z, dt)) u.orders.shift();
 }
 
+// A troop carrier puts down what it carries: its fire teams step off the ramp behind it and stand
+// ready (they shoot what comes in range, and take orders like any unit).
+function unload(b, u) {
+  const { unit, count } = CATALOG[u.type].carries;
+  const n = Math.min(u.cargo, count);
+  u.cargo = 0;
+  const back = CATALOG[u.type].radius + CATALOG[unit].radius + 1;
+  for (let i = 0; i < n; i++) {
+    const a = u.heading + Math.PI + (i - (n - 1) / 2) * 0.9;
+    const s = spawn(b, unit, u.side, u.owner, u.x + Math.sin(a) * back, u.z + Math.cos(a) * back);
+    s.heading = u.heading;
+  }
+}
+
 const moving = (u) => u.state === 'move' || (!!u.driven && !!(u.driven.mx || u.driven.mz));
 
 // Units keep a little apart: land from land and from structures, air from air. A unit on the move
@@ -1148,8 +1171,10 @@ function tick(b, dt) {
       }
     } else {
       if (u.vet) u.hp = Math.min(u.maxHp, u.hp + VET_REGEN * u.vet * dt);
+      const sent = u.orders.length > 0;
       if (u.driven) driveStep(b, u, dt);
       else unitStep(b, u, dt);
+      if (u.cargo && (u.state === 'fight' || (sent && !u.orders.length) || u.driven?.fire)) unload(b, u);
     }
   }
   buildGrid(b);

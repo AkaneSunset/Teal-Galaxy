@@ -15,7 +15,7 @@ const PANEL_BG := Color(0.02, 0.05, 0.08, 0.86)
 const MINIMAP_W := 220.0
 const DROP_COLUMNS := 4
 const DROP_W := DROP_COLUMNS * 60.0 + (DROP_COLUMNS - 1) * 6.0 + 24.0 # the call-in panel's width
-const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "gunship"]
+const DROPPABLE := ["engineer", "scout", "striker", "tank", "artillery", "aa", "transport", "gunship"]
 
 var view: Node # battle_view.gd
 var drop_count := 1
@@ -387,6 +387,8 @@ func _unit_tip(t: String) -> String:
 		s += ", %d damage every %ss, range %d m" % [int(c.damage), str(c.reload), int(c.range)]
 	if t == "aa":
 		s += " (hits air only)"
+	if c.has("carries"):
+		s += ". Carries %d %s teams: they get off where its orders end, when it meets the enemy, or when you tell it to stop" % [int(c.carries.count), str(view.catalog.get(str(c.carries.unit), {}).get("name", c.carries.unit)).to_lower()]
 	if t == "engineer" or t == "acu":
 		s += ". Builds extractors, generators, turrets and factories"
 	if t == "acu":

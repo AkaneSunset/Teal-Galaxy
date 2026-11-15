@@ -32,7 +32,8 @@ PLAIN, GLOW, SIDE_GLOW, PAINT = bm.PLAIN, bm.GLOW, bm.SIDE_GLOW, bm.PAINT
 Color = bm.Color
 MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
-UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship", "ashen/tank", "ashen/artillery", "ashen/striker", "ashen/scout"]  # each is tools/blender/units/<faction>_<type>.py
+UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship", "ashen/tank", "ashen/artillery", "ashen/striker", "ashen/scout",
+         "compact/tank", "compact/artillery", "compact/scout", "compact/aa", "compact/engineer", "compact/gunship", "compact/transport", "compact/infantry"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------

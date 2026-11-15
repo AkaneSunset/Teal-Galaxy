@@ -1009,3 +1009,42 @@ test('veterancy: the value of the enemies killed earns stars that heal and tough
   assert.ok(Math.abs(t.maxHp - B.CATALOG.tank.hp * 1.1) < 1e-6);
   assert.deepStrictEqual(B.frame(b).units.find((u) => u[0] === t.id)[9], 1);
 });
+
+test('troop carriers: two infantry teams step off where its orders end, when it meets the enemy, or on stop', () => {
+  const b = battle();
+  const infantry = () => units(b, (u) => u.type === 'infantry');
+  assert.ok(C.factory.produces.includes('transport') && B.DROPPABLE.includes('transport'));
+  assert.ok(!C.factory.produces.includes('infantry') && !B.DROPPABLE.includes('infantry'), 'infantry only come by carrier');
+  // Standing where it was made, it keeps them aboard; sent somewhere, it lets them off on arriving.
+  const t = B.spawn(b, 'transport', 'a', 'A', 600, 300);
+  run(b, 2);
+  assert.strictEqual(infantry().length, 0);
+  assert.ok(B.order(b, 'A', { units: [t.id], order: 'move', x: 600, z: 360 }).ok);
+  run(b, 2);
+  assert.strictEqual(infantry().length, 0, 'still on the road');
+  run(b, 4);
+  assert.strictEqual(infantry().length, 2);
+  assert.ok(infantry().every((u) => u.owner === 'A' && u.side === 'a' && Math.hypot(u.x - t.x, u.z - t.z) < 12 && u.z < t.z), 'behind it, off the ramp');
+  assert.strictEqual(t.cargo, 0);
+  B.order(b, 'A', { units: [t.id], order: 'move', x: 600, z: 400 });
+  run(b, 5);
+  assert.strictEqual(infantry().length, 2, 'only once');
+  // Meeting the enemy on an attack-move, it stops and they get off to fight.
+  const t2 = B.spawn(b, 'transport', 'a', 'A', 900, 300);
+  const foe = B.spawn(b, 'tank', 'd', '', 900, 380);
+  foe.hp = 1e6;
+  B.order(b, 'A', { units: [t2.id], order: 'amove', x: 900, z: 600 });
+  run(b, 6);
+  assert.strictEqual(t2.cargo, 0);
+  assert.strictEqual(infantry().length, 4);
+  assert.ok(t2.z < 380, "it didn't drive on past");
+  // Told to stop, it lets them off where it stands.
+  const t3 = B.spawn(b, 'transport', 'a', 'A', 300, 300);
+  B.order(b, 'A', { units: [t3.id], order: 'stop' });
+  assert.strictEqual(infantry().length, 6);
+  // One destroyed still loaded takes its troops with it.
+  const t4 = B.spawn(b, 'transport', 'a', 'A', 300, 500);
+  t4.hp = 0;
+  run(b, 0.2);
+  assert.strictEqual(infantry().length, 6);
+});

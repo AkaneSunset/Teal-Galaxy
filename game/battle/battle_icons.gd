@@ -114,6 +114,18 @@ static func draw(c: CanvasItem, type: String, rect: Rect2, tint := Color.WHITE) 
 			c.draw_line(P.call(24, 22), P.call(28, 8), line, 2.5 * s)
 			c.draw_polyline(PackedVector2Array([P.call(14, 6), P.call(20, 1), P.call(26, 6)]), SHIELD * tint, w)
 			_track(c, P.call(7, 33), P.call(33, 33), 3 * s, line, w)
+		"transport":
+			# A truck: a cab, a box body, three wheels.
+			c.draw_rect(Rect2(P.call(4, 11), Vector2(22, 16) * s), line)
+			c.draw_rect(Rect2(P.call(27, 17), Vector2(9, 10) * s), line)
+			for x in [10, 19, 31]:
+				c.draw_circle(P.call(x, 31), 3.5 * s, line)
+		"infantry":
+			# Three soldiers: a head and a body each.
+			for x in [9, 20, 31]:
+				var y := 10 if x == 20 else 14
+				c.draw_circle(P.call(x, y), 3.5 * s, line)
+				c.draw_rect(Rect2(P.call(x - 3.5, y + 5), Vector2(7, 14) * s), line)
 		"fighter":
 			# A swept-wing fighter.
 			_plane(c, P.call(20, 20), 1.0 * s, line)

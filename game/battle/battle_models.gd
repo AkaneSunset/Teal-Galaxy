@@ -291,6 +291,32 @@ static func model(type: String, look := "") -> Dictionary:
 				var face := Basis(Vector3.RIGHT, deg_to_rad(-40)) * Vector3(0, 0, 1.22)
 				_box(top, Vector3(0.7, 0.8, 0.1), Vector3(sx, 1.4, 0.3) + face, AMBER, GLOW, Vector3(deg_to_rad(-40), 0, 0))
 			muzzle = 1.5
+		"transport":
+			# A troop carrier: a cab, a tall box of a body, six wheels, a gun on the roof.
+			_box(body, Vector3(2.4, 0.5, 7.2), Vector3(0, 0.95, 0), DARK, PLAIN)
+			_box(body, Vector3(3.2, 1.9, 1.8), Vector3(0, 2.1, 2.8), GREY, PAINT)
+			_box(body, Vector3(2.8, 0.7, 0.15), Vector3(0, 2.5, 3.72), GLASS, PLAIN)
+			_box(body, Vector3(3.4, 2.2, 5.4), Vector3(0, 2.3, -1.0), LIGHT, PAINT)
+			_box(body, Vector3(2.6, 1.8, 0.15), Vector3(0, 2.2, -3.75), DARK, PLAIN)
+			_box(body, Vector3(3.0, 0.15, 0.3), Vector3(0, 3.45, -1.0), Color.WHITE, SIDE_GLOW)
+			for sx in [-1.45, 1.45]:
+				for sz in [2.6, -1.3, -2.75]:
+					_cyl(body, 0.64, 0.5, Vector3(sx, 0.64, sz), DARK, PLAIN, 8, Basis(Vector3.BACK, PI / 2.0))
+			top = _begin()
+			top_at = Vector3(0, 3.4, 0.9)
+			_cyl(top, 0.55, 0.3, Vector3(0, 0.15, 0), DARK, PLAIN, 8)
+			_box(top, Vector3(0.2, 0.2, 1.8), Vector3(0, 0.5, 0.9), DARK, PLAIN)
+			muzzle = 1.8
+		"infantry":
+			# A fire team on foot: five riflemen in a loose wedge.
+			for at in [[0.0, 1.5], [-1.2, 0.3], [1.25, 0.2], [-2.0, -1.2], [1.9, -1.3]]:
+				for sx in [-0.17, 0.17]:
+					_box(body, Vector3(0.26, 1.0, 0.3), Vector3(at[0] + sx, 0.5, at[1]), DARK, PLAIN)
+				_box(body, Vector3(0.7, 0.8, 0.42), Vector3(at[0], 1.42, at[1]), GREY, PAINT)
+				_box(body, Vector3(0.5, 0.6, 0.26), Vector3(at[0], 1.5, at[1] - 0.32), LIGHT, PAINT)
+				_box(body, Vector3(0.36, 0.36, 0.36), Vector3(at[0], 2.02, at[1]), GREY, PLAIN)
+				_box(body, Vector3(0.1, 0.14, 1.15), Vector3(at[0] + 0.25, 1.4, at[1] + 0.55), DARK, PLAIN)
+			muzzle = 2.6
 		"gunship":
 			_box(body, Vector3(2.0, 1.6, 6.0), Vector3(0, 0, 0), GREY, PAINT)
 			_box(body, Vector3(1.6, 0.9, 1.6), Vector3(0, 0.3, 3.4), GLASS, PLAIN, Vector3(deg_to_rad(18), 0, 0))
