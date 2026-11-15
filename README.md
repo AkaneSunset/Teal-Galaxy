@@ -1124,12 +1124,44 @@ lays the maps on by face as the shader does.
 
 **Troop carriers and infantry.** The Troop Carrier (`transport`: 380 hp, 15 m/s, a roof gun, 120
 mass, made by land factories and dropped like any tier 1 unit) carries two Infantry teams
-(`infantry`: 130 hp, 6 m/s, 9 damage every 0.5 s at 32 m, land and structures only). They get off
+(`infantry`: a squad of five, 150 hp, 6 m/s, 9 damage every 0.5 s at 32 m at full strength, land and structures only). They get off
 behind it where its orders end, the moment it starts fighting, or when it is told to stop; a carrier
 destroyed still loaded takes them with it. A team sent (a plain move) onto one of its owner's
 carriers with room walks to it and gets back on, keeping its hit points and stars; the server turns
 that move into a `board` order. Any unit type with `carries` in the catalog works the same way. Infantry come no other way.
 Factions without their own models draw both with simple shared ones.
+
+**Infantry squads** (after Company of Heroes; `squad: {size}` in the catalog marks a squad, and only
+squads use any of this). A squad's soldiers are its hit points in equal shares: it fires with the
+soldiers it has left, and the client draws each soldier, a wedge behind the leader on the move, a line
+across its front when it stops (shoulder to shoulder and crouched in cover), flat when pinned, each
+keeping its own pace so they lag and drift. A soldier lost falls where he stood; reinforcements join
+where the squad is. Shots come from one soldier at a time. The model (`infantry.glb`) is one soldier.
+- *Cover.* `layout()` scatters cover (`cover` in battle_joined: `{id, kind, x, z, r}`): heavy (stone
+  walls), light (scrub) and negative (open churned ground). Shells leave craters (light cover; `craters`
+  in battle_joined and in each snapshot as `[id, x, z, r]`, at most 120). A squad within `COVER_REACH`
+  of a piece's edge uses it, from the side it's on (a crater all round); within `COVER_CLOSE` of the
+  shooter cover counts for nothing. Damage taken: heavy ×0.5, light ×0.75, none ×1, negative ×1.25
+  (a blast only minds heavy cover and the open).
+- *Taking cover.* A squad sent somewhere (move or attack-move) goes behind the best cover within
+  `COVER_SEEK` (18 m) of the point, heavy before light, on the side away from the nearest enemy; squads
+  sharing a piece spread along it. With squads selected, the cover round the cursor shows as dots in
+  its colour and a shield at the cursor names the cover there.
+- *Suppression.* Every weapon has `suppress` (how much a hit adds, less in cover; a third of it spills
+  onto squads within 15 m). At 0.2 a squad is suppressed (half speed, half damage), at 0.6 pinned (no
+  moving or firing, only retreat) until it is back under 0.3. It wears off at 0.1 a second, faster in
+  cover. A pinned squad takes less for its first 6 s, then more.
+- *Retreat (T).* The squad runs for its landing zone (the defender's: its Command Node's) at 1.75×
+  speed, taking 0.4× damage, unable to fire or be pinned, and ignoring other orders until it gets there.
+- *Reinforce (R).* Within 35 m of its landing zone, a built factory or one of its owner's troop
+  carriers, a squad gets a soldier back every 4 s for its share of the squad's price.
+- *The AI* pulls back pinned squads and squads down to two soldiers, and reinforces them at home.
+- *Snapshots.* A squad's row adds `[cover (h/l/n/x), suppression, flags]` (r retreating, p pinned, f
+  reinforcing) after the tier. Over it the overlay draws a shield in its cover's colour, a pip per
+  soldier, its suppression and a word when it's suppressed, pinned, retreating or reinforcing.
+- *Not done:* cover doesn't block movement and there's no pathfinding round it (nothing on these
+  maps blocks a unit; everything moves in straight lines), no garrisoning buildings, and no squad
+  weapon upgrades.
 
 **Scout planes.** The Scout Plane (`spotter`: 120 hp, 38 m/s, unarmed, 45 mass, made by air
 factories) sees 220 m, further than anything else on the field.
@@ -1138,7 +1170,7 @@ factories) sees 220 m, further than anything else on the field.
 of the shared one: `game/battle/models/<faction>/<type>.glb` (`ashen/artillery_t3.glb` is the Ashen
 Collective's tier 3 mobile artillery, the first; `ashen/tank_t3.glb` its tier 3 heavy tank, `ashen/acu.glb` its Armoured Command Unit, whose top is everything from the waist up; `ashen/experimental.glb` an eight-legged experimental walker with a laser eye and missile racks, modelled ahead of the unit itself, which the server does not have yet). `battle_models.gd` uses it for that faction's side
 whenever the file is there (`model(type, look)`), at the size it was modelled (no tier scaling), and
-every other side keeps the shared model. A higher tier without a file of its own uses its base type's (`ashen/gunship.glb` draws the Ashen gunship at every tier, bigger for each), as it would the shared model. The Ashen roster so far: `acu`, `scout`, `striker` (the assault bot), `tank` (light, tier 1), `artillery` (wheeled, tier 1), `tank_t3`, `artillery_t3`, `gunship`, and `experimental`. The Terran Compact's tier 1 roster (welded grey steel, the side's colour in twin stripes and its ringed mark; shared parts in `units/compact_kit.py`): `tank` (the line tank), `artillery` (a tracked tractor towing a howitzer, the gun its top), `scout` (the recon car), `aa` (the flak halftrack), `engineer` (the construction crawler), `gunship` (the patrol gunship, a helicopter), `transport` (the conscript carrier) and `infantry` (a fire team of five). The Luminar Accord's tier 1 roster (smooth white ceramic shells banded in brass, dark works beneath, light in the side's colour; they wear `polished_marble`, glossy white metal with a few thin marble veins and no seams; `units/luminar_kit.py` has `shell`, which builds any slice of an ellipsoid, and `hoop`): `tank` (a hover skimmer with a lens of a turret), `striker` (the two-legged assault walker with twin lance rifles), `scout` (a four-legged walker with one eye), `artillery` (a hover hull with a domed chapel and twin mortars), `engineer` (a hover bowl with a brass cage round its orb), `bomber` (a crescent wing with two ring-duct engines) and `spotter` (a gull-winged scout plane). The file holds a `body` mesh, a `top` mesh placed where
+every other side keeps the shared model. A higher tier without a file of its own uses its base type's (`ashen/gunship.glb` draws the Ashen gunship at every tier, bigger for each), as it would the shared model. The Ashen roster so far: `acu`, `scout`, `striker` (the assault bot), `tank` (light, tier 1), `artillery` (wheeled, tier 1), `tank_t3`, `artillery_t3`, `gunship`, and `experimental`. The Terran Compact's tier 1 roster (welded grey steel, the side's colour in twin stripes and its ringed mark; shared parts in `units/compact_kit.py`): `tank` (the line tank), `artillery` (a tracked tractor towing a howitzer, the gun its top), `scout` (the recon car), `aa` (the flak halftrack), `engineer` (the construction crawler), `gunship` (the patrol gunship, a helicopter), `transport` (the conscript carrier) and `infantry` (one conscript: the game draws a squad as five). The Luminar Accord's tier 1 roster (smooth white ceramic shells banded in brass, dark works beneath, light in the side's colour; they wear `polished_marble`, glossy white metal with a few thin marble veins and no seams; `units/luminar_kit.py` has `shell`, which builds any slice of an ellipsoid, and `hoop`): `tank` (a hover skimmer with a lens of a turret), `striker` (the two-legged assault walker with twin lance rifles), `scout` (a four-legged walker with one eye), `artillery` (a hover hull with a domed chapel and twin mortars), `engineer` (a hover bowl with a brass cage round its orb), `bomber` (a crescent wing with two ring-duct engines) and `spotter` (a gull-winged scout plane). The file holds a `body` mesh, a `top` mesh placed where
 the turret turns and a `muzzle` point under it; colours and paint masks are in the vertex colours,
 so the same shader draws it. It can wear texture sets of its own, listed under `battle` in
 `surfaces.json` as `<faction>/<type>` (painted parts) and `<faction>/<type>_frame` (plain parts).

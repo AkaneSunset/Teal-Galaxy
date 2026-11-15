@@ -7,6 +7,14 @@ extends Control
 const Units := preload("res://battle/battle_units.gd")
 
 const ICONS_FROM := 500.0 # camera height (metres) past which units are drawn as icons
+const COVER_REACH := 3.0 # how near cover a squad has to be to use it (the server's COVER_REACH)
+## The colours of cover, by the server's codes and by name.
+const COVER_COLOURS := {
+	"h": Color(0.35, 0.95, 0.4), "heavy": Color(0.35, 0.95, 0.4),
+	"l": Color(1.0, 0.85, 0.25), "light": Color(1.0, 0.85, 0.25),
+	"n": Color(0.75, 0.78, 0.8), "none": Color(0.75, 0.78, 0.8),
+	"x": Color(1.0, 0.3, 0.25), "negative": Color(1.0, 0.3, 0.25),
+}
 
 var view: Node # battle_view.gd
 ## How long drawing takes a frame (ms, smoothed), for the performance checks.
@@ -59,11 +67,15 @@ func _draw_all() -> void:
 		if u.vet > 0 and not u.dropping(): # veterancy: a gold pip per star over the health bar
 			for i in u.vet:
 				draw_circle(t + Vector2(-w / 2.0 + 3.0 + i * 6.0, -13), 2.2, Color(1.0, 0.82, 0.25))
+		if u.squad > 0 and not u.dropping():
+			_squad_marks(u, t, w, font)
 		if u.name != "" and dist < 900.0:
 			var label := u.name
 			var size := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, 13)
 			draw_string(font, t + Vector2(-size.x * 0.5, -14), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.85))
 	_draw_mass_points(cam, strategic)
+	if not strategic and not view.driving() and not view.my_squads().is_empty():
+		_draw_cover_preview(cam, font)
 	if view.box_from != null:
 		var a: Vector2 = view.box_from
 		var b: Vector2 = view.mouse
@@ -203,3 +215,80 @@ func _draw_orders(cam: Camera3D) -> void:
 				draw_line(a, b, colour, 1.5)
 				draw_circle(b, 3.0, colour)
 			from = to
+
+
+
+## A squad's state over its health bar, as Company of Heroes shows it: a shield in the colour of
+## its cover (green heavy, yellow light, grey none, red negative) at the bar's left, a pip per
+## soldier under it (hollow for the ones it has lost), its suppression filling amber under that,
+## and a word when it's pinned, retreating or reinforcing.
+func _squad_marks(u: Units.Unit, t: Vector2, w: float, font: Font) -> void:
+	var at := t + Vector2(-w * 0.5 - 9.0, -4.0)
+	_shield(at, 5.0, COVER_COLOURS.get(u.cover, COVER_COLOURS.n))
+	var n := u.soldiers()
+	var step := minf(6.0, w / maxf(u.squad, 1))
+	var x0 := t.x - w * 0.5 + step * 0.5
+	for i in u.squad:
+		var p := Vector2(x0 + i * step, t.y + 2.0)
+		if i < n:
+			draw_rect(Rect2(p - Vector2(1.6, 1.6), Vector2(3.2, 3.2)), Color(0.9, 0.95, 1.0, 0.95), true)
+		else:
+			draw_rect(Rect2(p - Vector2(1.6, 1.6), Vector2(3.2, 3.2)), Color(0.9, 0.95, 1.0, 0.5), false, 1.0)
+	if u.supp > 0.02 and not u.retreating:
+		var r := Rect2(t + Vector2(-w * 0.5, 6.0), Vector2(w, 2.5))
+		draw_rect(r.grow(1), Color(0, 0, 0, 0.6), true)
+		draw_rect(Rect2(r.position, Vector2(w * clampf(u.supp, 0.0, 1.0), 2.5)), Color(1.0, 0.3, 0.25) if u.pinned else Color(1.0, 0.65, 0.2), true)
+	var word := ""
+	var colour := Color(1.0, 0.65, 0.2)
+	if u.retreating:
+		word = "Retreating"
+		colour = Color(1.0, 0.8, 0.45)
+	elif u.pinned:
+		word = "Pinned"
+		colour = Color(1.0, 0.35, 0.3)
+	elif u.reinforcing:
+		word = "Reinforcing"
+		colour = Color(0.45, 0.95, 0.88)
+	elif u.supp >= 0.2:
+		word = "Suppressed"
+	if word != "":
+		var size := font.get_string_size(word, HORIZONTAL_ALIGNMENT_CENTER, -1, 11)
+		draw_string(font, t + Vector2(-size.x * 0.5, 20.0), word, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, colour)
+
+
+## A small shield: flat across the top, pointed at the bottom.
+func _shield(c: Vector2, r: float, colour: Color) -> void:
+	var pts := PackedVector2Array([c + Vector2(-r, -r), c + Vector2(r, -r), c + Vector2(r, r * 0.2), c + Vector2(0, r * 1.2), c + Vector2(-r, r * 0.2)])
+	draw_colored_polygon(pts, Color(colour.r, colour.g, colour.b, 0.85))
+	pts.append(pts[0])
+	draw_polyline(pts, Color(0, 0, 0, 0.7), 1.0)
+
+
+## With squads selected, the cover round the cursor shows as dots round each piece in its colour
+## (where a squad has to stand to use it), and a shield at the cursor says the cover there.
+func _draw_cover_preview(cam: Camera3D, font: Font) -> void:
+	var g: Vector3 = view._ground_at(view.mouse)
+	if g.x < 0.0:
+		return
+	var m := Vector2(g.x, g.z)
+	for list in [view.cover, view.craters.values()]:
+		for c in list:
+			var at := Vector2(float(c.x), float(c.z))
+			var r := float(c.r)
+			if at.distance_to(m) - r > 45.0:
+				continue
+			var kind := str(c.kind)
+			var edge := r if kind == "negative" or c.get("crater", false) else r + COVER_REACH
+			var col: Color = COVER_COLOURS.get(kind, COVER_COLOURS.n)
+			var dots := clampi(int(edge * 1.6), 10, 48)
+			for k in dots:
+				var a := TAU * k / dots
+				var px := at.x + cos(a) * edge
+				var pz := at.y + sin(a) * edge
+				var p3 := Vector3(px, view.terrain.height(px, pz) + 0.3, pz)
+				if cam.is_position_behind(p3):
+					continue
+				draw_circle(cam.unproject_position(p3), 2.0, Color(col.r, col.g, col.b, 0.75))
+	var here: String = view.cover_at(m)
+	_shield(view.mouse + Vector2(16, 18), 6.0, COVER_COLOURS.get(here, COVER_COLOURS.n))
+	draw_string(font, view.mouse + Vector2(26, 24), {"heavy": "Heavy cover", "light": "Light cover", "negative": "Negative cover"}.get(here, "No cover"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.85))

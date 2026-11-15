@@ -316,15 +316,14 @@ static func model(type: String, look := "") -> Dictionary:
 			_box(top, Vector3(0.2, 0.2, 1.8), Vector3(0, 0.5, 0.9), DARK, PLAIN)
 			muzzle = 1.8
 		"infantry":
-			# A fire team on foot: five riflemen in a loose wedge.
-			for at in [[0.0, 1.5], [-1.2, 0.3], [1.25, 0.2], [-2.0, -1.2], [1.9, -1.3]]:
-				for sx in [-0.17, 0.17]:
-					_box(body, Vector3(0.26, 1.0, 0.3), Vector3(at[0] + sx, 0.5, at[1]), DARK, PLAIN)
-				_box(body, Vector3(0.7, 0.8, 0.42), Vector3(at[0], 1.42, at[1]), GREY, PAINT)
-				_box(body, Vector3(0.5, 0.6, 0.26), Vector3(at[0], 1.5, at[1] - 0.32), LIGHT, PAINT)
-				_box(body, Vector3(0.36, 0.36, 0.36), Vector3(at[0], 2.02, at[1]), GREY, PLAIN)
-				_box(body, Vector3(0.1, 0.14, 1.15), Vector3(at[0] + 0.25, 1.4, at[1] + 0.55), DARK, PLAIN)
-			muzzle = 2.6
+			# One rifleman: a squad is drawn as its soldiers, each one of these (battle_units.gd).
+			for sx in [-0.17, 0.17]:
+				_box(body, Vector3(0.26, 1.0, 0.3), Vector3(sx, 0.5, 0.0), DARK, PLAIN)
+			_box(body, Vector3(0.7, 0.8, 0.42), Vector3(0.0, 1.42, 0.0), GREY, PAINT)
+			_box(body, Vector3(0.5, 0.6, 0.26), Vector3(0.0, 1.5, -0.32), LIGHT, PAINT)
+			_box(body, Vector3(0.36, 0.36, 0.36), Vector3(0.0, 2.02, 0.0), GREY, PLAIN)
+			_box(body, Vector3(0.1, 0.14, 1.15), Vector3(0.25, 1.4, 0.55), DARK, PLAIN)
+			muzzle = 1.1
 		"gunship":
 			_box(body, Vector3(2.0, 1.6, 6.0), Vector3(0, 0, 0), GREY, PAINT)
 			_box(body, Vector3(1.6, 0.9, 1.6), Vector3(0, 0.3, 3.4), GLASS, PLAIN, Vector3(deg_to_rad(18), 0, 0))

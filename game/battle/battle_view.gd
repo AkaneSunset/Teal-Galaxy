@@ -37,6 +37,8 @@ const MILITIA := Color(0.86, 0.6, 0.28)
 const DRIVE_HZ := 20.0
 const END_S := 6.0 # the banner stays this long before the view closes
 const TAP_S := 0.22 # A or S released sooner than this is an order, not a pan
+const COVER_REACH := 3.0 # a squad this close to cover's edge is in it (the server's COVER_REACH)
+const CRATERS_MAX := 120 # craters kept (the server's CRATERS_MAX)
 const SILENT_S := 15.0 # no snapshot for this long (the server went away, say): the battle is lost to us
 
 ## True while a battle view is open (place.gd and explorer.gd look for it).
@@ -50,6 +52,10 @@ var battle_id := ""
 var my_side := "a"
 var catalog: Dictionary = {}
 var mass_points: Array = []
+## Cover on the field, for infantry squads: [{"id", "kind": heavy/light/negative, "x", "z", "r"}],
+## and the shell craters (light cover) as they're made: id -> {"id", "kind", "x", "z", "r", "crater"}.
+var cover: Array = []
+var craters: Dictionary = {}
 var units: Dictionary = {} # id -> Units.Unit
 var selected: Dictionary = {} # id -> true
 var pilots: Array = []
@@ -132,6 +138,9 @@ func _ready() -> void:
 	my_side = str(info.get("side", "a"))
 	catalog = info.get("units", {})
 	mass_points = info.get("massPoints", [])
+	cover = info.get("cover", [])
+	for c in info.get("craters", []):
+		_add_crater(c)
 	mass = float(info.get("mass", 0))
 	energy = float(info.get("energy", 0))
 	economy = info.get("economy", {})
@@ -147,6 +156,9 @@ func _ready() -> void:
 	terrain.generate(int(info.get("seed", 1)), str(info.get("planet", "")), lz, info.get("enemyLz", {"x": 800, "z": 1430}), mass_points)
 	_build_world()
 	_build_markers()
+	terrain.add_cover(cover)
+	for c in craters.values():
+		terrain.add_crater(c)
 	_units_view = Units.new()
 	_units_view.terrain = terrain
 	_units_view.side_colours = {"a": side_colour("a").srgb_to_linear(), "d": side_colour("d").srgb_to_linear()}
@@ -490,6 +502,7 @@ func _snapshot(msg: Dictionary) -> void:
 			u.kind = str(c.get("kind", "land"))
 			u.radius = float(c.get("radius", 3))
 			u.max_hp = float(c.get("hp", 100))
+			u.squad = int(c.get("squad", {}).get("size", 0))
 			u.mine = u.owner != "" and u.owner == Net.my_name
 			u.friend = u.side == my_side
 			u.name = str(names.get(str(id), "Command Node" if u.type == "node" else ""))
@@ -520,6 +533,13 @@ func _snapshot(msg: Dictionary) -> void:
 			u.shield = float(row[10]) if row[10] != null else -1.0
 			u.tier = int(row[11])
 			u.max_hp = float(catalog.get(u.type, {}).get("hp", 100)) * pow(1.1, u.vet)
+		if row.size() > 14: # a squad: its cover, suppression, and retreating / pinned / reinforcing
+			u.cover = str(row[12])
+			u.supp = float(row[13])
+			var flags := str(row[14])
+			u.retreating = flags.contains("r")
+			u.pinned = flags.contains("p")
+			u.reinforcing = flags.contains("f")
 		u.progress = 1.0
 		if u.mine and not u.orders.is_empty():
 			_track_orders(u)
@@ -534,6 +554,10 @@ func _snapshot(msg: Dictionary) -> void:
 			units.erase(id)
 			selected.erase(id)
 	_shots(msg.get("shots", []))
+	for c in msg.get("craters", []):
+		var made := _add_crater(c)
+		if not made.is_empty():
+			terrain.add_crater(made)
 	for line in msg.get("feed", []):
 		var s := str(line)
 		var colour := Color(0.85, 0.9, 0.95)
@@ -632,6 +656,11 @@ func _shots(list: Array) -> void:
 			muzzle = u.pos + Vector3(0, 34.0, 0)
 		elif u.type == "striker":
 			muzzle = u.pos + Vector3(0, 3.3, 0) + dir * 2.2
+		if u.squad > 0: # a squad fires from one of its soldiers at a time
+			u.shot_k += 1
+			var man: Vector3 = _units_view.soldier_at(u, u.shot_k)
+			dir = Vector3(to.x - man.x, 0, to.y - man.z).normalized()
+			muzzle = man + Vector3(0, 0.6 if u.pinned else (1.1 if u.cover == "h" or u.cover == "l" else 1.4), 0) + dir * 0.8
 		_fx.shot(muzzle, Vector3(to.x, y, to.y), str(s[3]), side_colour(u.side), sim_rate)
 
 
@@ -994,11 +1023,14 @@ func order_units(ids: Array, kind: String, p := Vector2.ZERO, queue := false, ta
 			continue
 		if not queue or kind == "stop":
 			u.orders.clear()
+		if kind == "retreat" or kind == "reinforce":
+			u.orders.clear()
+			continue
 		if kind != "stop" and (kind != "build" or builder(u.type)):
 			u.orders.append({"order": kind, "p": p if kind != "attack" else units[target].to if units.has(target) else p, "target": target})
 		u.idle_for = 0.0
 	var colour := Color(0.4, 1.0, 0.45) if kind == "move" else (Color(1.0, 0.8, 0.3) if kind == "build" else Color(1.0, 0.4, 0.3))
-	if kind != "stop":
+	if kind in ["move", "amove", "build", "attack"]:
 		_fx.flash(Vector3(p.x, terrain.height(p.x, p.y) + 0.5, p.y), 1.2, colour, 0.25)
 
 
@@ -1026,6 +1058,59 @@ func order_to(p: Vector2, target: Units.Unit = null) -> void:
 func order_stop() -> void:
 	order_units(_my_selected(), "stop")
 	armed = ""
+
+
+## Your selected infantry squads (the units that take cover, retreat and reinforce).
+func my_squads() -> Array:
+	return _my_selected().filter(func(id): return units[id].squad > 0)
+
+
+## Retreat (T): the selected squads run for home, faster and harder to hit, and can't be pinned.
+## Retreating is how a squad that's losing lives to fight again.
+func order_retreat() -> void:
+	var ids := my_squads()
+	if ids.is_empty():
+		_hud.notice("Select an infantry squad to retreat")
+		return
+	order_units(ids, "retreat")
+	_hud.feed("%d squad%s falling back" % [ids.size(), "" if ids.size() == 1 else "s"], Color(1.0, 0.8, 0.45))
+
+
+## Reinforce (R): the selected squads bring in new soldiers, one at a time, while they're near
+## your landing zone, a factory or a troop carrier of theirs.
+func order_reinforce() -> void:
+	var ids := my_squads().filter(func(id): return units[id].soldiers() < units[id].squad)
+	if ids.is_empty():
+		_hud.notice("Select a squad that has lost soldiers to reinforce")
+		return
+	order_units(ids, "reinforce")
+
+
+## The cover at a point on the ground as a squad standing there would have it, all round:
+## "heavy", "light", "negative" or "none" (the server's rules, without a direction to fire from).
+func cover_at(p: Vector2) -> String:
+	var best := ""
+	var negative := false
+	for list in [cover, craters.values()]:
+		for c in list:
+			var d := p.distance_to(Vector2(float(c.x), float(c.z)))
+			if str(c.kind) == "negative":
+				negative = negative or d < float(c.r)
+			elif d <= float(c.r) + (0.0 if c.get("crater", false) else COVER_REACH) and best != "heavy":
+				best = str(c.kind)
+	return best if best != "" else ("negative" if negative else "none")
+
+
+## A crater row from the server ([id, x, z, r]): kept as light cover. Returns it if it's new.
+func _add_crater(row: Array) -> Dictionary:
+	var id := int(row[0])
+	if craters.has(id):
+		return {}
+	var c := {"id": id, "kind": "light", "x": float(row[1]), "z": float(row[2]), "r": float(row[3]), "crater": true}
+	craters[id] = c
+	if craters.size() > CRATERS_MAX:
+		craters.erase(craters.keys().min())
+	return c
 
 
 ## What the next left click does: "amove" or "build:<structure>".
@@ -1479,6 +1564,10 @@ func _key(e: InputEventKey) -> void:
 				selected.clear()
 		KEY_H:
 			_centre_on([], true)
+		KEY_T:
+			order_retreat()
+		KEY_R:
+			order_reinforce()
 
 
 func _centre_on(ids: Array, home := false) -> void:

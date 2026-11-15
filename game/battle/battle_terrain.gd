@@ -10,6 +10,7 @@ extends Node3D
 const SIZE := 1600.0
 const SKIRT := 420.0 # metres of high ground drawn past each edge
 const CELL := 12.5 # metres per grid cell
+const CRATERS_MAX := 120 # shell craters drawn at once (the oldest go first)
 const N := int((SIZE + 2.0 * SKIRT) / CELL) # cells along a side
 
 ## A colour scheme per kind of world: low ground, high ground, rock, the peaks, and the glow of
@@ -76,6 +77,8 @@ var _ridge_mask := FastNoiseLite.new()
 var _detail := FastNoiseLite.new()
 var _tint := FastNoiseLite.new()
 var _mesh: MeshInstance3D
+var _craters: MultiMeshInstance3D
+var _crater_next := 0
 
 
 ## Builds the field for a battle: `seed` from battle_joined, `planet` its planet id (which kind of
@@ -375,3 +378,121 @@ func _tree_mesh() -> ArrayMesh:
 				st.add_vertex(v)
 	st.generate_normals()
 	return st.commit()
+
+
+# --- Cover for infantry ------------------------------------------------------------------------
+# What the server's cover list puts on the field, drawn so a squad's cover reads at a glance:
+# heavy cover is a low stone wall with boulders at its ends, light cover is a patch of scrub, and
+# negative cover (open, churned ground) a dark stain on the ground. Shell craters are dark rings.
+
+## Draws the battle's cover ([{"kind", "x", "z", "r"}], from battle_joined).
+func add_cover(list: Array) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4271
+	var walls: Array[Transform3D] = []
+	var boulders: Array[Transform3D] = []
+	var scrub: Array[Transform3D] = []
+	var stains := SurfaceTool.new()
+	stains.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var any_stain := false
+	for c in list:
+		var x := float(c.x)
+		var z := float(c.z)
+		var r := float(c.r)
+		match str(c.kind):
+			"heavy":
+				var a := rng.randf() * TAU
+				var dir := Vector2(sin(a), cos(a))
+				var length := r * 1.7
+				var y := minf(height(x - dir.x * length * 0.5, z - dir.y * length * 0.5), height(x + dir.x * length * 0.5, z + dir.y * length * 0.5))
+				y = minf(y, height(x, z))
+				walls.append(Transform3D(Basis(Vector3.UP, a).scaled(Vector3(0.9, 1.9, length)), Vector3(x, y + 0.55, z)))
+				for k in [-1.0, 1.0]:
+					var bx: float = x + dir.x * length * 0.5 * k
+					var bz: float = z + dir.y * length * 0.5 * k
+					var s := rng.randf_range(1.0, 1.5)
+					boulders.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * 0.9, s)), Vector3(bx, height(bx, bz), bz)))
+			"light":
+				for i in int(r * 1.4) + 2:
+					var d := sqrt(rng.randf()) * r
+					var t := rng.randf() * TAU
+					var bx := x + cos(t) * d
+					var bz := z + sin(t) * d
+					var s := rng.randf_range(0.6, 1.2)
+					scrub.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s * 1.2, s * 0.8, s * 1.2)), Vector3(bx, height(bx, bz) - 0.1, bz)))
+			"negative":
+				_stain(stains, x, z, r, Color(0.1, 0.08, 0.06, 0.55))
+				any_stain = true
+	var wall := BoxMesh.new()
+	if not walls.is_empty():
+		_multi(wall, walls, Color(0.52, 0.5, 0.46))
+	if not boulders.is_empty():
+		_multi(_rock_mesh(), boulders, Color(0.45, 0.43, 0.4))
+	if not scrub.is_empty():
+		_multi(_rock_mesh(), scrub, Color(0.3, 0.36, 0.18) if palette_name != "ash" else Color(0.33, 0.29, 0.22))
+	if any_stain:
+		var mi := MeshInstance3D.new()
+		mi.mesh = stains.commit()
+		mi.material_override = _stain_material()
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+
+
+## A shell crater (light cover): a dark ring on the ground. The oldest goes when there are too many.
+func add_crater(c: Dictionary) -> void:
+	if _craters == null:
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		_stain(st, 0.0, 0.0, 1.0, Color(0.08, 0.06, 0.05, 0.8), false)
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = st.commit()
+		mm.instance_count = CRATERS_MAX
+		mm.visible_instance_count = 0
+		_craters = MultiMeshInstance3D.new()
+		_craters.multimesh = mm
+		_craters.material_override = _stain_material()
+		_craters.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_craters.extra_cull_margin = 4000.0
+		add_child(_craters)
+	var x := float(c.x)
+	var z := float(c.z)
+	var r := float(c.r)
+	var mm := _craters.multimesh
+	mm.set_instance_transform(_crater_next % CRATERS_MAX, Transform3D(Basis().scaled(Vector3(r, 1, r)), Vector3(x, height(x, z) + 0.15, z)))
+	_crater_next += 1
+	mm.visible_instance_count = mini(_crater_next, CRATERS_MAX)
+
+
+## A round stain on the ground at (x, z), `r` across, following the ground (`follow`) or flat: dark
+## in the middle, fading out at its edge.
+func _stain(st: SurfaceTool, x: float, z: float, r: float, colour: Color, follow := true) -> void:
+	var rings := 5
+	var segs := 28
+	var at := func(k: int, s: int) -> Vector3:
+		var d := r * float(k) / rings
+		var a := TAU * float(s) / segs
+		var px := x + cos(a) * d
+		var pz := z + sin(a) * d
+		return Vector3(px, height(px, pz) + 0.18 if follow else 0.0, pz)
+	var tint := func(k: int) -> Color:
+		var c := colour
+		c.a = colour.a * (1.0 - pow(float(k) / rings, 2.0))
+		return c
+	for k in rings:
+		for s in segs:
+			var quad := [[k, s], [k + 1, s], [k + 1, s + 1], [k, s], [k + 1, s + 1], [k, s + 1]]
+			for v in quad:
+				st.set_color(tint.call(v[0]))
+				st.set_normal(Vector3.UP)
+				st.add_vertex(at.call(v[0], v[1]))
+
+
+func _stain_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.render_priority = -1
+	return m

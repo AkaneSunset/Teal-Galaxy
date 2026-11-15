@@ -12,6 +12,8 @@ const Models := preload("res://battle/battle_models.gd")
 const POD_FALL := 2.6 # real seconds a drop pod is seen falling before it lands
 const POD_HEIGHT := 420.0 # metres up a pod is first seen
 const WRECK_S := 30.0 # how long wrecks lie on the field (they sink at the end)
+const SQUAD_RING := 7.0 # selection ring radius round a squad (metres)
+const MAN_GAP := 1.9 # metres between soldiers in a wedge or a line
 
 ## One unit or structure as the client knows it.
 class Unit:
@@ -51,6 +53,21 @@ class Unit:
 	var vet := 0 # veterancy stars
 	var shield := -1.0 # a shield generator's dome strength (-1: not one)
 	var tier := 1 # a factory's, extractor's or generator's tier
+	# An infantry squad (Company of Heroes style): drawn as its soldiers, each finding its own place.
+	var squad := 0 # soldiers at full strength (0: not a squad)
+	var cover := "" # what it stands in: h, l, n, x (heavy, light, none, negative)
+	var supp := 0.0 # suppression, 0 to 1
+	var retreating := false
+	var pinned := false
+	var reinforcing := false
+	var men: Array = [] # each soldier drawn: {"p": Vector2, "yaw": float, "seed": float}
+	var shot_k := 0 # which soldier fires next
+
+	## Soldiers left: one for each share of its hit points it still has (as the server counts them).
+	func soldiers() -> int:
+		if squad <= 0:
+			return 1
+		return clampi(ceili(hp / (max_hp / squad) - 1e-6), 0, squad)
 
 	func ground() -> Vector2:
 		return Vector2(pos.x, pos.z)
@@ -213,6 +230,11 @@ func update(units: Dictionary, alpha: float, now: float, delta: float, selected:
 		var custom: Color = side_colours.get(u.side, Color.WHITE)
 		if now - u.hit_at < 0.08: # a flash of white when hit
 			custom = custom.lerp(Color(2, 2, 2), 0.5)
+		if u.squad > 0:
+			_squad(u, g, now, delta, scale, custom)
+			if selected.has(u.id):
+				_put(_rings, Transform3D(Basis().scaled(Vector3(SQUAD_RING, 1, SQUAD_RING)), Vector3(g.x, h + 0.4, g.y)), Color(0.35, 1.0, 0.45, 0.9) if u.friend else Color(1.0, 0.35, 0.3, 0.9))
+			continue
 		_put(_body(u.type, u.side), xf, custom)
 		var m: Dictionary = _model(u.type, u.side)
 		if m.top:
@@ -257,9 +279,95 @@ func _ground_tilt(g: Vector2) -> Basis:
 	return Basis(axis.normalized(), Vector3.UP.angle_to(n))
 
 
+## Draws a squad as its soldiers, each walking to its own place: a wedge behind the leader on the
+## move, a line across its front when it stops (tighter, crouched, in cover), flat on the ground when
+## pinned. Each soldier keeps to its own pace, so they lag and drift a little and never move as one
+## block. Soldiers the squad has lost fall where they stood; new ones join where it is.
+func _squad(u: Unit, g: Vector2, now: float, delta: float, scale: float, custom: Color) -> void:
+	var n := u.soldiers()
+	while u.men.size() > n:
+		_fall(u, u.men.pop_back())
+	while u.men.size() < n:
+		var jitter := Vector2(randf_range(-1.5, 1.5), randf_range(-1.5, 1.5))
+		u.men.append({"p": g + jitter, "yaw": u.yaw, "seed": randf() * TAU})
+	var moving := u.from.distance_squared_to(u.to) > 0.04 and not u.pinned
+	var in_cover := u.cover == "h" or u.cover == "l"
+	var fwd := Vector2(sin(u.yaw), cos(u.yaw))
+	var right := Vector2(fwd.y, -fwd.x)
+	var aiming := now < u.aim_until
+	for i in n:
+		var m: Dictionary = u.men[i]
+		var seed: float = m.seed
+		var slot := Vector2.ZERO
+		if moving: # a wedge: the leader in front, the rest fanned out behind
+			var row := (i + 1) / 2
+			var side := 1.0 if i % 2 == 1 else -1.0
+			slot = -fwd * row * MAN_GAP * 1.2 + right * side * row * MAN_GAP
+		else: # a line across its front, staggered in the open, shoulder to shoulder in cover
+			var gap := MAN_GAP * (0.85 if in_cover else 1.3)
+			slot = right * (i - (n - 1) * 0.5) * gap
+			if not in_cover:
+				slot += fwd * (0.6 if i % 2 == 0 else -0.6)
+		if not u.pinned:
+			slot += Vector2(sin(_clock * 0.6 + seed), cos(_clock * 0.8 + seed * 1.7)) * 0.3
+		var want := g + slot
+		var p: Vector2 = m.p
+		if p.distance_squared_to(want) > 900.0: # out of a carrier or far behind: just be there
+			p = want
+		var pace := 2.6 + fmod(seed, 1.0) * 1.6 # each soldier keeps up at his own rate
+		if u.retreating:
+			pace *= 1.6
+		var was := p
+		p = p.lerp(want, 1.0 - exp(-pace * delta))
+		var yaw: float = m.yaw
+		var face := u.yaw
+		if aiming and not u.retreating:
+			face = atan2(u.aim.x - p.x, u.aim.y - p.y)
+		elif p.distance_squared_to(was) > 0.0004 * maxf(delta * 60.0, 1.0):
+			face = atan2(p.x - was.x, p.y - was.y)
+		yaw = lerp_angle(yaw, face, 1.0 - exp(-8.0 * delta))
+		m.p = p
+		m.yaw = yaw
+		var basis := Basis(Vector3.UP, yaw)
+		var lift := 0.0
+		if u.pinned: # flat on his front
+			basis = basis * Basis(Vector3.RIGHT, PI * 0.47)
+			lift = 0.25
+		elif in_cover and not moving: # crouched behind it
+			basis = basis * Basis(Vector3.RIGHT, 0.2)
+			basis = basis.scaled(Vector3(1, 0.8, 1))
+		var h: float = terrain.height(p.x, p.y) + lift
+		_put(_body(u.type, u.side), Transform3D(basis.scaled(Vector3.ONE * scale), Vector3(p.x, h, p.y)), custom)
+
+
+## Where one of a squad's soldiers is now (its centre if it has none drawn), for its shots.
+func soldier_at(u: Unit, k: int) -> Vector3:
+	if u.men.is_empty():
+		return u.pos
+	var m: Dictionary = u.men[posmod(k, u.men.size())]
+	var p: Vector2 = m.p
+	return Vector3(p.x, terrain.height(p.x, p.y), p.y)
+
+
+## A soldier falls: he lies where he stood, on his back, with the wrecks.
+func _fall(u: Unit, m: Dictionary) -> void:
+	var p: Vector2 = m.p
+	var basis := Basis(Vector3.UP, float(m.yaw)) * Basis(Vector3.RIGHT, -PI * 0.48)
+	basis = basis.scaled(Vector3.ONE * Models.tier_scale(u.type, look(u.side)))
+	var at := Vector3(p.x, terrain.height(p.x, p.y) + 0.2, p.y)
+	_wrecks.append({"type": u.type, "side": u.side, "xform": Transform3D(basis, at), "top": Transform3D(), "t": _clock})
+	if _wrecks.size() > 240:
+		_wrecks.pop_front()
+
+
 ## A unit died: its wreck lies where it fell, dark, for a while.
 func add_wreck(u: Unit) -> void:
 	if u.dropping():
+		return
+	if u.squad > 0: # what was left of the squad
+		for m in u.men:
+			_fall(u, m)
+		u.men.clear()
 		return
 	var basis := Basis(Vector3.UP, u.yaw)
 	var at := u.pos
@@ -277,7 +385,7 @@ func add_wreck(u: Unit) -> void:
 	if m.top:
 		top = Transform3D(basis * Basis(Vector3.UP, u.top_yaw - u.yaw + 0.6), xf * (m.top_at as Vector3))
 	_wrecks.append({"type": u.type, "side": u.side, "xform": xf, "top": top, "t": _clock})
-	if _wrecks.size() > 160:
+	if _wrecks.size() > 240:
 		_wrecks.pop_front()
 
 

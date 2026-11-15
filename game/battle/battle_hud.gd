@@ -53,6 +53,8 @@ var _help: Label
 var _minimap: Control
 var _panels: Array[Control] = [] # hidden while driving
 var _take: Button
+var _retreat: Button
+var _reinforce: Button
 var _resign: Button
 var _was_out := false
 
@@ -167,6 +169,10 @@ func _ready() -> void:
 	_button(_orders, "Attack-move (A)", func(): view.arm("amove"))
 	_button(_orders, "Stop (S)", func(): view.order_stop())
 	_take = _button(_orders, "Take control (P)", func(): view.take_control())
+	_retreat = _button(_orders, "Retreat (T)", func(): view.order_retreat())
+	_retreat.tooltip_text = "The selected squads run for home: faster, harder to hit, and they can't be pinned. Better than losing them"
+	_reinforce = _button(_orders, "Reinforce (R)", func(): view.order_reinforce())
+	_reinforce.tooltip_text = "The selected squads bring in new soldiers, one at a time for a share of their cost, while within 35 m of your landing zone, a factory or one of your troop carriers"
 	_build = HFlowContainer.new()
 	_build.add_theme_constant_override("h_separation", 6)
 	_build.add_theme_constant_override("v_separation", 6)
@@ -260,7 +266,7 @@ func _ready() -> void:
 	_help.add_theme_constant_override("outline_size", 4)
 	_help.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_help.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_help.text = "Drag or click to select · right click: move / attack · A: attack-move · S: stop · Shift: queue · Ctrl+1-9: group · Space: your units · wheel: zoom · Q/E or middle drag: turn"
+	_help.text = "Drag or click to select · right click: move / attack · A: attack-move · S: stop · T: retreat squads · R: reinforce · Shift: queue · Ctrl+1-9: group · Space: your units · wheel: zoom · Q/E or middle drag: turn"
 	add_child(_help)
 	_panels.append(_help)
 
@@ -389,6 +395,8 @@ func _unit_tip(t: String) -> String:
 		s += " (hits air only)"
 	if c.has("carries"):
 		s += ". Carries %d %s teams: they get off where its orders end, when it meets the enemy, or when you tell it to stop. Send a team onto it to get back on" % [int(c.carries.count), str(view.catalog.get(str(c.carries.unit), {}).get("name", c.carries.unit)).to_lower()]
+	if c.has("squad"):
+		s += ". A squad of %d: it takes cover where you send it (green shield heavy, yellow light, red negative), gets pinned under heavy fire, retreats (T) and reinforces (R)" % int(c.squad.size)
 	if t == "engineer" or t == "acu":
 		s += ". Builds extractors, generators, turrets and factories"
 	if t == "acu":
@@ -437,6 +445,10 @@ func _update_command() -> void:
 			_selection.text += "    ·    " + view.armed_text()
 	_orders.visible = mine > 0
 	_take.disabled = view.selected.size() != 1
+	var squads: Array = view.my_squads()
+	_retreat.visible = not squads.is_empty()
+	_reinforce.visible = not squads.is_empty()
+	_reinforce.disabled = squads.all(func(id): return view.units[id].soldiers() >= view.units[id].squad)
 	var want_build := engineers
 	if _build.visible != want_build or (want_build and (_build.get_child_count() == 0 or _build.get_meta("key", "") != builds_key)):
 		_build.visible = want_build
