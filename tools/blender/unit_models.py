@@ -34,7 +34,19 @@ MODELS = os.path.join(kit.ROOT, "game", "battle", "models")
 
 UNITS = ["ashen/artillery_t3", "ashen/tank_t3", "ashen/acu", "ashen/experimental", "ashen/gunship", "ashen/tank", "ashen/artillery", "ashen/striker", "ashen/scout",
          "compact/tank", "compact/artillery", "compact/scout", "compact/aa", "compact/engineer", "compact/gunship", "compact/transport", "compact/infantry",
-         "luminar/tank", "luminar/striker", "luminar/scout", "luminar/artillery", "luminar/engineer", "luminar/bomber", "luminar/spotter"]  # each is tools/blender/units/<faction>_<type>.py
+         "luminar/tank", "luminar/striker", "luminar/scout", "luminar/artillery", "luminar/engineer", "luminar/bomber", "luminar/spotter",
+         "luminar/acu", "luminar/aa", "luminar/aa_t2", "luminar/aa_t3", "luminar/transport", "luminar/infantry",
+         "luminar/fighter", "luminar/fighter_t2", "luminar/fighter_t3", "luminar/gunship", "luminar/gunship_t2", "luminar/gunship_t3",
+         "luminar/tank_t2", "luminar/tank_t3", "luminar/artillery_t2", "luminar/artillery_t3", "luminar/striker_t2", "luminar/striker_t3",
+         "luminar/bomber_t2", "luminar/bomber_t3", "luminar/airtransport",
+         "coma/gunship", "coma/gunship_t2", "coma/gunship_t3", "coma/fighter", "coma/fighter_t2", "coma/fighter_t3",
+         "coma/bomber", "coma/bomber_t2", "coma/bomber_t3", "coma/spotter", "coma/airtransport",
+         "coma/tank_t2", "coma/tank_t3", "coma/striker_t2", "coma/striker_t3",
+         "coma/artillery_t2", "coma/artillery_t3", "coma/aa_t2", "coma/aa_t3", "coma/infantry",
+         "ashen/fighter", "ashen/fighter_t2", "ashen/fighter_t3", "ashen/gunship_t2", "ashen/gunship_t3",
+         "ashen/bomber", "ashen/bomber_t2", "ashen/bomber_t3", "ashen/spotter", "ashen/airtransport",
+         "ashen/aa", "ashen/aa_t2", "ashen/aa_t3", "ashen/transport",
+         "ashen/tank_t2", "ashen/artillery_t2", "ashen/striker_t2", "ashen/striker_t3", "ashen/infantry"]  # each is tools/blender/units/<faction>_<type>.py
 
 
 # --- Shapes: lists of faces (corners, normal, colour, mask) in the game's space ---------------------

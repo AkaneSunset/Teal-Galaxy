@@ -130,6 +130,8 @@ func _icon(u: Units.Unit, s: Vector2, sel: bool) -> void:
 			draw_colored_polygon(pts, fill)
 			pts.append(pts[0])
 			draw_polyline(pts, line, 1.5 if not sel else 2.5)
+			if u.type == "airtransport": # the troops it carries: a dot under its chevron
+				draw_circle(s + Vector2(0, 9), 2.0, mark)
 			return
 		"structure":
 			r = 9.0

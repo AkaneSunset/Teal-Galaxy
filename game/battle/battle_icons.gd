@@ -118,6 +118,11 @@ static func draw(c: CanvasItem, type: String, rect: Rect2, tint := Color.WHITE) 
 			# A small plane inside a ring: it looks, it doesn't shoot.
 			_plane(c, P.call(20, 20), 0.6 * s, line)
 			c.draw_arc(P.call(20, 20), 15 * s, 0, TAU, 24, line, w * 0.8)
+		"airtransport":
+			# A plane with a soldier hanging under it.
+			_plane(c, P.call(20, 13), 0.8 * s, line)
+			c.draw_circle(P.call(20, 25), 3 * s, line)
+			c.draw_rect(Rect2(P.call(17, 29), Vector2(6, 8) * s), line)
 		"transport":
 			# A truck: a cab, a box body, three wheels.
 			c.draw_rect(Rect2(P.call(4, 11), Vector2(22, 16) * s), line)

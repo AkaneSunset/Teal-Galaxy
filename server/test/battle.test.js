@@ -1164,3 +1164,22 @@ test('shells leave craters that squads can use; the defender AI pulls broken squ
   assert.ok(ai.retreating);
   assert.strictEqual(sq.side, 'a');
 });
+
+test('the air transport flies two squads in and lowers them where its orders end', () => {
+  const b = battle();
+  const infantry = () => units(b, (u) => u.type === 'infantry');
+  assert.ok(C.airfactory.produces.includes('airtransport') && B.DROPPABLE.includes('airtransport'));
+  assert.strictEqual(C.airtransport.kind, 'air');
+  const t = B.spawn(b, 'airtransport', 'a', 'A', 600, 300);
+  run(b, 2);
+  assert.strictEqual(infantry().length, 0);
+  assert.ok(B.order(b, 'A', { units: [t.id], order: 'move', x: 600, z: 420 }).ok);
+  run(b, 8);
+  assert.strictEqual(infantry().length, 2);
+  assert.ok(infantry().every((u) => Math.hypot(u.x - t.x, u.z - t.z) < 6), 'right under it');
+  // A squad sent onto it gets back on.
+  const [i1] = infantry();
+  B.order(b, 'A', { units: [i1.id], order: 'move', x: t.x, z: t.z });
+  run(b, 3);
+  assert.strictEqual(t.cargo.length, 1);
+});

@@ -291,6 +291,17 @@ static func model(type: String, look := "") -> Dictionary:
 				var face := Basis(Vector3.RIGHT, deg_to_rad(-40)) * Vector3(0, 0, 1.22)
 				_box(top, Vector3(0.7, 0.8, 0.1), Vector3(sx, 1.4, 0.3) + face, AMBER, GLOW, Vector3(deg_to_rad(-40), 0, 0))
 			muzzle = 1.5
+		"airtransport":
+			# An air transport: a fat body with a bay underneath, a wing, two lift fans.
+			_box(body, Vector3(3.0, 2.6, 8.0), Vector3(0, 0, 0), GREY, PAINT)
+			_box(body, Vector3(2.2, 0.8, 1.6), Vector3(0, 0.7, 3.6), GLASS, PLAIN)
+			_box(body, Vector3(11.0, 0.3, 2.4), Vector3(0, 0.9, -0.4), LIGHT, PAINT)
+			_box(body, Vector3(2.2, 0.3, 3.2), Vector3(0, -1.4, -0.2), DARK, PLAIN)
+			_box(body, Vector3(1.6, 0.15, 2.4), Vector3(0, -1.6, -0.2), Color.WHITE, SIDE_GLOW)
+			for sx in [-4.2, 4.2]:
+				_cyl(body, 1.1, 0.6, Vector3(sx, 0.9, -0.4), DARK, PLAIN, 10)
+				_cyl(body, 0.9, 0.2, Vector3(sx, 0.5, -0.4), Color.WHITE, SIDE_GLOW, 10)
+			_box(body, Vector3(0.2, 1.6, 1.4), Vector3(0, 1.8, -3.4), GREY, PAINT)
 		"spotter":
 			# A scout plane: a slim body, long thin wings, a sensor underneath.
 			_box(body, Vector3(1.2, 0.9, 6.0), Vector3(0, 0, 0), GREY, PAINT)
