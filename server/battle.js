@@ -95,9 +95,33 @@ const AI_WAVE = 600; // its army outside the defence group attacks once worth th
 const AI_WAVE_SHARE = 0.4; // this much of what it may field, if that's less (a small army sends small waves)
 const AI_FIRST_WAVE_S = 300; // the attackers get this long to land and dig in before the first wave
 const AI_HOME = 400; // a wave with nothing left to fight further than this from the Command Node goes back
-const AI_MIX = ['striker', 'tank', 'striker', 'aa', 'tank', 'artillery', 'striker', 'tank'];
+const AI_MIX = ['striker', 'tank', 'striker', 'aa', 'tank', 'artillery', 'striker', 'tank', 'transport'];
 const MILITIA_K = 0.6; // an unclaimed sector's militia earns this much of a faction's AI
 const CELL = 40; // metres per cell of the grid used to find what's near
+// Infantry squads, after Company of Heroes. Cover: what share of the damage a squad takes there,
+// and of the suppression. Heavy and light cover protect only from the side it stands on (or all
+// round, standing in it); craters protect all round; positive cover does nothing against a
+// shooter inside COVER_CLOSE.
+const COVER_TAKEN = { heavy: 0.5, light: 0.75, none: 1, negative: 1.25 };
+const COVER_SUPPRESS = { heavy: 0.25, light: 0.5, none: 1, negative: 1.5 };
+const COVER_CLOSE = 10;
+const COVER_REACH = 3; // a squad this close to a cover object's edge uses it
+const COVER_SEEK = 18; // a squad sent somewhere takes the best cover within this of it
+const CRATERS_MAX = 120; // shell craters on the map at once (the oldest fill in)
+const CRATER_R = 4;
+const SUPPRESSED = 0.2; // suppression from 0 to 1: at this a squad crawls and shoots badly...
+const PINNED = 0.6; // ...at this it is pinned: no moving, no shooting, only a retreat...
+const UNPINNED = 0.3; // ...until it falls back under this
+const SUPPRESS_FADE = 0.1; // suppression lost a second (twice that in heavy cover, 1.5x in light)
+const SUPPRESS_SPREAD = 0.35; // share of it that reaches the squad's neighbours...
+const SPREAD_R = 15; // ...this close
+const PINNED_SAFE_S = 6; // a pinned squad takes 0.75x damage this long, then 1.5x
+const SUPPRESSED_SPEED = 0.5;
+const SUPPRESSED_FIRE = 0.5;
+const RETREAT_SPEED = 1.75; // a retreating squad runs this much faster...
+const RETREAT_TAKEN = 0.4; // ...and takes this share of the damage
+const REINFORCE_R = 35; // squads reinforce this close to a troop carrier, factory or their landing zone...
+const REINFORCE_S = 4; // ...a soldier every this many seconds, for its share of the squad's price
 // Command: every attacking commander lands an Armoured Command Unit (ACU) and is out of the battle
 // when it falls; the defender gets a Command Node (and a drop zone by it) for every attacking
 // commander, and a defending pilot who joins commands one of them. The attackers win when every
@@ -116,33 +140,35 @@ const CATALOG = {
   engineer: { name: 'Engineer', kind: 'land', hp: 150, speed: 9, damage: 0, reload: 0, range: 12, cost: 50, energy: 250, radius: 3, vision: 80, hits: [], builds: ['extractor', 'generator', 'turret', 'aaturret', 'factory', 'airfactory', 'shield', 'massstorage', 'energystorage'] },
   // One per attacking commander, landed when they join, never built: tougher than a handful of tier
   // 1 units, builds what an engineer does, and goes up in a blast that wrecks what's round it.
-  acu: { name: 'Armoured Command Unit', kind: 'land', hp: 4000, speed: 7, damage: 60, reload: 1, range: 45, cost: 0, energy: 0, radius: 5, vision: 140, hits: ['land', 'structure', 'air'], builds: ['extractor', 'generator', 'turret', 'aaturret', 'factory', 'airfactory', 'massstorage', 'energystorage'], acu: true, blast: { radius: 45, damage: 3000 } },
-  scout: { name: 'Scout', kind: 'land', hp: 90, speed: 22, damage: 5, reload: 1, range: 30, cost: 25, energy: 100, radius: 3, vision: 160, hits: LAND },
-  striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, energy: 275, radius: 3, vision: 80, hits: LAND },
-  tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, energy: 650, radius: 4, vision: 80, hits: LAND },
+  acu: { name: 'Armoured Command Unit', kind: 'land', hp: 4000, speed: 7, damage: 60, reload: 1, range: 45, cost: 0, energy: 0, radius: 5, vision: 140, hits: ['land', 'structure', 'air'], suppress: 0.05, builds: ['extractor', 'generator', 'turret', 'aaturret', 'factory', 'airfactory', 'massstorage', 'energystorage'], acu: true, blast: { radius: 45, damage: 3000 } },
+  scout: { name: 'Scout', kind: 'land', hp: 90, speed: 22, damage: 5, reload: 1, range: 30, cost: 25, energy: 100, radius: 3, vision: 160, hits: LAND, suppress: 0.04 },
+  striker: { name: 'Striker', kind: 'land', hp: 280, speed: 12, damage: 18, reload: 1, range: 40, cost: 55, energy: 275, radius: 3, vision: 80, hits: LAND, suppress: 0.03 },
+  tank: { name: 'Tank', kind: 'land', hp: 750, speed: 9, damage: 50, reload: 1.5, range: 55, cost: 130, energy: 650, radius: 4, vision: 80, hits: LAND, suppress: 0.06 },
   artillery: { name: 'Artillery', kind: 'land', hp: 220, speed: 7, damage: 120, reload: 4, range: 160, cost: 170, energy: 850, radius: 3, vision: 80, hits: LAND, minRange: 30, splash: 14, shell: 160 },
   // The troop carrier drives its fire teams to the line and puts them down where its orders end, or
   // the moment it meets the enemy; after that it is a light gun truck. Infantry come no other way:
   // slow and cheap to kill one at a time, but each team shoots as hard as a striker for its price.
-  transport: { name: 'Troop Carrier', kind: 'land', hp: 380, speed: 15, damage: 8, reload: 0.5, range: 32, cost: 120, energy: 500, radius: 4, vision: 90, hits: LAND, carries: { unit: 'infantry', count: 2 } },
-  infantry: { name: 'Infantry', kind: 'land', hp: 130, speed: 6, damage: 9, reload: 0.5, range: 32, cost: 40, energy: 150, radius: 2.5, vision: 70, hits: LAND, carried: true },
+  transport: { name: 'Troop Carrier', kind: 'land', hp: 380, speed: 15, damage: 8, reload: 0.5, range: 32, cost: 120, energy: 500, radius: 4, vision: 90, hits: LAND, carries: { unit: 'infantry', count: 2 }, suppress: 0.06 },
+  // A squad of five: it fights as one unit, loses soldiers one at a time (and hits that much less
+  // hard), and is reinforced back up (see the infantry section below).
+  infantry: { name: 'Infantry Squad', kind: 'land', hp: 150, speed: 6, damage: 9, reload: 0.5, range: 32, cost: 40, energy: 150, radius: 2.5, vision: 70, hits: LAND, carried: true, squad: { size: 5 }, suppress: 0.025 },
   aa: { name: 'AA', kind: 'land', hp: 320, speed: 10, damage: 30, reload: 0.5, range: 80, cost: 90, energy: 450, radius: 3, vision: 100, hits: ['air'] },
   // The scout plane is unarmed: fast, cheap, and it sees further than anything else.
   spotter: { name: 'Scout Plane', kind: 'air', hp: 120, speed: 38, damage: 0, reload: 0, range: 0, cost: 45, energy: 300, radius: 3, vision: 220, hits: [] },
   fighter: { name: 'Fighter', kind: 'air', hp: 260, speed: 30, damage: 22, reload: 0.6, range: 40, cost: 70, energy: 500, radius: 3, vision: 120, hits: ['air'] },
   bomber: { name: 'Bomber', kind: 'air', hp: 520, speed: 18, damage: 260, reload: 5, range: 14, cost: 160, energy: 1100, radius: 3.5, vision: 100, hits: ['land', 'structure'], splash: 12, shell: 60 },
-  gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, energy: 1400, radius: 3, vision: 100, hits: ['land', 'structure', 'air'] },
+  gunship: { name: 'Gunship', kind: 'air', hp: 420, speed: 24, damage: 26, reload: 1, range: 45, cost: 230, energy: 1400, radius: 3, vision: 100, hits: ['land', 'structure', 'air'], suppress: 0.06 },
   extractor: { name: 'Mass Extractor', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 200, radius: 8, hits: [], income: EXTRACTOR_INCOME, tiers: 3, upgrade: EXTRACTOR_UPGRADE, mass: EXTRACTOR_MASS, drain: GENERATOR_POWER_T.map((p) => p * EXTRACTOR_DRAIN) },
   generator: { name: 'Power Generator', kind: 'structure', hp: 500, damage: 0, cost: 20, energy: 0, radius: 7, hits: [], power: GENERATOR_POWER, tiers: 3, upgrade: GENERATOR_UPGRADE, powers: GENERATOR_POWER_T },
   aaturret: { name: 'AA Turret', kind: 'structure', hp: 900, damage: 26, reload: 0.5, range: 90, cost: 110, energy: 500, radius: 6, hits: ['air'] },
   shield: { name: 'Shield Generator', kind: 'structure', hp: 800, damage: 0, cost: 180, energy: 1200, radius: 6, hits: [], shield: { radius: 32, hp: 4000, regen: 40, drain: 50 } },
   massstorage: { name: 'Mass Storage', kind: 'structure', hp: 600, damage: 0, cost: 80, energy: 200, radius: 6, hits: [], storage: STORAGE.massstorage },
   energystorage: { name: 'Energy Storage', kind: 'structure', hp: 600, damage: 0, cost: 60, energy: 0, radius: 6, hits: [], storage: STORAGE.energystorage },
-  turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'] },
+  turret: { name: 'Turret', kind: 'structure', hp: 1300, damage: 32, reload: 1, range: 65, cost: 160, energy: 800, radius: 8, hits: ['land', 'air'], suppress: 0.06 },
   factory: { name: 'Land Factory', kind: 'structure', hp: 2600, damage: 0, cost: 320, energy: 1200, radius: 12, hits: [], produces: ['engineer', 'scout', 'striker', 'tank', 'artillery', 'aa', 'transport'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   airfactory: { name: 'Air Factory', kind: 'structure', hp: 2200, damage: 0, cost: 280, energy: 1500, radius: 12, hits: [], produces: ['spotter', 'fighter', 'bomber', 'gunship'], tiers: FACTORY_TIERS, upgrade: FACTORY_UPGRADE },
   outpost: { name: 'Outpost', kind: 'structure', hp: 2000, damage: 0, cost: 0, energy: 0, radius: 12, hits: [] },
-  node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'] },
+  node: { name: 'Command Node', kind: 'structure', hp: 5000, damage: 20, reload: 1, range: 50, cost: 0, energy: 0, radius: 14, hits: ['land', 'air'], suppress: 0.06 },
 };
 // The higher tiers of the combat units ("tank_t2" is a Tank Mk II), made by upgraded factories.
 for (const base of TIERED)
@@ -243,7 +269,36 @@ function layout(seed, outposts = []) {
   for (let i = 0; i < 3; i++) place(node, 70, 120);
   for (let i = 0; i < 2; i++) place(lz, LZ_R + 30, LZ_R + 90);
   while (points.length < count) place(null);
-  return { lz, enemyLz: { x: node.x, z: node.z, r: LZ_R }, node, base, massPoints: points };
+  const enemyLz = { x: node.x, z: node.z, r: LZ_R };
+  return { lz, enemyLz, node, base, massPoints: points, cover: coverLayout(seed, lz, enemyLz, base, points) };
+}
+
+// Cover for infantry, from its own draw of the seed (so the rest of the map is as it was): clusters
+// of heavy cover (rock outcrops, broken walls) and light (scrub, low rubble), and a few open
+// flats where a squad is exposed (negative cover). Kept off the landing zones, the base and the
+// mass points.
+function coverLayout(seed, lz, enemyLz, base, points) {
+  const rng = { s: (seed ^ 0x5bd1e995) >>> 0 };
+  const r = () => random(rng);
+  const out = [];
+  const clear = (x, z, rad) =>
+    x > 40 && x < SIZE - 40 && z > 40 && z < SIZE - 40 &&
+    Math.hypot(lz.x - x, lz.z - z) > lz.r * 0.6 + rad &&
+    Math.hypot(enemyLz.x - x, enemyLz.z - z) > 60 + rad &&
+    base.every((s) => Math.hypot(s.x - x, s.z - z) > CATALOG[s.type].radius + 10 + rad) &&
+    points.every((p) => Math.hypot(p.x - x, p.z - z) > 14 + rad) &&
+    out.every((c) => Math.hypot(c.x - x, c.z - z) > c.r + rad + 3);
+  const add = (kind, x, z, rad) => clear(x, z, rad) && out.push({ id: out.length + 1, kind, x: r1(x), z: r1(z), r: r1(rad) });
+  for (let i = 0; i < 28; i++) {
+    const cx = 80 + r() * (SIZE - 160);
+    const cz = 80 + r() * (SIZE - 160);
+    for (let k = 2 + Math.floor(r() * 4); k > 0; k--) {
+      const heavy = r() < 0.45;
+      add(heavy ? 'heavy' : 'light', cx + (r() - 0.5) * 70, cz + (r() - 0.5) * 70, heavy ? 2.5 + r() * 2.5 : 4 + r() * 4);
+    }
+  }
+  for (let i = 0; i < 7; i++) add('negative', 120 + r() * (SIZE - 240), 250 + r() * (SIZE - 500), 18 + r() * 14);
+  return out;
 }
 
 // A new battle over `sector` of war planet `wp`. `attacker` is a faction; `defender` the sector's
@@ -273,11 +328,14 @@ function newBattle({ id = 'b1', wp, sector, attacker, defender = null, outposts 
     aiAt: 0,
     rng: { s: (seed ^ 0x9e3779b9) >>> 0 },
     shells: [], // artillery shells in the air
+    craters: [], // where shells landed: light cover all round
+    craterId: 0,
     dropCount: { a: 0, d: 0 },
     emptySince: null, // when the attackers last had nothing on the field
     leaderless: null, // when the last of the attackers' pilots left
     result: null, // 'a' or 'd' once it's decided, and `how`
     // Since the last snapshot:
+    newCraters: [],
     dead: [],
     shots: [],
     feed: [],
@@ -619,7 +677,8 @@ function order(b, name, msg) {
   if (name && !b.pilots.get(name)?.present) return fail('not in that battle');
   if (name && b.pilots.get(name).out) return fail(OUT);
   const ids = Array.isArray(msg.units) ? msg.units.slice(0, 400) : [];
-  const units = [...new Set(ids.map(Number))].map((id) => b.units.get(id)).filter((u) => u && u.owner === name && (name || u.side === 'd') && mobile(u) && !u.driven);
+  // (A retreating squad takes no orders till it is home.)
+  const units = [...new Set(ids.map(Number))].map((id) => b.units.get(id)).filter((u) => u && u.owner === name && (name || u.side === 'd') && mobile(u) && !u.driven && !u.retreating);
   if (!units.length) return { ok: true, quiet: true };
   const queue = msg.queue === true;
   const give = (u, o) => {
@@ -634,14 +693,30 @@ function order(b, name, msg) {
         if (u.cargo?.length) unload(b, u); // a carrier told to stop lets its troops off
       }
       return { ok: true };
+    case 'retreat': {
+      // Squads run for home: fast, harder to hit, not to be stopped. Other units take no notice.
+      for (const u of units.filter(squad)) retreat(u);
+      return { ok: true };
+    }
+    case 'reinforce': {
+      const squads = units.filter((u) => squad(u) && models(u) < squad(u).size);
+      if (!squads.length) return { ok: true, quiet: true };
+      const close = squads.filter((u) => reinforcePoint(b, u));
+      if (!close.length) return fail(`squads reinforce within ${REINFORCE_R} m of a troop carrier, a factory or your landing zone`);
+      for (const u of close) [u.orders, u.target] = [[{ order: 'reinforce' }], null];
+      return { ok: true };
+    }
     case 'move':
     case 'amove': {
       if (!num(msg.x) || !num(msg.z)) return { ok: true, quiet: true };
       const spots = formation(units, clamp(msg.x, 0, SIZE), clamp(msg.z, 0, SIZE));
+      const taken = new Map(); // cover object -> squads sent to it by this order
       units.forEach((u, i) => {
         // A team sent onto one of its carriers gets aboard.
         const ride = CATALOG[u.type].carried && msg.order === 'move' ? carrierAt(b, u, clamp(msg.x, 0, SIZE), clamp(msg.z, 0, SIZE)) : null;
-        give(u, ride ? { order: 'board', target: ride.id } : { order: msg.order, x: spots[i][0], z: spots[i][1] });
+        // A squad takes the best cover near where it was sent, on the side away from the enemy.
+        const [x, z] = squad(u) && !ride ? coverSpot(b, u, spots[i][0], spots[i][1], taken) : spots[i];
+        give(u, ride ? { order: 'board', target: ride.id } : { order: msg.order, x, z });
       });
       return { ok: true };
     }
@@ -783,8 +858,9 @@ function acquire(b, u, extra = 0) {
 
 // `t` takes damage from `from` (a unit's id). An idle unit that can shoot back goes after whoever
 // hit it, as units do.
-function hurt(b, t, damage, from = null) {
+function hurt(b, t, damage, from = null, src = null, blast = false) {
   if (t.hp <= 0) return;
+  if (squad(t)) damage *= squadTaken(b, t, src, blast);
   const dome = CATALOG[t.type].shield ? null : shieldOver(b, t);
   if (dome) {
     // The dome takes it first; what's left gets through.
@@ -803,11 +879,16 @@ function hurt(b, t, damage, from = null) {
 function fire(b, u, x, z, t = null) {
   const c = CATALOG[u.type];
   if (u.cd > 0 || !c.damage) return false;
+  if (c.squad && (u.retreating || u.pinnedAt != null)) return false;
   u.cd = c.reload;
-  const damage = c.damage * (u.driven ? DRIVE_BONUS : 1);
+  let damage = c.damage * (u.driven ? DRIVE_BONUS : 1);
+  if (c.squad) damage *= (models(u) / c.squad.size) * (u.supp >= SUPPRESSED ? SUPPRESSED_FIRE : 1);
   if (mobile(u) && !u.driven) u.heading = Math.atan2(x - u.x, z - u.z);
   if (c.shell) b.shells.push({ x, z, at: b.t + Math.hypot(x - u.x, z - u.z) / c.shell, damage, side: u.side, from: u.id });
-  else if (t) hurt(b, t, damage, u.id);
+  else if (t) {
+    hurt(b, t, damage, u.id, u);
+    if (c.suppress) suppress(b, t, c.suppress, u);
+  }
   b.shots.push([u.id, r1(x), r1(z), u.type]);
   return true;
 }
@@ -819,8 +900,12 @@ function land(b, s) {
   near(b, s.x, s.z, r + RADIUS_MAX, (t) => {
     if (t.side === s.side || t.hp <= 0 || CATALOG[t.type].kind === 'air') return;
     const d = Math.max(0, Math.hypot(t.x - s.x, t.z - s.z) - CATALOG[t.type].radius);
-    if (d <= r) hurt(b, t, s.damage * (1 - (1 - SPLASH_EDGE) * (d / r)), s.from);
+    if (d > r) return;
+    const k = 1 - (1 - SPLASH_EDGE) * (d / r);
+    hurt(b, t, s.damage * k, s.from, s, true);
+    suppress(b, t, 0.35 * k, s);
   });
+  crater(b, s.x, s.z);
 }
 
 // Moves `u` toward (x, z); true once it's within `arrive` of it.
@@ -829,7 +914,7 @@ function moveToward(b, u, x, z, dt, arrive = 2) {
   const dz = z - u.z;
   const d = Math.hypot(dx, dz);
   if (d <= arrive) return true;
-  const step = Math.min(CATALOG[u.type].speed * dt, d);
+  const step = Math.min(speedOf(u) * dt, d);
   u.x = clamp(u.x + (dx / d) * step, 0, SIZE);
   u.z = clamp(u.z + (dz / d) * step, 0, SIZE);
   u.heading = Math.atan2(dx, dz);
@@ -954,8 +1039,8 @@ function driveStep(b, u, dt) {
   u.state = 'driven';
   if (b.t - d.t > Math.max(1, b.speed) + 1e-6) [d.mx, d.mz, d.fire] = [0, 0, false];
   if (d.mx || d.mz) {
-    u.x = clamp(u.x + d.mx * c.speed * dt, 0, SIZE);
-    u.z = clamp(u.z + d.mz * c.speed * dt, 0, SIZE);
+    u.x = clamp(u.x + d.mx * speedOf(u) * dt, 0, SIZE);
+    u.z = clamp(u.z + d.mz * speedOf(u) * dt, 0, SIZE);
     u.heading = Math.atan2(d.mx, d.mz);
   }
   if (!d.fire || !c.damage || u.cd > 0) return;
@@ -980,6 +1065,7 @@ function driveStep(b, u, dt) {
 function unitStep(b, u, dt) {
   const c = CATALOG[u.type];
   u.state = 'idle';
+  if (c.squad && squadStep(b, u, dt)) return;
   const o = u.orders[0];
   if (!o) {
     const t = c.damage ? acquire(b, u) : null;
@@ -1069,6 +1155,188 @@ function board(b, u, o) {
   b.units.delete(u.id); // gone from the field without dying
   for (const p of b.pilots.values()) if (p.drive === u.id) p.drive = null;
   return true;
+}
+
+// --- Infantry squads ----------------------------------------------------------------------------
+// Company of Heroes' rules, kept small: cover a squad reads at a glance (heavy, light, none,
+// negative), suppression that slows it and then pins it, a retreat that saves it, and
+// reinforcement that brings it back up to strength. Only squads (`squad` in the catalog) use any
+// of this; vehicles don't take cover or get suppressed.
+
+const squad = (u) => CATALOG[u.type].squad;
+const COVER_CODE = { heavy: 'h', light: 'l', none: 'n', negative: 'x' };
+const craterRow = (c) => [c.id, c.x, c.z, c.r];
+
+// Soldiers left in a squad: one for every share of its hit points it still has.
+function models(u) {
+  const s = squad(u);
+  return s ? Math.max(0, Math.ceil(u.hp / (u.maxHp / s.size) - 1e-6)) : 1;
+}
+
+// The cover `u` has against fire from `src` (a unit or a point; none: whatever it stands in).
+function coverFor(b, u, src = null) {
+  const close = src && Math.hypot(src.x - u.x, src.z - u.z) < COVER_CLOSE;
+  let best = null;
+  let negative = false;
+  const look = (c, crater) => {
+    const d = Math.hypot(c.x - u.x, c.z - u.z);
+    if (c.kind === 'negative') {
+      if (d < c.r) negative = true;
+      return;
+    }
+    if (d > c.r + (crater ? 0 : COVER_REACH) || close) return;
+    // Standing in it, it covers all round; beside it, only from the side it's on.
+    if (!crater && src && d >= c.r && (c.x - u.x) * (src.x - u.x) + (c.z - u.z) * (src.z - u.z) < 0) return;
+    if (best !== 'heavy') best = c.kind;
+  };
+  for (const c of b.cover) look(c, false);
+  for (const c of b.craters) look(c, true);
+  return best || (negative ? 'negative' : 'none');
+}
+
+// The share of a hit a squad takes: its cover (a blast only minds heavy cover, and the open), and
+// whether it's retreating or pinned.
+function squadTaken(b, t, src, blast) {
+  const cover = coverFor(b, t, src);
+  let k = blast ? (cover === 'heavy' ? 0.5 : cover === 'negative' ? 1.25 : 1) : COVER_TAKEN[cover];
+  if (t.retreating) k *= RETREAT_TAKEN;
+  if (t.pinnedAt != null) k *= b.t - t.pinnedAt < PINNED_SAFE_S ? 0.75 : 1.5;
+  return k;
+}
+
+// Fire keeps a squad's head down: `amount` of suppression (less in cover), and some of it to the
+// squads next to it. Enough pins it.
+function suppress(b, t, amount, src) {
+  if (!squad(t) || t.retreating || amount <= 0 || t.hp <= 0) return;
+  const add = (s, k) => {
+    s.supp = Math.min(1, (s.supp || 0) + amount * k * COVER_SUPPRESS[coverFor(b, s, src)]);
+    if (s.supp >= PINNED && s.pinnedAt == null) s.pinnedAt = b.t;
+  };
+  add(t, 1);
+  near(b, t.x, t.z, SPREAD_R, (s) => {
+    if (s !== t && s.side === t.side && squad(s) && !s.retreating && s.hp > 0 && dist(s, t) <= SPREAD_R) add(s, SUPPRESS_SPREAD);
+  });
+}
+
+// Suppression wears off, faster in cover; a pinned squad gets up once it's down to UNPINNED.
+function recover(b, u, dt) {
+  if (!u.supp) return;
+  const cover = coverFor(b, u);
+  u.supp = Math.max(0, u.supp - SUPPRESS_FADE * (cover === 'heavy' ? 2 : cover === 'light' ? 1.5 : 1) * dt);
+  if (u.pinnedAt != null && u.supp < UNPINNED) u.pinnedAt = null;
+}
+
+// How fast a unit moves now: a squad runs when retreating, crawls when suppressed, and lies still pinned.
+function speedOf(u) {
+  const c = CATALOG[u.type];
+  if (!c.squad) return c.speed;
+  if (u.retreating) return c.speed * RETREAT_SPEED;
+  if (u.pinnedAt != null) return 0;
+  return u.supp >= SUPPRESSED ? c.speed * SUPPRESSED_SPEED : c.speed;
+}
+
+function retreat(u) {
+  [u.orders, u.target] = [[{ order: 'retreat' }], null];
+  u.retreating = true;
+  u.pinnedAt = null; // it gets up and runs
+}
+
+// Where a squad of a side runs to: its landing zone (the attackers') or its Command Node's.
+const homeOf = (b, u) => (u.side === 'a' ? b.lz : b.enemyLz);
+
+// Where a squad can reinforce now, or null: its landing zone, one of its side's factories, or one
+// of its owner's carriers that carries its kind.
+function reinforcePoint(b, u) {
+  const home = homeOf(b, u);
+  if (Math.hypot(home.x - u.x, home.z - u.z) <= home.r) return home;
+  let best = null;
+  near(b, u.x, u.z, REINFORCE_R + RADIUS_MAX, (t) => {
+    if (t.side !== u.side || t.hp <= 0 || t.dropAt) return;
+    const c = CATALOG[t.type];
+    const ok = (c.produces && t.built && t.type === 'factory') || (c.carries?.unit === u.type && t.owner === u.owner);
+    if (ok && reach(u, t) <= REINFORCE_R && (!best || t.id < best.id)) best = t;
+  });
+  return best;
+}
+
+// A squad's own orders, before anything else: a retreat, lying pinned, reinforcing. True when it
+// took the step.
+function squadStep(b, u, dt) {
+  const o = u.orders[0];
+  if (o?.order === 'retreat') {
+    const home = homeOf(b, u);
+    if (moveToward(b, u, home.x, home.z, dt, home.r * 0.5)) {
+      u.orders.shift();
+      [u.retreating, u.supp, u.pinnedAt] = [false, 0, null];
+    }
+    u.state = 'retreat';
+    return true;
+  }
+  if (u.pinnedAt != null) {
+    u.state = 'pinned';
+    return true;
+  }
+  if (o?.order !== 'reinforce') return false;
+  const sq = squad(u);
+  const c = CATALOG[u.type];
+  if (models(u) >= sq.size || !reinforcePoint(b, u)) {
+    u.orders.shift();
+    return false;
+  }
+  u.state = 'reinforce';
+  const t = acquire(b, u);
+  if (t) fire(b, u, t.x, t.z, t);
+  o.done = Math.min(1, (o.done || 0) + dt / REINFORCE_S);
+  const [mass, energy] = [c.cost / sq.size, c.energy / sq.size];
+  const pay = purse(b, u.owner);
+  if (o.done >= 1 && pay && affordable(pay, mass, energy) >= 1) {
+    charge(pay, mass, energy);
+    u.hp = Math.min(u.maxHp, u.hp + u.maxHp / sq.size);
+    o.done = 0;
+  }
+  return true;
+}
+
+// Where a squad sent to (x, z) goes: behind the best cover within COVER_SEEK of it (heavy before
+// light), on the side away from the nearest enemy (or from where it came), squads that share a
+// piece of cover spread along it. (x, z) itself if there's none.
+function coverSpot(b, u, x, z, taken) {
+  let [tx, tz] = [x - u.x, z - u.z];
+  let foe = null;
+  let far = 150;
+  near(b, x, z, far, (t) => {
+    if (t.side === u.side || t.hp <= 0 || t.dropAt || CATALOG[t.type].kind === 'air') return;
+    const d = Math.hypot(t.x - x, t.z - z);
+    if (d < far) [foe, far] = [t, d];
+  });
+  if (foe) [tx, tz] = [foe.x - x, foe.z - z];
+  const n = Math.hypot(tx, tz);
+  if (n < 1e-6) return [x, z];
+  [tx, tz] = [tx / n, tz / n];
+  let best = null;
+  let score = Infinity;
+  for (const c of b.cover.concat(b.craters)) {
+    if (c.kind === 'negative') continue;
+    const d = Math.max(0, Math.hypot(c.x - x, c.z - z) - c.r);
+    if (d > COVER_SEEK || (taken.get(c) || 0) >= Math.max(1, Math.floor(c.r / 2.5))) continue;
+    const s = d + (c.kind === 'heavy' ? 0 : 8);
+    if (s < score) [best, score] = [c, s];
+  }
+  if (!best) return [x, z];
+  const k = (taken.get(best) || 0) + 1;
+  taken.set(best, k);
+  const along = (k % 2 ? 1 : -1) * Math.floor(k / 2) * 3.5;
+  const back = best.crater ? 0 : best.kind === 'heavy' ? best.r + 1.5 : best.r * 0.4;
+  return [clamp(best.x - tx * back - tz * along, 0, SIZE), clamp(best.z - tz * back + tx * along, 0, SIZE)];
+}
+
+// A shell leaves a crater: light cover all round, for whoever gets to it first.
+function crater(b, x, z) {
+  if (b.craters.some((c) => Math.hypot(c.x - x, c.z - z) < CRATER_R)) return;
+  const c = { id: ++b.craterId, kind: 'light', crater: true, x: r1(x), z: r1(z), r: CRATER_R };
+  b.craters.push(c);
+  if (b.craters.length > CRATERS_MAX) b.craters.shift();
+  b.newCraters.push(craterRow(c));
 }
 
 const moving = (u) => u.state === 'move' || (!!u.driven && !!(u.driven.mx || u.driven.mz));
@@ -1210,6 +1478,7 @@ function tick(b, dt) {
       }
     } else {
       if (u.vet) u.hp = Math.min(u.maxHp, u.hp + VET_REGEN * u.vet * dt);
+      if (squad(u)) recover(b, u, dt);
       const sent = u.orders.length > 0;
       if (u.driven) driveStep(b, u, dt);
       else unitStep(b, u, dt);
@@ -1287,6 +1556,14 @@ function think(b) {
     const jitter = () => (random(b.rng) - 0.5) * 30;
     u.orders = [{ order: 'amove', x: clamp(p.x + jitter(), 0, SIZE), z: clamp(p.z + jitter(), 0, SIZE) }];
   }
+  // Its squads fall back rather than die where they stand, and reinforce once home.
+  for (const u of army) {
+    const sq = squad(u);
+    if (!sq || u.dropAt || u.retreating) continue;
+    const home = reinforcePoint(b, u);
+    if (!home && (u.pinnedAt != null || models(u) <= Math.ceil(sq.size * 0.4))) retreat(u);
+    else if (home && models(u) < sq.size && !u.orders.length && !u.target) u.orders = [{ order: 'reinforce' }];
+  }
   // What its army may be worth: more for a richer AI, and more against a bigger attack.
   const attackers = value([...b.units.values()].filter((u) => u.side === 'a' && mobile(u)));
   const allowed = ai.k * AI_ARMY + AI_MATCH * attackers;
@@ -1349,7 +1626,10 @@ function frame(b) {
   const units = [];
   const build = [];
   for (const u of b.units.values()) {
-    units.push([u.id, u.type, u.side, u.owner, r1(u.x), r1(u.z), r1(Math.max(0, u.hp)), r1(u.heading), u.state, u.vet || 0, u.shieldHp !== undefined ? Math.round(u.shieldHp) : null, u.tier || 1]);
+    const row = [u.id, u.type, u.side, u.owner, r1(u.x), r1(u.z), r1(Math.max(0, u.hp)), r1(u.heading), u.state, u.vet || 0, u.shieldHp !== undefined ? Math.round(u.shieldHp) : null, u.tier || 1];
+    // A squad's cover (h, l, n, x: heavy, light, none, negative), suppression, and r/p/f: retreating, pinned, reinforcing.
+    if (squad(u)) row.push(COVER_CODE[coverFor(b, u)], Math.round((u.supp || 0) * 100) / 100, (u.retreating ? 'r' : '') + (u.pinnedAt != null ? 'p' : '') + (u.orders[0]?.order === 'reinforce' ? 'f' : ''));
+    units.push(row);
     if (isStructure(u) && !u.built) build.push([u.id, Math.round(u.progress * 100) / 100]);
   }
   const out = {
@@ -1359,6 +1639,7 @@ function frame(b) {
     dead: b.dead,
     shots: b.shots,
     build,
+    craters: b.newCraters,
     pilots: present(b).map((p) => ({ name: p.name, side: p.side, out: !!p.out, resign: !!p.resign })),
     endsAt: b.endsAt,
     feed: b.feed,
@@ -1366,6 +1647,7 @@ function frame(b) {
   b.dead = [];
   b.shots = [];
   b.feed = [];
+  b.newCraters = [];
   return out;
 }
 
@@ -1399,6 +1681,8 @@ function joined(b, name) {
     lz: p.side === 'a' ? b.lz : b.enemyLz,
     enemyLz: p.side === 'a' ? b.enemyLz : b.lz,
     massPoints: b.massPoints,
+    cover: b.cover,
+    craters: b.craters.map(craterRow),
     units: CATALOG,
     economy: { energyCap: ENERGY_CAP, massCap: MASS_CAP, factoryDiscount: FACTORY_DISCOUNT, droppable: DROPPABLE },
     endsAt: b.endsAt,
@@ -1672,6 +1956,11 @@ function createBattles({ galaxy, now = Date.now, speed = 1, send, changed, onCam
 }
 
 module.exports = {
+  coverFor,
+  models,
+  COVER_TAKEN,
+  PINNED,
+  SUPPRESSED,
   SIZE,
   PILOTS_MAX,
   TICK_MS,

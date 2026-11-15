@@ -678,7 +678,7 @@ test('snapshots: every unit, the dead, shots, building progress, pilots, rounded
   run(b, 0.1);
   const f = B.frame(b);
   const s = B.stateFor(b, f, 'A');
-  assert.deepStrictEqual(Object.keys(s).sort(), ['battle', 'build', 'dead', 'endsAt', 'energy', 'energyCap', 'energyIncome', 'factories', 'feed', 'income', 'mass', 'massCap', 'pilots', 'shots', 'stalled', 't', 'type', 'units'].sort());
+  assert.deepStrictEqual(Object.keys(s).sort(), ['battle', 'build', 'craters', 'dead', 'endsAt', 'energy', 'energyCap', 'energyIncome', 'factories', 'feed', 'income', 'mass', 'massCap', 'pilots', 'shots', 'stalled', 't', 'type', 'units'].sort());
   assert.strictEqual(s.type, 'battle_state');
   assert.strictEqual(s.t, 0.1);
   assert.strictEqual(s.mass, 400.2);
@@ -1083,4 +1083,84 @@ test('scout planes: unarmed aircraft from the air factory that see furthest of a
   assert.strictEqual(foe.hp, C.tank.hp, "it doesn't shoot");
   assert.strictEqual(s.hp, C.spotter.hp, "and a tank can't reach it");
   assert.ok(s.z > 380, 'it flies on');
+});
+
+test('infantry squads: cover, suppression and pinning, retreat, reinforcement, and taking cover where sent', () => {
+  const b = battle();
+  b.cover = [{ id: 1, kind: 'heavy', x: 500, z: 505, r: 3 }, { id: 2, kind: 'light', x: 700, z: 500, r: 6 }, { id: 3, kind: 'negative', x: 900, z: 500, r: 20 }];
+  b.craters = [];
+  const sq = B.spawn(b, 'infantry', 'a', 'A', 500, 500);
+  // Heavy cover counts only toward the shooter's side, and not from close in; the open flats are negative.
+  assert.strictEqual(B.coverFor(b, sq, { x: 500, z: 560 }), 'heavy');
+  assert.strictEqual(B.coverFor(b, sq, { x: 500, z: 440 }), 'none', 'shot from behind');
+  assert.strictEqual(B.coverFor(b, sq, { x: 500, z: 508 }), 'none', 'too close for cover to help');
+  assert.strictEqual(B.coverFor(b, { x: 700, z: 501 }, { x: 700, z: 400 }), 'light', 'standing in scrub: all round');
+  assert.strictEqual(B.coverFor(b, { x: 900, z: 500 }, { x: 900, z: 560 }), 'negative');
+  // It fights as five soldiers: damage taken in heavy cover is halved, and losing soldiers weakens it.
+  const foe = B.spawn(b, 'tank', 'd', '', 500, 545);
+  assert.strictEqual(B.models(sq), 5);
+  B.CATALOG.tank.suppress = 0; // just the damage for now
+  const before = sq.hp;
+  run(b, 1);
+  assert.strictEqual(before - sq.hp, C.tank.damage * 0.5);
+  assert.strictEqual(B.models(sq), 5, 'hurt, but nobody down yet');
+  sq.hp = 85;
+  assert.strictEqual(B.models(sq), 3);
+  B.CATALOG.tank.suppress = 0.06;
+  b.units.delete(foe.id);
+  // Suppression slows a squad, then pins it: no moving, no firing; then it wears off.
+  sq.supp = 0.5;
+  const x0 = sq.x;
+  B.order(b, 'A', { units: [sq.id], order: 'move', x: 300, z: 500 });
+  run(b, 1);
+  assert.ok(Math.abs(sq.x - x0) > 1 && Math.abs(sq.x - x0) < C.infantry.speed * 0.6, 'crawls');
+  sq.supp = 0.9;
+  sq.pinnedAt = b.t;
+  const x1 = sq.x;
+  run(b, 1);
+  assert.strictEqual(sq.x, x1, 'pinned: it stays down');
+  assert.strictEqual(sq.state, 'pinned');
+  // Only a retreat moves it: home, fast, harder to hit, taking no other orders on the way.
+  assert.ok(B.order(b, 'A', { units: [sq.id], order: 'retreat' }).ok);
+  assert.ok(sq.retreating && sq.pinnedAt == null);
+  B.order(b, 'A', { units: [sq.id], order: 'move', x: 1000, z: 1000 });
+  assert.strictEqual(sq.orders[0].order, 'retreat');
+  run(b, 2);
+  assert.strictEqual(sq.state, 'retreat');
+  run(b, 120);
+  assert.ok(!sq.retreating && Math.hypot(sq.x - b.lz.x, sq.z - b.lz.z) < b.lz.r && sq.supp === 0, 'home and rallied');
+  // Reinforcing at the landing zone: a soldier every few seconds, paid for.
+  const mass = b.pilots.get('A').mass;
+  assert.ok(B.order(b, 'A', { units: [sq.id], order: 'reinforce' }).ok);
+  run(b, 8.5);
+  assert.strictEqual(B.models(sq), 5);
+  assert.ok(b.pilots.get('A').mass < mass + 5, 'it paid');
+  const far = B.spawn(b, 'infantry', 'a', 'A', 800, 900);
+  far.hp = 60;
+  assert.match(B.order(b, 'A', { units: [far.id], order: 'reinforce' }).reason, /within 35 m/);
+  // Sent near cover, a squad takes it, behind the cover from the enemy.
+  b.units.get(far.id).hp = 150;
+  const foe2 = B.spawn(b, 'tank', 'd', '', 700, 600);
+  foe2.cd = 99;
+  B.order(b, 'A', { units: [far.id], order: 'move', x: 705, z: 490 });
+  const o = far.orders[0];
+  assert.ok(Math.hypot(o.x - 700, o.z - 500) < 6, 'into the scrub');
+});
+
+test('shells leave craters that squads can use; the defender AI pulls broken squads back', () => {
+  const b = battle();
+  const sq = B.spawn(b, 'infantry', 'a', 'A', 600, 600);
+  const n = b.craters.length;
+  b.shells.push({ x: 650, z: 650, at: b.t, damage: 10, side: 'd', from: null });
+  run(b, 0.1);
+  assert.strictEqual(b.craters.length, n + 1);
+  assert.strictEqual(B.coverFor(b, { x: 651, z: 650 }, { x: 900, z: 900 }), 'light');
+  assert.ok(B.frame(b).craters.length >= 0);
+  // The AI's squads retreat once broken, far from home.
+  const ai = B.spawn(b, 'infantry', 'd', '', 800, 400);
+  ai.hp = 40;
+  b.aiAt = 0;
+  run(b, 0.1);
+  assert.ok(ai.retreating);
+  assert.strictEqual(sq.side, 'a');
 });
