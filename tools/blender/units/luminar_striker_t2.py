@@ -69,7 +69,7 @@ def make(Part, tier):
     right.box((0.54, 0.08, 0.26), (0.95, 0.04, 0.95), BRASS)
     body.mirrored(right)
     k = 1.0 if tier == 2 else 1.1
-    return {"body": scaled(body, k), "top": None, "top_at": (0, 0, 0), "muzzle": (0.0, tip[1] * k, tip[2] * k), "view": 0.75 * k}
+    return {"body": scaled(body, k), "top": None, "top_at": (0, 0, 0), "muzzle": (0.0, tip[1] * k, tip[2] * k), "view": 0.92 * k}
 
 
 def build(Part):
